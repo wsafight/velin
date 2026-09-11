@@ -63,6 +63,22 @@ label good_end:
 
 回复 `1` 会喝下药水（`hp` 变成 `40`，走到好结局）。回复 `0` 则跳过。
 
+## 用插值构造消息
+
+在字符串中写 `[表达式]`，无需事先转换类型即可格式化值。字符串 `+` 用于拼接，`[[` 输出字面量左方括号。
+
+```velin
+default name = "Ada"
+default role = "ranger"
+default level = 4
+
+title = name + " the " + role
+perform say("[title] reached level [level + 1].")
+perform say("Quest state: [[ready]")
+```
+
+输出依次为 `Ada the ranger reached level 5.` 和 `Quest state: [ready]`。插值表达式可以产生任意 Velin 值；只有两个操作数都是字符串时，`+` 才表示字符串拼接。
+
 ## 用列表做背包
 
 列表是持久化的。`push` 返回新列表；除非你把结果赋回去，旧值不会变。
@@ -94,9 +110,11 @@ perform say("Pack:", items)
 ```velin
 default hero = record("name", "Ada", "hp", 30, "atk", 4)
 
-perform say("[get(hero, \"name\")] stands ready.")
+name = get(hero, "name")
+perform say("[name] stands ready.")
 set hero = put(hero, "hp", get(hero, "hp") - 7)
-perform say("HP is now [get(hero, \"hp\")]")
+hp = get(hero, "hp")
+perform say("HP is now [hp]")
 
 if get(hero, "hp") <= 0:
     perform say("Ada falls.")
@@ -106,12 +124,30 @@ else:
 
 `contains(hero, "hp")` 测试键是否存在。`remove(hero, "atk")` 返回去掉该字段的记录；删除不存在的键是错误。
 
+## 安全读取可选配置
+
+当记录键或列表下标可能不存在时，向 `get` 传入第三个参数。缺少目标时会返回回退值，而不是产生运行时错误。
+
+```velin
+default settings = record("theme", "dark")
+
+theme = get(settings, "theme", "light")
+volume = get(settings, "volume", 50)
+set settings = put(settings, "volume", volume + 10)
+stored_volume = get(settings, "volume")
+
+perform say("Theme: [theme]")
+perform say("Volume: [stored_volume]")
+```
+
+脚本保留已有的主题 `"dark"`，为缺失的音量使用 `50`，再把 `60` 存入新记录。如果不提供回退值，`get(settings, "volume")` 会在执行 `put` 前报错并停止。
+
 ## 带种子的随机遭遇
 
 随机调用消耗机器局部的 RNG 状态。相同种子和回复会精确回放。
 
 ```velin
-default roll = random(1, 6)
+roll = random(1, 6)
 
 perform say("You rolled [roll].")
 if roll >= 5:
@@ -182,6 +218,35 @@ perform say("You are in the [room].")
 ```
 
 把选项编号写在提示里。语言并不认识什么是菜单。
+
+## 限制输入重试次数
+
+`while` 可以限制重试次数，而 `ask` 会在每次尝试时让出给宿主。下面的脚本接受数字 `7`，连续答错三次后停止。
+
+```velin
+default attempts = 0
+default accepted = false
+
+while attempts < 3 and not accepted:
+    answer = perform ask("Enter the access number")
+    set attempts = attempts + 1
+    if answer == 7:
+        set accepted = true
+        perform say("Access granted on attempt [attempts].")
+    elif attempts < 3:
+        perform say("Try again.")
+
+if not accepted:
+    perform say("Access denied.")
+```
+
+第三次输入正确时可以这样运行：
+
+```sh
+printf '2\n4\n7\n' | cargo run -p velin-cli -- run retry.velin
+```
+
+这里 `retry.velin` 包含上面的代码片段，stdin 专门传入三次 `ask` 回复。在 Playground 中则把回复数组设为 `[2, 4, 7]`。
 
 ## 先检查再运行
 

@@ -63,6 +63,22 @@ label good_end:
 
 A reply of `1` drinks the potion (`hp` becomes `40` and the good ending runs). A reply of `0` skips the drink.
 
+## Build messages with interpolation
+
+Use `[expression]` inside a string to format values without converting them first. String `+` concatenates strings, while `[[` emits a literal opening bracket.
+
+```velin
+default name = "Ada"
+default role = "ranger"
+default level = 4
+
+title = name + " the " + role
+perform say("[title] reached level [level + 1].")
+perform say("Quest state: [[ready]")
+```
+
+This prints `Ada the ranger reached level 5.` followed by `Quest state: [ready]`. Interpolated expressions can produce any Velin value; `+` only concatenates when both operands are strings.
+
 ## Inventory with a list
 
 Lists are persistent. `push` returns a new list; the previous value is unchanged unless you assign the result.
@@ -94,9 +110,11 @@ Records take alternating string keys and values. `put` updates one field and ret
 ```velin
 default hero = record("name", "Ada", "hp", 30, "atk", 4)
 
-perform say("[get(hero, \"name\")] stands ready.")
+name = get(hero, "name")
+perform say("[name] stands ready.")
 set hero = put(hero, "hp", get(hero, "hp") - 7)
-perform say("HP is now [get(hero, \"hp\")]")
+hp = get(hero, "hp")
+perform say("HP is now [hp]")
 
 if get(hero, "hp") <= 0:
     perform say("Ada falls.")
@@ -106,12 +124,30 @@ else:
 
 `contains(hero, "hp")` tests for a key. `remove(hero, "atk")` returns a record without that field; removing a missing key is an error.
 
+## Read optional settings safely
+
+Pass a third argument to `get` when a missing key or list index is expected. The fallback becomes the result instead of raising a runtime error.
+
+```velin
+default settings = record("theme", "dark")
+
+theme = get(settings, "theme", "light")
+volume = get(settings, "volume", 50)
+set settings = put(settings, "volume", volume + 10)
+stored_volume = get(settings, "volume")
+
+perform say("Theme: [theme]")
+perform say("Volume: [stored_volume]")
+```
+
+The script keeps `"dark"` for `theme`, uses `50` for the absent `volume`, and stores `60` in a new record. Without the fallback, `get(settings, "volume")` would stop with an error before the `put`.
+
 ## Seeded random encounter
 
 Random calls consume machine-local RNG state. The same seed and replies replay exactly.
 
 ```velin
-default roll = random(1, 6)
+roll = random(1, 6)
 
 perform say("You rolled [roll].")
 if roll >= 5:
@@ -182,6 +218,35 @@ perform say("You are in the [room].")
 ```
 
 Keep option numbers in the prompt text. The language does not know what a menu is.
+
+## Limit input retries
+
+A `while` loop can cap retries while `ask` yields to the host on every attempt. This example accepts the number `7` and stops after three wrong answers.
+
+```velin
+default attempts = 0
+default accepted = false
+
+while attempts < 3 and not accepted:
+    answer = perform ask("Enter the access number")
+    set attempts = attempts + 1
+    if answer == 7:
+        set accepted = true
+        perform say("Access granted on attempt [attempts].")
+    elif attempts < 3:
+        perform say("Try again.")
+
+if not accepted:
+    perform say("Access denied.")
+```
+
+Run a successful third attempt with:
+
+```sh
+printf '2\n4\n7\n' | cargo run -p velin-cli -- run retry.velin
+```
+
+Here `retry.velin` contains the snippet above, while stdin is reserved for the three `ask` replies. In the Playground, use `[2, 4, 7]` as the reply array.
 
 ## Checking before running
 
