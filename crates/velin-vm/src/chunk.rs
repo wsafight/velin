@@ -8,7 +8,7 @@
 
 use velin_compile::{ExprChunk, ExprOp};
 use velin_eval::{EvalError, apply_binary, apply_unary, invoke, invoke_random, unassigned};
-use velin_syntax::{BinaryOp, Builtin, MAX_DATA_TEXT_BYTES, Value};
+use velin_syntax::{BinaryOp, Builtin, DataFootprint, MAX_DATA_TEXT_BYTES, Value};
 
 /// A variable frame: slot `i` holds `Some(value)` once assigned, `None`
 /// otherwise. Reading a `None` slot reproduces the tree-walker's
@@ -33,7 +33,7 @@ pub fn eval_chunk(
     chunk
         .validate(frame.len())
         .map_err(|error| EvalError::new(chunk.line, format!("invalid bytecode: {error}")))?;
-    eval_validated_chunk(chunk, frame, slot_name)
+    eval_validated_chunk(chunk, frame, slot_name).map(|(value, _)| value)
 }
 
 /// Executes a chunk belonging to a `Program` already validated by `Machine`.
@@ -41,7 +41,7 @@ pub(crate) fn eval_validated_chunk(
     chunk: &ExprChunk,
     frame: &mut Frame,
     slot_name: impl Fn(u32) -> String,
-) -> Result<Value, EvalError> {
+) -> Result<(Value, DataFootprint), EvalError> {
     let line = chunk.line;
     let mut stack: Vec<Value> = Vec::new();
     let mut pc = 0;
@@ -132,10 +132,10 @@ pub(crate) fn eval_validated_chunk(
         pc += 1;
     }
     let result = stack.pop().expect("chunk leaves exactly one value");
-    result
-        .validate_data()
+    let footprint = result
+        .data_footprint()
         .map_err(|error| EvalError::new(line, error))?;
-    Ok(result)
+    Ok((result, footprint))
 }
 
 /// Resolves the serializable integer slot that owns RNG state.

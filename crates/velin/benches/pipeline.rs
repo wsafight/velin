@@ -8,8 +8,8 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use std::fmt::Write as _;
 use std::hint::black_box;
 use velin::{
-    Environment, Expr, Machine, Op, ProgramBuilder, SlotTable, Value, Variables, Yield,
-    check_expression, check_script, compile, compile_expression, evaluate, parse_expression,
+    Environment, Expr, Machine, Op, ProgramBuilder, ScriptRunner, SlotTable, Value, Variables,
+    Yield, check_expression, check_script, compile, compile_expression, evaluate, parse_expression,
 };
 
 /// A non-trivial arithmetic/boolean guard, the shape a real script branches on.
@@ -54,6 +54,26 @@ fn bench_compile(c: &mut Criterion) {
         b.iter(|| {
             let mut slots = SlotTable::new();
             compile_expression(black_box(&expr), &mut slots, 1)
+        });
+    });
+}
+
+fn bench_growing_list(c: &mut Criterion) {
+    let script = compile(
+        "bench.velin",
+        concat!(
+            "default items = list()\n",
+            "default index = 0\n",
+            "while index < 2000:\n",
+            "    set items = push(items, index)\n",
+            "    set index = index + 1\n",
+        ),
+    )
+    .unwrap();
+    c.bench_function("vm/growing_list", |b| {
+        b.iter(|| {
+            let mut runner = ScriptRunner::new(&script).unwrap();
+            black_box(runner.run().unwrap())
         });
     });
 }
@@ -140,6 +160,7 @@ criterion_group!(
     bench_check,
     bench_check_wide_script,
     bench_compile,
+    bench_growing_list,
     bench_eval_tree,
     bench_vm_run
 );

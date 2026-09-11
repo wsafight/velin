@@ -84,6 +84,25 @@ impl Value {
     /// # Errors
     /// Rejects more than 4096 values, 16 collection levels or 1 MiB of text.
     pub fn data_footprint(&self) -> Result<DataFootprint, &'static str> {
+        match self {
+            Self::Integer(_) | Self::Boolean(_) => {
+                return Ok(DataFootprint {
+                    values: 1,
+                    text_bytes: 0,
+                });
+            }
+            Self::String(text) => {
+                if text.len() > MAX_DATA_TEXT_BYTES {
+                    return Err("data text exceeds 1 MiB");
+                }
+                return Ok(DataFootprint {
+                    values: 1,
+                    text_bytes: text.len(),
+                });
+            }
+            Self::List(_) | Self::Record(_) => {}
+        }
+
         let mut pending = vec![(self, 0)];
         let mut items: usize = 0;
         let mut bytes: usize = 0;

@@ -247,13 +247,13 @@ impl Machine {
     fn step(&mut self) -> Result<Option<Yield>, EvalError> {
         match self.program.ops[self.pc].clone() {
             Op::Set { slot, value } => {
-                let result = self.eval(value)?;
+                let (result, footprint) = self.eval(value)?;
                 let line = self.program.chunks[value as usize].line;
-                self.assign(slot, result, line)?;
+                self.assign_measured(slot, result, footprint, line)?;
                 self.pc += 1;
             }
             Op::Jump(target) => self.pc = target as usize,
-            Op::JumpIfFalse { condition, target } => match self.eval(condition)? {
+            Op::JumpIfFalse { condition, target } => match self.eval(condition)?.0 {
                 Value::Boolean(false) => self.pc = target as usize,
                 Value::Boolean(true) => self.pc += 1,
                 value => {
@@ -272,10 +272,7 @@ impl Machine {
                 let mut values = Vec::with_capacity(args.len());
                 let mut payload = DataFootprint::default();
                 for chunk in args {
-                    let value = self.eval(chunk)?;
-                    let footprint = value
-                        .data_footprint()
-                        .map_err(|error| EvalError::new(line, error))?;
+                    let (value, footprint) = self.eval(chunk)?;
                     payload = checked_total(
                         payload,
                         footprint,
@@ -295,7 +292,7 @@ impl Machine {
         Ok(None)
     }
 
-    fn eval(&mut self, chunk_id: u32) -> Result<Value, EvalError> {
+    fn eval(&mut self, chunk_id: u32) -> Result<(Value, DataFootprint), EvalError> {
         let chunk = &self.program.chunks[chunk_id as usize];
         let slots = &self.program.slots;
         eval_validated_chunk(chunk, &mut self.frame, |slot| {
@@ -307,6 +304,16 @@ impl Machine {
         let footprint = value
             .data_footprint()
             .map_err(|error| EvalError::new(line, error))?;
+        self.assign_measured(slot, value, footprint, line)
+    }
+
+    fn assign_measured(
+        &mut self,
+        slot: u32,
+        value: Value,
+        footprint: DataFootprint,
+        line: usize,
+    ) -> Result<(), EvalError> {
         self.replace_slot(slot, value, footprint)
             .map_err(|error| EvalError::new(line, error))
     }
