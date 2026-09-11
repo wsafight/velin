@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 readme.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 description = "Core language types (values, expressions, diagnostics) for the Velin embeddable scripting language"
 
 [dependencies]

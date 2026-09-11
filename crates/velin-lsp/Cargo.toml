@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 readme.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 description = "Minimal Language Server for Velin: live diagnostics, keyword/builtin/variable completion, and label document symbols over stdio"
 
 [[bin]]

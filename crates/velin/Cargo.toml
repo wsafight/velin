@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 readme.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 description = "Velin: an embeddable, deterministic scripting language (parse, check, compile, run)"
 
 [dependencies]

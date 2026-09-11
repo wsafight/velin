@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 readme.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 description = "Velin command-line runner: `velin check` and `velin run` over a line-based reference host"
 
 [[bin]]
