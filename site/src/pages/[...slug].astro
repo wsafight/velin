@@ -1,0 +1,70 @@
+---
+import {getCollection, render, type CollectionEntry} from 'astro:content';
+import {ArrowLeft, ArrowRight, Download} from '@lucide/astro';
+import Base from '../layouts/Base.astro';
+import DocSidebar from '../components/DocSidebar.astro';
+import TableOfContents from '../components/TableOfContents.astro';
+import T from '../components/T.astro';
+import {groups, href, neighbors, pages, relatedPages, type DocPage} from '../catalog';
+import '../styles/docs.css';
+
+export async function getStaticPaths() {
+  const docsEn = await getCollection('docsEn');
+  const docsZh = await getCollection('docsZh');
+  return pages.map(page => {
+    const entryEn = docsEn.find(item => item.id === page.slug);
+    const entryZh = docsZh.find(item => item.id === page.slug);
+    if (!entryEn) throw new Error(`Missing English documentation for ${page.sources.en}`);
+    if (!entryZh) throw new Error(`Missing Chinese documentation for ${page.sources.zh}`);
+    return {params: {slug: page.slug}, props: {page, entryEn, entryZh}};
+  });
+}
+
+interface Props {
+  page: DocPage;
+  entryEn: CollectionEntry<'docsEn'>;
+  entryZh: CollectionEntry<'docsZh'>;
+}
+
+const {page, entryEn, entryZh} = Astro.props;
+const {Content: ContentEn, headings: headingsEn} = await render(entryEn);
+const {Content: ContentZh, headings: headingsZh} = await render(entryZh);
+const group = groups.find(item => item.id === page.group);
+const {previous, next} = neighbors(page.slug);
+const related = relatedPages(page.slug);
+const sourceEn = `${import.meta.env.BASE_URL}source/${page.sources.en}`;
+const sourceZh = `${import.meta.env.BASE_URL}source/${page.sources.zh}`;
+---
+<Base title={`${page.title.en} - Velin`} titleZh={`${page.title.zh} - Velin`} description={page.description.en} descriptionZh={page.description.zh}>
+  <main id="main-content" class="docs-shell">
+    <DocSidebar current={page.slug} />
+    <article class="docs-main">
+      <p class="docs-kicker">{group?.number} / {group && <T en={group.label.en} zh={group.label.zh} />}</p>
+      <h1><T en={page.title.en} zh={page.title.zh} /></h1>
+      <p class="docs-lead"><T en={page.description.en} zh={page.description.zh} /></p>
+      <a class="docs-source i18n-en" href={sourceEn}><Download size={15} />Download source</a>
+      <a class="docs-source i18n-zh" href={sourceZh}><Download size={15} />下载原始 Markdown</a>
+      {related.length > 0 && (
+        <nav class="docs-see" aria-label="Related pages">
+          {related.map(item => (
+            <a href={href(item.slug)}><T en={item.title.en} zh={item.title.zh} /></a>
+          ))}
+        </nav>
+      )}
+      <div class="prose i18n-en"><ContentEn /></div>
+      <div class="prose i18n-zh"><ContentZh /></div>
+      <nav class="docs-pager" aria-label="Adjacent pages" data-i18n-aria="pager">
+        {previous ? (
+          <a href={href(previous.slug)}><span><ArrowLeft size={15} /><T en="Previous" zh="上一篇" /></span><strong><T en={previous.title.en} zh={previous.title.zh} /></strong></a>
+        ) : <span></span>}
+        {next ? (
+          <a href={href(next.slug)}><span><T en="Next" zh="下一篇" /><ArrowRight size={15} /></span><strong><T en={next.title.en} zh={next.title.zh} /></strong></a>
+        ) : <span></span>}
+      </nav>
+    </article>
+    <div class="docs-toc-stack">
+      <TableOfContents headings={headingsEn} lang="en" />
+      <TableOfContents headings={headingsZh} lang="zh" />
+    </div>
+  </main>
+</Base>

@@ -1,0 +1,33 @@
+# Rust / Cargo
+# 编译产物目录（workspace 根与各 crate）
+/target/
+**/target/
+
+# 由 rustc 生成的增量编译缓存
+**/*.rs.bk
+
+# 崩溃时生成的 panic backtrace 转储
+*.pdb
+
+# macOS 系统文件
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# 编辑器 / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 环境变量与本地配置
+.env
+.env.local
+
+# Documentation site
+/site/node_modules/
+/site/dist/
+/site/.astro/
+/site/.generated/
+/site/test-results/
+/site/playwright-report/

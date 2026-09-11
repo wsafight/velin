@@ -1,0 +1,33 @@
+{
+  "name": "velin-site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "content": "node scripts/prepare.mjs",
+    "wasm": "wasm-pack build --target web --release --out-dir ../../web/playground/pkg ../crates/velin-wasm",
+    "dev": "npm run wasm && npm run content && astro dev --host 127.0.0.1",
+    "check": "npm run content && astro check",
+    "build:site": "npm run content && astro build && node scripts/check-links.mjs",
+    "build": "npm run wasm && npm run build:site",
+    "preview": "astro preview --host 127.0.0.1",
+    "serve": "node scripts/serve.mjs",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "3.7.3",
+    "@lucide/astro": "1.41.0",
+    "astro": "7.3.1",
+    "remark": "15.0.1",
+    "unist-util-visit": "5.1.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.10",
+    "@playwright/test": "1.63.0",
+    "cheerio": "1.2.0",
+    "typescript": "5.9.3"
+  }
+}

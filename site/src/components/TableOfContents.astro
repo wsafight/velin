@@ -1,0 +1,15 @@
+---
+import {ui} from '../i18n';
+interface Heading {depth: number; slug: string; text: string;}
+interface Props {headings: Heading[]; lang: 'en' | 'zh';}
+const {headings, lang} = Astro.props;
+const items = headings.filter(heading => heading.depth === 2 || heading.depth === 3);
+---
+{items.length > 0 && (
+  <nav class:list={['docs-toc', `i18n-${lang}`]} aria-label={ui[lang].toc} data-i18n-aria="toc">
+    <h2>{ui[lang].toc}</h2>
+    {items.map(heading => (
+      <a class:list={[heading.depth === 3 && 'nested']} href={`#${heading.slug}`}>{heading.text}</a>
+    ))}
+  </nav>
+)}

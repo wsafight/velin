@@ -1,0 +1,32 @@
+# A tiny branching adventure — the canonical Velin sample.
+#
+# Run it:  velin run examples/adventure.velin
+# Check it: velin check examples/adventure.velin
+#
+# `say`/`ask` are *host commands*, not language keywords: the CLI's reference
+# host prints `say` and reads a line of stdin for `ask`. Other embedders can
+# bind the same opaque commands to their own effect handlers.
+
+default hp = 30
+default potions = 2
+
+label start:
+    perform say("You wake in a cold cell.")
+    choice = perform ask("Drink a potion? (1 = yes, 0 = no)")
+    if choice == 1:
+        set hp = hp + 10
+        set potions = potions - 1
+        perform say("You feel better.")
+    else:
+        perform say("You steel yourself.")
+
+    while potions > 0:
+        set potions = potions - 1
+        perform say("You stash a potion for later.")
+
+    if hp > 35:
+        jump good_end
+    perform say("You limp onward into the dark.")
+
+label good_end:
+    perform say("You escape, unbroken.")

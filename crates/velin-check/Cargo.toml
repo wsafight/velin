@@ -1,0 +1,18 @@
+[package]
+name = "velin-check"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+description = "Conservative static checks for Velin: expression type inference and definite-assignment analysis"
+
+[dependencies]
+velin-syntax.workspace = true
+velin-compile.workspace = true
+
+[dev-dependencies]
+velin-parse.workspace = true
+
+[lints]
+workspace = true

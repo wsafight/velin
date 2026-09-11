@@ -1,0 +1,60 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Velin",
+  "scopeName": "source.velin",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#labels" },
+    { "include": "#keywords" },
+    { "include": "#builtins" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "match": "#.*$",
+      "name": "comment.line.number-sign.velin"
+    },
+    "strings": {
+      "name": "string.quoted.double.velin",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.velin"
+        }
+      ]
+    },
+    "labels": {
+      "match": "^\\s*(label)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
+      "captures": {
+        "1": { "name": "keyword.control.velin" },
+        "2": { "name": "entity.name.function.label.velin" },
+        "3": { "name": "punctuation.separator.colon.velin" }
+      }
+    },
+    "keywords": {
+      "match": "\\b(label|default|set|perform|if|elif|else|while|jump)\\b",
+      "name": "keyword.control.velin"
+    },
+    "builtins": {
+      "match": "\\b(list|record|get|put|push|remove|len|contains|random|chance)\\b(?=\\s*\\()",
+      "name": "support.function.builtin.velin"
+    },
+    "constants": {
+      "match": "\\b(true|false)\\b",
+      "name": "constant.language.boolean.velin"
+    },
+    "numbers": {
+      "match": "\\b-?[0-9]+\\b",
+      "name": "constant.numeric.integer.velin"
+    },
+    "operators": {
+      "match": "(==|!=|<=|>=|\\band\\b|\\bor\\b|\\bnot\\b|[+\\-*/<>=])",
+      "name": "keyword.operator.velin"
+    }
+  }
+}

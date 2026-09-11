@@ -1,0 +1,25 @@
+[package]
+name = "velin-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+description = "WebAssembly bindings for Velin: compile, check, and run a .velin script in the browser"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+velin.workspace = true
+wasm-bindgen = "0.2"
+serde.workspace = true
+serde_json.workspace = true
+
+# NOTE: unlike the core crates, this shim does not set `unsafe_code = "forbid"`:
+# `#[wasm_bindgen]` expands to generated `unsafe` glue, which `forbid` cannot
+# permit. All *authored* code here is safe; the crate only marshals strings and
+# delegates every language decision to `velin` (which keeps the forbid gate).
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

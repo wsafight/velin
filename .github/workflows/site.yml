@@ -1,0 +1,90 @@
+name: Site
+
+on:
+  push:
+    paths:
+      - '.github/workflows/site.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'README.md'
+      - 'README.zh-CN.md'
+      - 'crates/**'
+      - 'docs/**'
+      - 'examples/**'
+      - 'site/**'
+      - 'web/playground/**'
+  pull_request:
+    paths:
+      - '.github/workflows/site.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'README.md'
+      - 'README.zh-CN.md'
+      - 'crates/**'
+      - 'docs/**'
+      - 'examples/**'
+      - 'site/**'
+      - 'web/playground/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DOCS_SITE: ${{ vars.DOCS_SITE }}
+      DOCS_BASE: ${{ vars.DOCS_BASE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@wasm-pack
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+        working-directory: site
+      - run: npm run check
+        working-directory: site
+      - run: npm run build
+        working-directory: site
+      - run: npx playwright install --with-deps chromium
+        working-directory: site
+      - run: npm test
+        working-directory: site
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: velin-site
+          path: site/dist
+      - uses: actions/configure-pages@v5
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+        with:
+          path: site/dist
+
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,19 @@
+---
+import {groupedPages, href} from '../catalog';
+import {ui} from '../i18n';
+import T from './T.astro';
+interface Props {current: string;}
+const {current} = Astro.props;
+---
+<nav class="docs-sidebar" aria-label={ui.en.docsNav} data-i18n-aria="docsNav">
+  {groupedPages.map(group => (
+    <section class="docs-group">
+      <h2>{group.number} / <T en={group.label.en} zh={group.label.zh} /></h2>
+      {group.pages.map(page => (
+        <a href={href(page.slug)} aria-current={page.slug === current ? 'page' : undefined}>
+          <T en={page.title.en} zh={page.title.zh} />
+        </a>
+      ))}
+    </section>
+  ))}
+</nav>

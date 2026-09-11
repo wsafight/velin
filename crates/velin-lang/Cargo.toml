@@ -1,0 +1,18 @@
+[package]
+name = "velin-lang"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+description = "Velin language front-end: indentation-sensitive statement syntax lowering to the Velin bytecode program"
+
+[dependencies]
+velin-syntax.workspace = true
+velin-parse.workspace = true
+velin-eval.workspace = true
+velin-compile.workspace = true
+velin-check.workspace = true
+
+[lints]
+workspace = true

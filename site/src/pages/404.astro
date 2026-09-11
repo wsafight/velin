@@ -1,0 +1,16 @@
+---
+import Base from '../layouts/Base.astro';
+import BracketLink from '../components/BracketLink.astro';
+import T from '../components/T.astro';
+import {href} from '../catalog';
+import {pagesMeta} from '../i18n';
+---
+<Base title={pagesMeta.notFound.title.en} titleZh={pagesMeta.notFound.title.zh} description={pagesMeta.notFound.description.en} descriptionZh={pagesMeta.notFound.description.zh}>
+  <main id="main-content" class="not-found">
+    <div>
+      <p>404 / NO SUCH LABEL</p>
+      <h1><T en="This execution path does not exist" zh="这条执行路径不存在" /></h1>
+      <BracketLink href={href()}><T en="Back home" zh="返回首页" /></BracketLink>
+    </div>
+  </main>
+</Base>

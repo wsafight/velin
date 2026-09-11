@@ -1,0 +1,174 @@
+//! Lexical helpers shared by the statement parser.
+//!
+//! These are the small, self-contained routines that turn a raw [`Line`]'s
+//! text into the pieces the recursive-descent parser assembles: splitting a
+//! leading keyword, finding the top-level `=` of an assignment, validating an
+//! identifier, and recognising the `:`-terminated headers of compound
+//! statements. Keeping them here keeps `parser.rs` focused on grammar.
+
+use crate::FILE;
+use crate::error::ParseError;
+use crate::lines::Line;
+use velin_parse::parse_expression;
+use velin_syntax::Expr;
+
+/// Parses an embedded expression, translating any diagnostic into a
+/// `ParseError` at the right location.
+pub(crate) fn parse_embedded(text: &str, line: usize, column: usize) -> Result<Expr, ParseError> {
+    let trimmed = text.trim_start();
+    let leading = text[..text.len() - trimmed.len()].chars().count();
+    parse_expression(trimmed, FILE, line, column + leading).map_err(ParseError::from_diagnostic)
+}
+
+/// Splits a leading identifier-like keyword from the rest of a line.
+///
+/// The keyword is the maximal leading run of identifier characters
+/// (`A-Za-z0-9_`); the rest is everything after it, left-trimmed. This makes
+/// `else:` split to `("else", ":")` even though no space separates them, while
+/// `set hp = 1` splits to `("set", "hp = 1")`. A line whose first character is
+/// not an identifier char (e.g. a bare `= ...`) yields an empty keyword.
+pub(crate) fn split_keyword(content: &str) -> (&str, &str) {
+    let end = content
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .unwrap_or(content.len());
+    (&content[..end], content[end..].trim_start())
+}
+
+/// Splits `name = value` at the first top-level `=` that is not `==`/`!=` etc.,
+/// returning the trimmed name, the value text, and the value's source column.
+pub(crate) fn split_eq(line: &Line) -> Result<(String, &str, usize), ParseError> {
+    let content = &line.content;
+    let bytes = content.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'=' {
+            let prev = index.checked_sub(1).map(|i| bytes[i]);
+            let next = bytes.get(index + 1).copied();
+            // Skip comparison/relational operators: ==, !=, <=, >=.
+            let part_of_comparison =
+                next == Some(b'=') || matches!(prev, Some(b'!' | b'<' | b'>' | b'='));
+            if !part_of_comparison {
+                let name = expect_identifier(line, content[..index].trim())?;
+                let value = &content[index + 1..];
+                let value_column = line.column + content[..=index].chars().count();
+                return Ok((name, value, value_column));
+            }
+        }
+        index += 1;
+    }
+    Err(ParseError::new(
+        line.number,
+        line.column,
+        "expected `name = value`",
+    ))
+}
+
+/// Validates an identifier: non-empty, ASCII-alphanumeric/underscore, not
+/// starting with a digit.
+pub(crate) fn expect_identifier(line: &Line, text: &str) -> Result<String, ParseError> {
+    let valid = !text.is_empty()
+        && text
+            .chars()
+            .enumerate()
+            .all(|(i, c)| c == '_' || c.is_ascii_alphabetic() || (i > 0 && c.is_ascii_digit()));
+    if valid {
+        Ok(text.to_owned())
+    } else {
+        Err(ParseError::new(
+            line.number,
+            line.column,
+            format!("expected an identifier, found `{text}`"),
+        ))
+    }
+}
+
+/// Parses a `name:` header (used by `label`), rejecting a missing colon.
+pub(crate) fn expect_header_name(line: &Line, rest: &str) -> Result<String, ParseError> {
+    let text = rest.trim();
+    let name = text.strip_suffix(':').ok_or_else(|| {
+        ParseError::new(line.number, line.column, "expected `:` after label name")
+    })?;
+    expect_identifier(line, name.trim())
+}
+
+/// Parses a `<expr>:` header, returning the expression text and its column.
+pub(crate) fn expect_colon_header<'a>(
+    line: &Line,
+    rest: &'a str,
+) -> Result<(&'a str, usize), ParseError> {
+    let trimmed = rest.trim_end();
+    let expr = trimmed
+        .strip_suffix(':')
+        .ok_or_else(|| ParseError::new(line.number, line.column, "expected `:` to open a block"))?;
+    // Column of the expression: past the keyword to the first non-space of rest.
+    let rest_offset = line.content.len() - rest.len();
+    let leading = rest.len() - rest.trim_start().len();
+    let column = line.column + line.content[..rest_offset + leading].chars().count();
+    Ok((expr, column))
+}
+
+/// Validates a bare `keyword:` header such as `else:`.
+pub(crate) fn expect_bare_header(line: &Line, rest: &str, keyword: &str) -> Result<(), ParseError> {
+    if rest.trim() == ":" {
+        Ok(())
+    } else {
+        Err(ParseError::new(
+            line.number,
+            line.column,
+            format!("`{keyword}` takes no condition and must end with `:`"),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lines::Line;
+
+    fn line(content: &str) -> Line {
+        Line {
+            number: 1,
+            indent: 0,
+            content: content.to_owned(),
+            column: 1,
+        }
+    }
+
+    #[test]
+    fn split_eq_skips_comparisons_and_reports_missing_assignment() {
+        let assigned = line("ok = hp != 3");
+        let (name, value, column) = split_eq(&assigned).unwrap();
+        assert_eq!(name, "ok");
+        assert_eq!(value, " hp != 3");
+        assert!(column > 1);
+        assert!(split_eq(&line("hp != 3")).is_err());
+        assert!(
+            split_eq(&line("flag"))
+                .unwrap_err()
+                .message
+                .contains("name = value")
+        );
+        let le = line("ok = hp <= 3");
+        let (name, value, _) = split_eq(&le).unwrap();
+        assert_eq!(name, "ok");
+        assert!(value.contains("<="));
+        let ge = line("ok = hp >= 3");
+        let (name, value, _) = split_eq(&ge).unwrap();
+        assert_eq!(name, "ok");
+        assert!(value.contains(">="));
+    }
+
+    #[test]
+    fn headers_require_colons_and_identifiers() {
+        assert!(expect_header_name(&line("label start"), "start").is_err());
+        assert_eq!(
+            expect_header_name(&line("label start:"), "start:").unwrap(),
+            "start"
+        );
+        assert!(expect_bare_header(&line("else x:"), "x:", "else").is_err());
+        assert!(expect_bare_header(&line("else:"), ":", "else").is_ok());
+        assert!(expect_identifier(&line("set 1x = 1"), "1x").is_err());
+        assert_eq!(split_keyword("else:"), ("else", ":"));
+        assert_eq!(split_keyword("= 1"), ("", "= 1"));
+    }
+}

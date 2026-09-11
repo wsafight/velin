@@ -1,0 +1,70 @@
+---
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  titleZh?: string;
+  description: string;
+  descriptionZh?: string;
+  home?: boolean;
+}
+const {title, titleZh = title, description, descriptionZh = description, home = false} = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+const english = new URL(Astro.url.pathname, Astro.site);
+english.searchParams.set('lang', 'en');
+const chinese = new URL(Astro.url.pathname, Astro.site);
+chinese.searchParams.set('lang', 'zh');
+---
+<!doctype html>
+<html lang="en" data-lang="en" data-theme="dark" data-title-en={title} data-title-zh={titleZh} data-desc-en={description} data-desc-zh={descriptionZh}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#0c0d10" />
+    <link rel="canonical" href={canonical} />
+    <link rel="alternate" hreflang="en" href={english} />
+    <link rel="alternate" hreflang="zh-CN" href={chinese} />
+    <link rel="alternate" hreflang="x-default" href={canonical} />
+    <link rel="icon" type="image/svg+xml" href={`${import.meta.env.BASE_URL}favicon.svg`} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="zh_CN" />
+    <meta property="og:site_name" content="Velin" />
+    <script is:inline>
+      (() => {
+        const query = new URLSearchParams(location.search).get('lang');
+        const lang = query === 'zh' || query === 'en'
+          ? query
+          : (localStorage.getItem('velin-lang') === 'zh' ? 'zh' : 'en');
+        if (query === 'zh' || query === 'en') localStorage.setItem('velin-lang', query);
+        const root = document.documentElement;
+        root.dataset.lang = lang;
+        root.lang = lang === 'zh' ? 'zh-CN' : 'en';
+        const pageTitle = root.getAttribute(lang === 'zh' ? 'data-title-zh' : 'data-title-en');
+        const pageDescription = root.getAttribute(lang === 'zh' ? 'data-desc-zh' : 'data-desc-en');
+        if (pageTitle) document.title = pageTitle;
+        const meta = document.querySelector('meta[name="description"]');
+        if (meta && pageDescription) meta.setAttribute('content', pageDescription);
+        const savedTheme = localStorage.getItem('velin-theme');
+        root.dataset.theme = savedTheme === 'light' || savedTheme === 'dark'
+          ? savedTheme
+          : (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      })();
+    </script>
+  </head>
+  <body class={home ? 'home' : 'docs-body'}>
+    <Header home={home} />
+    <slot />
+    <Footer />
+    <script>
+      import '../scripts/site';
+    </script>
+  </body>
+</html>

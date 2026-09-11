@@ -1,0 +1,17 @@
+[package]
+name = "velin-eval"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+description = "Deterministic expression evaluator and built-in functions for Velin"
+
+[dependencies]
+velin-syntax.workspace = true
+
+[dev-dependencies]
+velin-parse.workspace = true
+
+[lints]
+workspace = true

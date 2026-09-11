@@ -1,0 +1,16 @@
+# Deterministic arithmetic with no host input — runs start to finish on its own.
+#
+#   velin run examples/counting.velin
+#
+# Demonstrates `default`, bare assignment (no `set` keyword needed), a `while`
+# loop, and interpolation-free `say` with computed values.
+
+default total = 0
+default n = 1
+
+while n <= 5:
+    set total = total + n
+    perform say("added", n, "running total is", total)
+    n = n + 1
+
+perform say("final total:", total)

@@ -1,0 +1,20 @@
+[package]
+name = "velin-lsp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+description = "Minimal Language Server for Velin: live diagnostics, keyword/builtin/variable completion, and label document symbols over stdio"
+
+[[bin]]
+name = "velin-lsp"
+path = "src/main.rs"
+
+[dependencies]
+velin.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,32 @@
+---
+import BrandMark from './BrandMark.astro';
+import T from './T.astro';
+import {groupedPages, href} from '../catalog';
+import {githubRepo, ui} from '../i18n';
+
+const year = new Date().getUTCFullYear();
+const start = groupedPages[0]?.pages ?? [];
+---
+<footer class="site-footer">
+  <div class="section-inner footer-layout">
+    <div class="footer-brand">
+      <BrandMark />
+      <strong>Velin</strong>
+      <p><T en="Deterministic scripts. Explicit host boundaries." zh="确定性脚本，清晰的宿主边界。" /></p>
+      <p class="footer-legal">MIT · {year}</p>
+    </div>
+    <nav class="footer-nav" aria-label={ui.en.footerNav} data-i18n-aria="footerNav">
+      <a href={href('docs')}><T en={ui.en.docs} zh={ui.zh.docs} /></a>
+      <a href={href('docs/language')}><T en={ui.en.language} zh={ui.zh.language} /></a>
+      <a href={href('docs/embedding')}><T en={ui.en.embedding} zh={ui.zh.embedding} /></a>
+      <a href={href('playground')}><T en={ui.en.playground} zh={ui.zh.playground} /></a>
+      <a href={githubRepo} target="_blank" rel="noopener noreferrer"><T en={ui.en.github} zh={ui.zh.github} /></a>
+    </nav>
+    <div class="footer-docs">
+      <span><T en={groupedPages[0]?.label.en ?? ''} zh={groupedPages[0]?.label.zh ?? ''} /></span>
+      {start.map(page => (
+        <a href={href(page.slug)}><T en={page.title.en} zh={page.title.zh} /></a>
+      ))}
+    </div>
+  </div>
+</footer>

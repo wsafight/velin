@@ -1,0 +1,54 @@
+{
+  "name": "vscode-velin",
+  "displayName": "Velin",
+  "description": "Syntax highlighting and language support for the Velin scripting language, backed by velin-lsp.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "publisher": "velin",
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onLanguage:velin"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "velin",
+        "aliases": [
+          "Velin",
+          "velin"
+        ],
+        "extensions": [
+          ".velin"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "velin",
+        "scopeName": "source.velin",
+        "path": "./syntaxes/velin.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Velin",
+      "properties": {
+        "velin.server.path": {
+          "type": "string",
+          "default": "velin-lsp",
+          "description": "Path to the velin-lsp executable. Defaults to `velin-lsp` on PATH; during development point it at target/debug/velin-lsp."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

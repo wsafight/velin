@@ -1,0 +1,220 @@
+---
+import Base from '../layouts/Base.astro';
+import BracketLink from '../components/BracketLink.astro';
+import T from '../components/T.astro';
+import {href} from '../catalog';
+import {pagesMeta} from '../i18n';
+import '../styles/home.css';
+
+const docs = href('docs');
+const language = href('docs/language');
+const examples = href('docs/examples');
+const embedding = href('docs/embedding');
+const host = href('docs/host');
+const tooling = href('docs/tooling');
+const playground = href('playground');
+---
+<Base title={pagesMeta.home.title.en} titleZh={pagesMeta.home.title.zh} description={pagesMeta.home.description.en} descriptionZh={pagesMeta.home.description.zh} home>
+  <main id="main-content">
+    <section class="hero dark-section" id="top">
+      <div class="hero-sky" aria-hidden="true"></div>
+      <div class="hero-inner section-inner">
+        <div>
+          <p class="eyebrow">Velin · Embeddable · Deterministic · Bounded</p>
+          <h1 class="hero-title">
+            <span class="i18n-en"><span class="title-line">Write the rules.</span><span class="title-line">Let the host shape reality.</span></span>
+            <span class="i18n-zh"><span class="title-line">让脚本只负责规则</span><span class="title-line">让宿主决定现实。</span></span>
+          </h1>
+        </div>
+        <div class="hero-bottom">
+          <div class="hero-cta">
+            <BracketLink href={playground}><T en="Open Playground" zh="打开 Playground" /></BracketLink>
+            <a class="text-link" href={docs}><T en="Read the docs" zh="阅读文档" /></a>
+          </div>
+          <div class="hero-copy">
+            <p><T en="A compact embeddable bytecode language: scripts own rules and control flow, the host owns every effect. The same semantics can embed in an application, or check and run in the browser through WebAssembly." zh="一门可嵌入的小型字节码语言：脚本负责规则和控制流，宿主负责全部外部效果。同一套语义可以嵌进应用，也可以经 WebAssembly 在浏览器里检查和运行。" /></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="capabilities light-section" id="language">
+      <div class="section-inner">
+        <div class="section-heading">
+          <p class="eyebrow"><T en="01 / Execution model" zh="01 / 执行模型" /></p>
+          <h2><T en="Source goes in.<br>Host effects come out." zh="源码进来。<br>宿主效果出去。" /></h2>
+          <p class="section-lede"><T en="Velin handles expressions, state, and control flow. I/O, networking, interfaces, and business actions remain in your host application." zh="Velin 处理表达式、状态和控制流。I/O、网络、界面和业务行为始终留在你的宿主程序里。" /></p>
+        </div>
+        <div class="capability-panels">
+          <article class="capability-panel is-active">
+            <div class="capability-surface">
+              <button class="capability-trigger" type="button">Parse</button>
+              <p><T en="Indentation-sensitive statements and expressions, with exact source spans for diagnostics." zh="缩进敏感的语句与表达式，诊断带精确源码位置。" /></p>
+            </div>
+          </article>
+          <article class="capability-panel">
+            <div class="capability-surface">
+              <button class="capability-trigger" type="button">Check</button>
+              <p><T en="Conservative types and definite assignment. The checker reports only mismatches it can prove." zh="保守类型与确定赋值。检查器只报告能够证明的不匹配。" /></p>
+            </div>
+          </article>
+          <article class="capability-panel">
+            <div class="capability-surface">
+              <button class="capability-trigger" type="button">Compile</button>
+              <p><T en="Slot-addressed bytecode. Variables resolve at compile time; the VM never looks up names." zh="槽位寻址字节码。变量在编译期解析，VM 不再查名字。" /></p>
+            </div>
+          </article>
+          <article class="capability-panel">
+            <div class="capability-surface">
+              <button class="capability-trigger" type="button">Yield</button>
+              <p><T en="The host owns every side effect. <code>perform</code> suspends; <code>resume</code> continues." zh="宿主拥有全部副作用。<code>perform</code> 挂起，<code>resume</code> 继续。" /></p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="script-section dark-section" id="script">
+      <div class="section-inner script-layout">
+        <div class="section-heading">
+          <p class="eyebrow"><T en="02 / Language" zh="02 / 语言" /></p>
+          <h2><T en="A small syntax with<br>complete control flow" zh="小语法，<br>完整控制流" /></h2>
+          <p class="section-lede"><T en="Variables, conditions, loops, labels, and host commands stay in one readable hierarchy. There are no system APIs or hidden global random state." zh="变量、条件、循环、标签和宿主命令保持在一个可读层级中。没有系统 API，也没有隐藏的全局随机状态。" /></p>
+          <p style="margin-top:24px">
+            <a class="text-link" href={language}><T en="Language reference" zh="语言参考" /></a>
+          </p>
+          <p style="margin-top:12px">
+            <a class="text-link" href={examples}><T en="Examples and recipes" zh="示例与写法" /></a>
+          </p>
+        </div>
+        <pre class="code-frame"><div class="code-label">examples/adventure.velin</div><code><span class="kw">default</span> hp = <span class="num">30</span>
+<span class="kw">default</span> potions = <span class="num">2</span>
+
+<span class="kw">label</span> start:
+    choice = <span class="kw">perform</span> ask(<span class="str">"Drink a potion?"</span>)
+    <span class="kw">if</span> choice == <span class="num">1</span>:
+        <span class="kw">set</span> hp = hp + <span class="num">10</span>
+        <span class="kw">perform</span> say(<span class="str">"HP: [hp]"</span>)
+    <span class="kw">else</span>:
+        <span class="kw">perform</span> say(<span class="str">"You wait."</span>)</code></pre>
+      </div>
+    </section>
+
+    <section class="tools-section dark-section" id="tooling">
+      <div class="section-inner context-chapter">
+        <div class="context-stack">
+          <article class="context-card">
+            <span>01</span>
+            <h3>CLI</h3>
+            <p><T en="Check and run <code>.velin</code> files with a minimal reference host." zh="检查并运行 <code>.velin</code> 文件，附带最小参考宿主。" /></p>
+          </article>
+          <article class="context-card">
+            <span>02</span>
+            <h3>LSP + VS Code</h3>
+            <p><T en="Live diagnostics, completion, label symbols, and syntax highlighting." zh="实时诊断、补全、标签符号与语法高亮。" /></p>
+          </article>
+          <article class="context-card">
+            <span>03</span>
+            <h3>Rust API</h3>
+            <p><T en="A facade crate exposes compilation, checks, machines, and the host protocol." zh="门面 crate 暴露编译、检查、机器和宿主协议。" /></p>
+          </article>
+          <article class="context-card">
+            <span>04</span>
+            <h3>WebAssembly</h3>
+            <p><T en="<code>velin-wasm</code> compiles the same pipeline to the browser. Hosts call <code>check</code> and <code>run</code>; source never leaves the page." zh="<code>velin-wasm</code> 把同一套管线编译到浏览器。宿主调用 <code>check</code> 和 <code>run</code>，源码不离开当前页面。" /></p>
+          </article>
+        </div>
+        <div class="context-copy">
+          <p class="eyebrow"><T en="03 / Tooling" zh="03 / 工具链" /></p>
+          <h2><T en="One path from<br>editing to embedding" zh="从编辑到嵌入，<br>不留断层" /></h2>
+          <p><T en="Use the same parser, checker, compiler, and VM from the terminal, editor, Rust host, or browser." zh="终端、编辑器、Rust 宿主与浏览器共用同一套解析器、检查器、编译器和 VM。" /></p>
+          <p style="margin-top:24px"><a class="text-link" href={embedding}><T en="Embedding guide" zh="嵌入指南" /></a></p>
+          <p style="margin-top:12px"><a class="text-link" href={host}><T en="Host protocol" zh="宿主协议" /></a></p>
+          <p style="margin-top:12px"><a class="text-link" href={tooling}><T en="Tooling guide" zh="工具链指南" /></a></p>
+          <span class="boundary-note"><T en="Pre-release. Syntax and the Rust API may still change." zh="尚未发布稳定版，语法与 Rust API 仍可能变化。" /></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="play-section light-section" id="playground">
+      <div class="section-inner play-layout">
+        <div>
+          <p class="eyebrow"><T en="04 / Playground" zh="04 / Playground" /></p>
+          <h2><T en="Execution stays<br>in your browser" zh="运行发生在<br>你的浏览器里" /></h2>
+          <ul class="feature-list">
+            <li>
+              <strong>velin-wasm</strong>
+              <span><T en="The core crates compile to WebAssembly. The Playground loads that package in this tab; there is no script server." zh="核心 crate 编译为 WebAssembly。Playground 在当前标签页加载该包，没有脚本服务端。" /></span>
+            </li>
+            <li>
+              <strong><T en="Check and run" zh="检查与运行" /></strong>
+              <span><T en="Diagnostics, host output, and runtime errors share one interface. <code>ask</code> replies are a JSON array." zh="诊断、宿主输出和运行错误在同一界面呈现。<code>ask</code> 回复是 JSON 数组。" /></span>
+            </li>
+            <li>
+              <strong><T en="Same semantics" zh="同一套语义" /></strong>
+              <span><T en="The browser path uses the same parser, checker, compiler, and VM as the CLI." zh="浏览器路径与 CLI 使用同一套解析器、检查器、编译器和 VM。" /></span>
+            </li>
+          </ul>
+          <div class="play-cta">
+            <BracketLink href={playground}><T en="Run it now" zh="立即试运行" /></BracketLink>
+          </div>
+        </div>
+        <div class="playground-frame" aria-hidden="true">
+          <div class="playground-mock">
+            <div class="playground-mock-editor">
+              <div class="playground-mock-label">Script · adventure.velin</div>
+              <pre><code><span class="kw">default</span> hp = <span class="num">30</span>
+choice = <span class="kw">perform</span> ask(<span class="str">"Drink a potion?"</span>)
+<span class="kw">if</span> choice == <span class="num">1</span>:
+    <span class="kw">set</span> hp = hp + <span class="num">10</span>
+    <span class="kw">perform</span> say(<span class="str">"You feel restored."</span>)</code></pre>
+            </div>
+            <div class="playground-mock-side">
+              <div>
+                <div class="playground-mock-label"><T en="Diagnostics" zh="诊断" /></div>
+                <p class="ok"><T en="No problems." zh="没有问题。" /></p>
+              </div>
+              <div>
+                <div class="playground-mock-label"><T en="Output" zh="输出" /></div>
+                <p>You feel restored.</p>
+                <p>HP is now 40</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="boundary-section light-section" id="limits">
+      <div class="section-inner">
+        <div class="boundary-card">
+          <div>
+            <p class="eyebrow"><T en="05 / Explicit limits" zh="05 / 明确边界" /></p>
+            <h2><T en="Untrusted input<br>fails in bounds" zh="不信任输入，<br>也能明确失败" /></h2>
+          </div>
+          <div>
+            <p><T en="Source, ASTs, values, bytecode, execution steps, and output each have a budget. Deserialized programs are structurally validated before entering the VM." zh="源码、AST、值、字节码、执行步数和输出都有各自边界。反序列化程序在进入 VM 前完成结构校验。" /></p>
+            <dl class="limit-list">
+              <div><dt>1 MiB</dt><dd><T en="Source file" zh="单份源码" /></dd></div>
+              <div><dt>10,000</dt><dd><T en="Immediate VM steps" zh="单次立即执行步数" /></dd></div>
+              <div><dt>10,000</dt><dd><T en="Physical lines" zh="物理行" /></dd></div>
+              <div><dt>0</dt><dd><T en="Unsafe in core crates" zh="核心 unsafe 代码" /></dd></div>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta dark-section">
+      <div class="section-inner final-cta-layout">
+        <div>
+          <p class="eyebrow">Velin · 0.1.0</p>
+          <h2><T en="Start with a script you can check" zh="从一段可检查的脚本开始" /></h2>
+          <p><T en="Run the shipped samples, or paste a script into the Playground. The host still owns every effect." zh="运行仓库示例，或把脚本贴进 Playground。宿主仍然拥有全部效果。" /></p>
+          <BracketLink href={docs}><T en="Open the quick start" zh="打开快速开始" /></BracketLink>
+          <span class="final-platforms">Rust 1.88 · CLI · LSP · WebAssembly</span>
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>

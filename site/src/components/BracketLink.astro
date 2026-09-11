@@ -1,0 +1,14 @@
+---
+interface Props {
+  href: string;
+  class?: string;
+}
+const {href, class: className} = Astro.props;
+---
+<a class:list={['bracket-link', className]} href={href}>
+  <span class="bracket-corner corner-tl" aria-hidden="true"></span>
+  <span class="bracket-corner corner-tr" aria-hidden="true"></span>
+  <span class="bracket-corner corner-bl" aria-hidden="true"></span>
+  <span class="bracket-corner corner-br" aria-hidden="true"></span>
+  <span class="bracket-label"><slot /></span>
+</a>

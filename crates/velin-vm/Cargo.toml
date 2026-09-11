@@ -1,0 +1,19 @@
+[package]
+name = "velin-vm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+description = "Deterministic bytecode virtual machine for Velin, with host-effect yielding"
+
+[dependencies]
+velin-syntax.workspace = true
+velin-eval.workspace = true
+velin-compile.workspace = true
+
+[dev-dependencies]
+velin-parse.workspace = true
+
+[lints]
+workspace = true

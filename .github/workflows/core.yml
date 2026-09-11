@@ -1,0 +1,39 @@
+name: Core
+
+on:
+  push:
+    paths-ignore:
+      - 'docs/**'
+      - 'site/**'
+      - 'README.md'
+      - 'README.zh-CN.md'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - 'site/**'
+      - 'README.md'
+      - 'README.zh-CN.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --all-targets
+      - run: cargo build -p velin-wasm --target wasm32-unknown-unknown
