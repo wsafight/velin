@@ -5,6 +5,8 @@
 // only launches it and wires up the document selector.
 
 const { workspace, window } = require("vscode");
+const fs = require("node:fs");
+const path = require("node:path");
 const {
   LanguageClient,
   TransportKind,
@@ -14,19 +16,40 @@ const {
 let client;
 
 /**
- * Starts the language client, spawning the configured `velin-lsp` binary.
- * @param {import("vscode").ExtensionContext} _context
+ * Starts the language client, preferring an explicitly configured server and
+ * then the platform binary bundled in release VSIX packages.
+ * @param {import("vscode").ExtensionContext} context
  */
-function activate(_context) {
-  const configured = workspace
+function activate(context) {
+  const configuredValue = workspace
     .getConfiguration("velin")
-    .get("server.path", "velin-lsp");
+    .get("server.path", "")
+    .trim();
+  const workspaceFolder = workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const configured = workspaceFolder
+    ? configuredValue.replaceAll("${workspaceFolder}", workspaceFolder)
+    : configuredValue;
+  const bundled = context.asAbsolutePath(
+    path.join("bin", process.platform === "win32" ? "velin-lsp.exe" : "velin-lsp")
+  );
+  const command = configured || (fs.existsSync(bundled) ? bundled : "velin-lsp");
+
+  if (!configured && command === bundled && process.platform !== "win32") {
+    try {
+      fs.chmodSync(command, 0o755);
+    } catch (error) {
+      window.showErrorMessage(
+        `Velin: failed to make the bundled language server executable. (${error})`
+      );
+      return;
+    }
+  }
 
   // Both the run and debug profiles use the same stdio transport; a build that
   // wants verbose server logging can override the command in settings.
   const serverOptions = {
-    run: { command: configured, transport: TransportKind.stdio },
-    debug: { command: configured, transport: TransportKind.stdio },
+    run: { command, transport: TransportKind.stdio },
+    debug: { command, transport: TransportKind.stdio },
   };
 
   const clientOptions = {
@@ -45,7 +68,7 @@ function activate(_context) {
 
   client.start().catch((error) => {
     window.showErrorMessage(
-      `Velin: failed to start '${configured}'. Set 'velin.server.path' to the velin-lsp binary. (${error})`
+      `Velin: failed to start '${command}'. Set 'velin.server.path' to override the velin-lsp binary. (${error})`
     );
   });
 }

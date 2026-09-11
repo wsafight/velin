@@ -31,6 +31,8 @@ cargo run -p velin-cli -- check examples/adventure.velin
 
 `check` prints parsing, lowering, type, and definite-assignment diagnostics. It exits with status 1 when any error is present; warnings alone do not fail the command.
 
+Use `velin check --json <file>` for a stable `{ ok, diagnostics, error }` JSON result. Both subcommands accept `-` as the source path to read UTF-8 source from stdin; `velin --help` and `velin --version` print command metadata and exit successfully.
+
 Run through the line-oriented reference host:
 
 ```sh
@@ -60,20 +62,21 @@ cargo build -p velin-lsp
 - Live parser, lowering, type, and definite-assignment diagnostics.
 - Completion for keywords, built-ins, variables, and labels.
 - Document symbols for labels.
+- Hover help for language names and go-to-definition/reference search for labels.
 - Standard JSON-RPC `MethodNotFound` responses for unsupported requests.
 
 The server limits JSON-RPC messages to 4 MiB and bounds header size before allocating the body.
 
 ## VS Code extension
 
-The extension is in `editors/vscode-velin` and contributes `.velin` registration, TextMate highlighting, indentation rules, completion, diagnostics, and label outlines.
+The extension is in `editors/vscode-velin` and contributes `.velin` registration, TextMate highlighting, indentation rules, completion, diagnostics, and label outlines. Platform release VSIX files bundle the matching `velin-lsp`; the setting below is only needed to override it or during development.
 
 ```sh
 cd editors/vscode-velin
 npm ci
 ```
 
-Open that folder in VS Code and press `F5` to launch an Extension Development Host. The extension starts `velin-lsp` from `PATH` by default. To use a local binary, set:
+Open that folder in VS Code and press `F5` to launch an Extension Development Host. Without a bundled server, the extension starts `velin-lsp` from `PATH`. To use a local binary, set:
 
 ```json
 { "velin.server.path": "${workspaceFolder}/target/debug/velin-lsp" }
@@ -109,7 +112,7 @@ Set `GITHUB_REPOSITORY=wsafight/velin` locally to test GitHub Pages under `/veli
 
 ## Continuous integration
 
-`.github/workflows/core.yml` runs formatting, Clippy, workspace tests, and a Wasm target build. `.github/workflows/site.yml` builds and tests the complete static site, uploads its artifact, and deploys it to GitHub Pages from the repository's default branch.
+`.github/workflows/core.yml` runs formatting, Clippy, workspace tests, a Wasm target build, and whole-workspace crate packaging verification. `.github/workflows/site.yml` builds and tests the complete static site, uploads its artifact, and deploys it to GitHub Pages from the repository's default branch. `.github/workflows/release.yml` builds CLI/LSP archives and platform-specific VSIX packages for manual runs; a matching `v*` tag also creates a GitHub Release with SHA-256 checksums.
 
 ## Workspace verification
 
@@ -120,4 +123,5 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 cargo build -p velin-wasm --target wasm32-unknown-unknown
+cargo package --workspace
 ```

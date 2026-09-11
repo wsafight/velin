@@ -33,7 +33,7 @@ await cp(path.join(root, 'examples'), path.join(publicSource, 'examples'), {recu
 
 const playgroundSource = path.join(root, 'web/playground');
 await mkdir(publicPlayground, {recursive: true});
-for (const file of ['index.html', 'style.css', 'playground.js']) {
+for (const file of ['index.html', 'style.css', 'playground.js', 'worker.js']) {
   await copyFile(path.join(playgroundSource, file), path.join(publicPlayground, file));
 }
 try {

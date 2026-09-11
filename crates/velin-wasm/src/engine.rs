@@ -7,10 +7,32 @@
 //! the same source + replies always produce the same transcript.
 
 use serde::Serialize;
-use velin::{Diagnostic, Machine, Value, Yield, check_script, compile};
+use std::fmt;
+use velin::{Diagnostic, ScriptRunner, ScriptYield, Value, check_script, compile};
 
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 const MAX_REPLIES_JSON_BYTES: usize = 1024 * 1024;
+
+/// A caller error in the scripted replies supplied to the Playground host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseRepliesError {
+    TooLarge,
+    InvalidJson(String),
+    UnsupportedValue { index: usize },
+}
+
+impl fmt::Display for ParseRepliesError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TooLarge => write!(formatter, "invalid replies: JSON exceeds 1 MiB"),
+            Self::InvalidJson(message) => write!(formatter, "invalid replies JSON: {message}"),
+            Self::UnsupportedValue { index } => write!(
+                formatter,
+                "invalid replies: item {index} must be an integer, boolean, or string"
+            ),
+        }
+    }
+}
 
 /// The result of [`check`]: whether the script is error-free plus every
 /// diagnostic (errors and warnings), pre-flattened for the browser.
@@ -69,7 +91,6 @@ pub fn check(file: &str, source: &str) -> CheckResult {
 /// host, answering `ask` effects from `replies` in order.
 #[must_use]
 pub fn run(file: &str, source: &str, replies: Vec<Value>) -> RunResult {
-    const MAX_HOST_EFFECTS: usize = 1_000;
     let script = match compile(file, source) {
         Ok(script) => script,
         Err(diagnostic) => {
@@ -95,46 +116,32 @@ pub fn run(file: &str, source: &str, replies: Vec<Value>) -> RunResult {
         };
     }
 
-    let mut machine = match Machine::new(script.program.clone()) {
-        Ok(machine) => machine,
-        Err(validation) => {
+    let mut runner = match ScriptRunner::new(&script) {
+        Ok(runner) => runner,
+        Err(error) => {
             return RunResult {
                 ok: false,
                 diagnostics,
                 output: Vec::new(),
-                error: Some(format!("invalid bytecode: {validation}")),
+                error: Some(error.to_string()),
             };
         }
     };
-    for (name, value) in &script.defaults {
-        machine.set_variable(name, value.clone());
-    }
 
     let mut output = Vec::new();
     let mut output_bytes = 0;
-    let mut host_effects = 0;
     let mut answers = replies.into_iter();
-    let mut outcome = machine.run();
+    let mut outcome = runner.run();
     let error = loop {
         match outcome {
-            Ok(Yield::Finished) => break None,
-            Ok(Yield::Host { host_id, values }) => {
-                host_effects += 1;
-                if host_effects > MAX_HOST_EFFECTS {
-                    break Some("execution budget exceeded: too many host effects".to_owned());
-                }
-                let name = script.host_name(host_id).unwrap_or("<unknown>");
-                match perform(name, &values, &mut output, &mut output_bytes, &mut answers) {
-                    Ok(reply) => outcome = machine.resume(reply),
+            Ok(ScriptYield::Finished) => break None,
+            Ok(ScriptYield::Host { name, values }) => {
+                match perform(&name, &values, &mut output, &mut output_bytes, &mut answers) {
+                    Ok(reply) => outcome = runner.resume(reply),
                     Err(message) => break Some(message.to_owned()),
                 }
             }
-            Err(evaluation) => {
-                break Some(format!(
-                    "runtime error at line {}: {}",
-                    evaluation.line, evaluation.message
-                ));
-            }
+            Err(error) => break Some(error.to_string()),
         }
     };
 
@@ -224,17 +231,23 @@ fn push_line_text(output: &mut String, text: &str, limit: usize) -> Result<(), &
     Ok(())
 }
 
-/// Parses the caller's JSON reply array into Velin values; a malformed string
-/// yields no replies (each `ask` then resumes with nothing).
-#[must_use]
-pub fn parse_replies(replies_json: &str) -> Vec<Value> {
+/// Parses the caller's JSON reply array into Velin values.
+///
+/// The entire input is rejected if any item is unsupported. Silently dropping
+/// an item would shift every subsequent answer to the wrong `ask` effect.
+pub fn parse_replies(replies_json: &str) -> Result<Vec<Value>, ParseRepliesError> {
     if replies_json.len() > MAX_REPLIES_JSON_BYTES {
-        return Vec::new();
+        return Err(ParseRepliesError::TooLarge);
     }
-    let Ok(parsed) = serde_json::from_str::<Vec<serde_json::Value>>(replies_json) else {
-        return Vec::new();
-    };
-    parsed.iter().filter_map(json_to_value).collect()
+    let parsed = serde_json::from_str::<Vec<serde_json::Value>>(replies_json)
+        .map_err(|error| ParseRepliesError::InvalidJson(error.to_string()))?;
+    parsed
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            json_to_value(value).ok_or(ParseRepliesError::UnsupportedValue { index: index + 1 })
+        })
+        .collect()
 }
 
 /// Maps a JSON scalar to a Velin [`Value`] (integers, booleans, strings only —
@@ -312,17 +325,27 @@ else:
     }
 
     #[test]
-    fn parse_replies_reads_scalars_and_ignores_garbage() {
+    fn parse_replies_accepts_scalars_and_rejects_the_entire_invalid_input() {
         assert_eq!(
-            parse_replies("[1, true, \"hi\"]"),
+            parse_replies("[1, true, \"hi\"]").unwrap(),
             vec![
                 Value::Integer(1),
                 Value::Boolean(true),
                 Value::String("hi".into())
             ]
         );
-        assert!(parse_replies("not json").is_empty());
-        assert!(parse_replies(&" ".repeat(MAX_REPLIES_JSON_BYTES + 1)).is_empty());
+        assert!(matches!(
+            parse_replies("not json"),
+            Err(ParseRepliesError::InvalidJson(_))
+        ));
+        assert_eq!(
+            parse_replies("[1, null, 2]"),
+            Err(ParseRepliesError::UnsupportedValue { index: 2 })
+        );
+        assert_eq!(
+            parse_replies(&" ".repeat(MAX_REPLIES_JSON_BYTES + 1)),
+            Err(ParseRepliesError::TooLarge)
+        );
     }
 
     #[test]
@@ -366,8 +389,11 @@ else:
         let warning = WireDiagnostic::from(&velin::Diagnostic::warning("t.velin", 1, 1, "unused"));
         assert_eq!(warning.severity, "warning");
 
-        assert!(parse_replies("[1.5, null, {}, []]").is_empty());
-        assert!(parse_replies("[]").is_empty());
+        assert!(matches!(
+            parse_replies("[1.5, null, {}, []]"),
+            Err(ParseRepliesError::UnsupportedValue { index: 1 })
+        ));
+        assert!(parse_replies("[]").unwrap().is_empty());
     }
 
     #[test]

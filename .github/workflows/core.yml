@@ -37,3 +37,4 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --all-targets
       - run: cargo build -p velin-wasm --target wasm32-unknown-unknown
+      - run: cargo package --workspace

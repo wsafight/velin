@@ -47,9 +47,10 @@ mod token;
 
 pub use ast::{Condition, Stmt};
 pub use error::ParseError;
-pub use host::CompiledScript;
+pub use host::{CompiledScript, HostSchema};
 pub use limits::{MAX_SOURCE_BYTES, MAX_SOURCE_LINES, MAX_STATEMENT_DEPTH};
 pub use lower::LowerError;
+pub use parser::RecoveredProgram;
 
 use velin_syntax::Diagnostic;
 
@@ -69,6 +70,16 @@ pub(crate) const FILE: &str = "<velin>";
 /// it with [`ParseError::into_diagnostic`], passing the source path.
 pub fn parse_program(source: &str) -> Result<Vec<Stmt>, ParseError> {
     parser::parse(source)
+}
+
+/// Parses a partial statement AST for editor features, collecting recoverable
+/// syntax errors instead of stopping at the first malformed statement.
+///
+/// Compilation deliberately uses [`parse_program`] instead: a recovered AST
+/// must not be lowered or executed while its `errors` collection is non-empty.
+#[must_use]
+pub fn parse_program_recovering(source: &str) -> RecoveredProgram {
+    parser::parse_recovering(source)
 }
 
 /// Parses and lowers `source` (named `file` for diagnostics) into a runnable
@@ -91,4 +102,14 @@ pub fn compile(file: &str, source: &str) -> Result<CompiledScript, Diagnostic> {
 #[must_use]
 pub fn check_script(file: &str, script: &CompiledScript) -> Vec<Diagnostic> {
     script.check(file)
+}
+
+/// Runs static checks using host-owned command names and type contracts.
+#[must_use]
+pub fn check_script_with_host_schema(
+    file: &str,
+    script: &CompiledScript,
+    schema: &HostSchema,
+) -> Vec<Diagnostic> {
+    script.check_with_host_schema(file, schema)
 }

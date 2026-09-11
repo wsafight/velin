@@ -18,7 +18,10 @@ mod flow;
 mod types;
 
 pub use definite::{UnassignedUse, definite_assignment};
-pub use flow::{TypeCheckKind, TypeCheckSite, check_program_types};
+pub use flow::{
+    HostSignature, HostSignatures, TypeCheckKind, TypeCheckSite, check_program_types,
+    check_program_types_with_hosts,
+};
 pub use types::{Environment, Type, TypeError, infer};
 
 use velin_syntax::{Diagnostic, Expr};

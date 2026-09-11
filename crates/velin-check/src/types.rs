@@ -26,7 +26,9 @@ pub enum Type {
 }
 
 impl Type {
-    pub(crate) const fn name(self) -> &'static str {
+    /// Stable human-readable name used in diagnostics and host schemas.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
         match self {
             Self::Integer => "integer",
             Self::Boolean => "boolean",
@@ -37,9 +39,12 @@ impl Type {
         }
     }
 
-    /// Whether a value of this type could be `expected` at runtime. `Unknown`
-    /// is compatible with everything, so it never triggers a diagnostic.
-    fn could_be(self, expected: Type) -> bool {
+    /// Whether this type could satisfy `expected` at runtime.
+    ///
+    /// `Unknown` is compatible with every type, preserving the checker's rule
+    /// that uncertain values do not create false positives.
+    #[must_use]
+    pub fn could_be(self, expected: Type) -> bool {
         self == Type::Unknown || expected == Type::Unknown || self == expected
     }
 }

@@ -1,7 +1,7 @@
 //! Control-flow-aware type propagation for surface-language expressions.
 
 use crate::{Environment, Type, check_condition, check_expression, infer};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use velin_compile::{Op, Program};
 use velin_syntax::{Diagnostic, Expr};
 
@@ -24,6 +24,69 @@ pub struct TypeCheckSite {
     pub kind: TypeCheckKind,
 }
 
+/// Static type contract for one opaque host command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostSignature {
+    arguments: Vec<Type>,
+    variadic: Option<Type>,
+    returns: Option<Type>,
+}
+
+impl HostSignature {
+    /// Creates a command with an exact argument list.
+    #[must_use]
+    pub fn exact(arguments: impl Into<Vec<Type>>, returns: Option<Type>) -> Self {
+        Self {
+            arguments: arguments.into(),
+            variadic: None,
+            returns,
+        }
+    }
+
+    /// Creates a command with fixed leading arguments followed by zero or more
+    /// arguments of `variadic` type.
+    #[must_use]
+    pub fn variadic(
+        arguments: impl Into<Vec<Type>>,
+        variadic: Type,
+        returns: Option<Type>,
+    ) -> Self {
+        Self {
+            arguments: arguments.into(),
+            variadic: Some(variadic),
+            returns,
+        }
+    }
+
+    #[must_use]
+    pub fn accepts(&self, count: usize) -> bool {
+        count == self.arguments.len() || (self.variadic.is_some() && count >= self.arguments.len())
+    }
+
+    #[must_use]
+    pub fn argument(&self, index: usize) -> Option<Type> {
+        self.arguments.get(index).copied().or(self.variadic)
+    }
+
+    #[must_use]
+    pub const fn returns(&self) -> Option<Type> {
+        self.returns
+    }
+
+    #[must_use]
+    pub fn minimum_arguments(&self) -> usize {
+        self.arguments.len()
+    }
+
+    #[must_use]
+    pub fn is_variadic(&self) -> bool {
+        self.variadic.is_some()
+    }
+}
+
+/// Host signatures keyed by the program-local `host_id`.
+pub type HostSignatures = BTreeMap<u32, HostSignature>;
+
 /// Propagates variable types through the program CFG and checks reachable sites.
 ///
 /// Concrete types survive a merge only when all incoming paths agree. A host
@@ -34,6 +97,19 @@ pub fn check_program_types(
     program: &Program,
     initial: &Environment,
     sites: &[TypeCheckSite],
+    file: &str,
+) -> Vec<Diagnostic> {
+    check_program_types_with_hosts(program, initial, sites, &HostSignatures::new(), file)
+}
+
+/// Propagates types like [`check_program_types`], using host return contracts
+/// for bound effects and validating host argument types at each call site.
+#[must_use]
+pub fn check_program_types_with_hosts(
+    program: &Program,
+    initial: &Environment,
+    sites: &[TypeCheckSite],
+    hosts: &HostSignatures,
     file: &str,
 ) -> Vec<Diagnostic> {
     if program.ops.is_empty() {
@@ -74,10 +150,15 @@ pub fn check_program_types(
                 }
             }
             Op::Host {
-                bind: Some(slot), ..
+                host_id,
+                bind: Some(slot),
+                ..
             } => {
                 if let Some(target) = outgoing.get_mut(*slot as usize) {
-                    *target = Type::Unknown;
+                    *target = hosts
+                        .get(host_id)
+                        .and_then(HostSignature::returns)
+                        .unwrap_or(Type::Unknown);
                 }
             }
             _ => {}
@@ -93,6 +174,7 @@ pub fn check_program_types(
     }
 
     let mut diagnostics = Vec::new();
+    let mut host_argument_indices = HashMap::<usize, usize>::new();
     for site in sites {
         let Some(Some(state)) = incoming.get(site.pc) else {
             continue;
@@ -104,6 +186,32 @@ pub fn check_program_types(
                 check_expression(&site.expression, &env, file, 0, 1)
             }
         });
+        if site.kind == TypeCheckKind::Expression
+            && let Some(Op::Host { host_id, .. }) = program.ops.get(site.pc)
+        {
+            let index = host_argument_indices.entry(site.pc).or_default();
+            if let Some(expected) = hosts
+                .get(host_id)
+                .and_then(|signature| signature.argument(*index))
+            {
+                let actual = infer(&site.expression, &env, &mut Vec::new());
+                if !actual.could_be(expected) {
+                    let span = site.expression.span();
+                    diagnostics.push(Diagnostic::new(
+                        file,
+                        span.map_or(0, |span| span.line),
+                        span.map_or(1, |span| span.column),
+                        format!(
+                            "host argument {} expects {}, found {}",
+                            *index + 1,
+                            expected.name(),
+                            actual.name()
+                        ),
+                    ));
+                }
+            }
+            *index += 1;
+        }
     }
     diagnostics
 }

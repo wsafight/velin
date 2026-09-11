@@ -13,7 +13,7 @@
 velin = { path = "../velin/crates/velin" }
 ```
 
-项目仍处于首次发布前，目前不承诺 Rust API 或序列化程序格式的向后兼容。
+项目仍处于预稳定的 `0.x` 阶段，目前不承诺 Rust API 或序列化程序格式的向后兼容。
 
 ## 编译与检查
 
@@ -35,6 +35,10 @@ if diagnostics.iter().any(velin::Diagnostic::is_error) {
 ```
 
 `check_script` 运行 CFG 感知的类型传播和确定赋值分析，不会修改程序。
+
+宿主词汇已知时，用 `HostSignature::exact` 或 `HostSignature::variadic` 构建 `HostSchema`，再调用 `check_script_with_host_schema`。这会增加命令名、参数数量、参数类型、绑定和返回值传播检查，同时不把宿主专用名称放进语言核心。
+
+大多数语句语言宿主应优先使用 `ScriptRunner`：它会验证字节码、安装默认值、把宿主 ID 解析为名称、执行累计宿主效果预算，并可在运行时应用同一份 `HostSchema`。只有需要更底层控制时才直接使用 `Machine`。
 
 ## 创建机器
 

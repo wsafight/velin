@@ -1,6 +1,6 @@
 # Velin for VS Code
 
-Syntax highlighting and language support for [Velin](../../README.md) `.velin`
+Syntax highlighting and language support for [Velin](https://github.com/wsafight/velin) `.velin`
 scripts, backed by the `velin-lsp` language server.
 
 ## Features
@@ -13,17 +13,19 @@ scripts, backed by the `velin-lsp` language server.
 - **Completion** — keywords, built-ins, and the variables/labels the current
   script declares.
 - **Outline** — the script's `label`s as document symbols.
+- **Navigation** — hover help plus definition and reference lookup for labels.
 
-## Requirements
+## Language server
 
-The extension launches the `velin-lsp` binary. Build it from the workspace root:
+Platform-specific release packages include `velin-lsp` and use it by default.
+For extension development, build the server from the workspace root:
 
 ```sh
 cargo build -p velin-lsp        # produces target/debug/velin-lsp
 ```
 
-Then either put `velin-lsp` on your `PATH`, or set **`velin.server.path`** in
-settings to the built binary, e.g.:
+Then either put `velin-lsp` on your `PATH`, or set **`velin.server.path`** to
+the built binary, e.g.:
 
 ```json
 { "velin.server.path": "${workspaceFolder}/target/debug/velin-lsp" }
@@ -46,4 +48,6 @@ Development Host, then open any `.velin` file (see `../../examples`).
 | `package.json` | Language contribution, grammar wiring, `velin.server.path` setting |
 | `language-configuration.json` | Comments, brackets, indentation rules |
 | `syntaxes/velin.tmLanguage.json` | TextMate grammar for highlighting |
-| `src/extension.js` | `vscode-languageclient` shell that spawns `velin-lsp` over stdio |
+| `src/extension.js` | Source for the `vscode-languageclient` shell that spawns `velin-lsp` over stdio |
+| `dist/extension.js` | Bundled extension entry point generated for a VSIX |
+| `bin/` | Platform `velin-lsp` inserted by the release workflow |

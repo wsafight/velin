@@ -95,13 +95,13 @@ fn lower(expression: &Expr, chunk: &mut ExprChunk, slots: &mut SlotTable, column
 /// ```text
 ///   <left>                 ; leaves the left boolean on the stack
 ///   JumpIfFalse END        ; (for `and`) if false, keep it and skip the right
-///   <right>                ; pops the surviving left, evaluates right
+///   <right>                ; leaves the right value above the left
+///   Binary And             ; validates and combines both operands
 /// END:
 /// ```
 /// For `or` the guard is `JumpIfTrue`. When the jump is taken the left operand
-/// is the whole result; when it falls through, the left is popped and the right
-/// becomes the result. Type errors (a non-boolean operand) surface in the VM,
-/// matching the tree-walker.
+/// is the whole result. Keeping the left operand on the fallthrough path lets
+/// `Binary` reproduce the tree-walker's evaluation order and exact type error.
 fn lower_short_circuit(
     left: &Expr,
     op: BinaryOp,
@@ -117,7 +117,7 @@ fn lower_short_circuit(
         _ => unreachable!("only and/or reach short-circuit lowering"),
     });
     lower(right, chunk, slots, column);
-    chunk.push(ExprOp::AssertBoolean(op));
+    chunk.push(ExprOp::Binary(op));
     let end = u32::try_from(chunk.ops.len()).expect("op index fits in u32");
     chunk.ops[guard] = match op {
         BinaryOp::And => ExprOp::JumpIfFalse(end),
@@ -167,7 +167,7 @@ mod tests {
             right: Box::new(Expr::Variable("b".into())),
         };
         let chunk = compile_expression(&expr, &mut slots, 1);
-        // Load a, JumpIfFalse END, Load b  -> END == 3
+        // Load a, JumpIfFalse END, Load b, Binary And -> END == 4
         match chunk.ops[1] {
             ExprOp::JumpIfFalse(target) => assert_eq!(target as usize, chunk.ops.len()),
             ref other => panic!("expected JumpIfFalse guard, got {other:?}"),

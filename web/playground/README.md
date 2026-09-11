@@ -8,7 +8,8 @@ transcript it returns — the language logic runs entirely client-side.
 web/playground/
 ├── index.html      # markup: editor, controls, results
 ├── style.css       # single-file stylesheet
-├── playground.js   # marshals strings to/from the wasm module
+├── playground.js   # UI and bounded worker lifecycle
+├── worker.js       # loads and runs Wasm away from the main thread
 └── pkg/            # BUILD OUTPUT (git-ignored) — see below
 ```
 
@@ -49,7 +50,12 @@ python3 -m http.server --directory web/playground 8080
 | `check(source)`              | `{ ok, diagnostics: [{ severity, line, column, message }] }` |
 | `run(source, repliesJson)`   | `{ ok, diagnostics, output: [string], error? }`           |
 
+Both calls execute in a Web Worker. The page can stop an active request and
+terminates a worker that runs for more than five seconds; the next request
+starts a fresh worker.
+
 `run` drives a deterministic reference host: `say` appends a line to `output`,
 and `ask` prints its prompt then consumes the next entry from the `replies`
 JSON array (integers, `true`/`false`, or strings). This mirrors the CLI's line
-host without needing interactive stdin.
+host without needing interactive stdin. Invalid JSON or an unsupported reply
+rejects the entire reply list, so later answers cannot shift to the wrong ask.

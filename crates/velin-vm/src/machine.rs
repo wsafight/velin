@@ -11,13 +11,25 @@ use crate::chunk::eval_validated_chunk;
 use std::sync::Arc;
 use velin_compile::{Op, Program, ProgramValidationError};
 use velin_eval::EvalError;
-use velin_syntax::Value;
+use velin_syntax::{DataFootprint, Value};
 
 /// The maximum number of control-flow ops executed between two yields.
 ///
 /// Mirrors the original runtime's guard against infinite loops. Reaching it is
 /// reported as an error rather than hanging.
 pub const MAX_IMMEDIATE_STEPS: usize = 10_000;
+
+/// Maximum logical values retained across one machine frame.
+pub const MAX_MACHINE_DATA_VALUES: usize = 100_000;
+
+/// Maximum text retained across one machine frame.
+pub const MAX_MACHINE_TEXT_BYTES: usize = 16 * 1024 * 1024;
+
+/// Maximum logical values emitted in one host yield.
+pub const MAX_HOST_PAYLOAD_VALUES: usize = 100_000;
+
+/// Maximum text emitted in one host yield.
+pub const MAX_HOST_PAYLOAD_TEXT_BYTES: usize = 16 * 1024 * 1024;
 
 /// Seed used by [`Machine::new`] when a program contains random expressions.
 pub const DEFAULT_RNG_SEED: i64 = 0;
@@ -32,6 +44,27 @@ pub enum Yield {
     Finished,
 }
 
+/// Why a host-provided variable could not be installed in a machine frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetVariableError {
+    UnknownVariable(String),
+    InvalidValue(&'static str),
+    StateBudget(&'static str),
+}
+
+impl std::fmt::Display for SetVariableError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownVariable(name) => write!(formatter, "unknown variable `{name}`"),
+            Self::InvalidValue(message) | Self::StateBudget(message) => {
+                formatter.write_str(message)
+            }
+        }
+    }
+}
+
+impl std::error::Error for SetVariableError {}
+
 /// A running program instance. Cloning it creates an in-memory checkpoint: the
 /// program counter, variables, pending host request, and RNG slot are all
 /// copied, so restoring the clone also rewinds future random draws.
@@ -39,6 +72,8 @@ pub enum Yield {
 pub struct Machine {
     program: Arc<Program>,
     frame: Vec<Option<Value>>,
+    frame_slots: Vec<DataFootprint>,
+    frame_total: DataFootprint,
     pc: usize,
     /// The host effect execution is currently waiting to resume from.
     pending_host: Option<PendingHost>,
@@ -73,12 +108,21 @@ impl Machine {
         program.validate()?;
         let width = program.slots.len();
         let mut frame = vec![None; width];
+        let mut frame_slots = vec![DataFootprint::default(); width];
+        let mut frame_total = DataFootprint::default();
         if let Some(slot) = program.slots.rng_state() {
             frame[slot as usize] = Some(Value::Integer(seed));
+            frame_slots[slot as usize] = DataFootprint {
+                values: 1,
+                text_bytes: 0,
+            };
+            frame_total.values = 1;
         }
         Ok(Self {
             program,
             frame,
+            frame_slots,
+            frame_total,
             pc: 0,
             pending_host: None,
             finished: false,
@@ -114,18 +158,27 @@ impl Machine {
     /// Presets a slot's value by name (e.g. for `default`-style initial state).
     ///
     /// Returns `false` if the program never referenced that name or `value`
-    /// exceeds the deterministic data budget.
+    /// exceeds a per-value or aggregate machine data budget.
     pub fn set_variable(&mut self, name: &str, value: Value) -> bool {
-        if value.validate_data().is_err() {
-            return false;
-        }
-        match self.program.slots.get(name) {
-            Some(slot) => {
-                self.frame[slot as usize] = Some(value);
-                true
-            }
-            None => false,
-        }
+        self.try_set_variable(name, value).is_ok()
+    }
+
+    /// Presets a variable and reports why the value could not be installed.
+    ///
+    /// # Errors
+    /// Returns an error for an unknown name, an invalid value, or an aggregate
+    /// machine-state budget violation.
+    pub fn try_set_variable(&mut self, name: &str, value: Value) -> Result<(), SetVariableError> {
+        let slot = self
+            .program
+            .slots
+            .get(name)
+            .ok_or_else(|| SetVariableError::UnknownVariable(name.to_owned()))?;
+        let footprint = value
+            .data_footprint()
+            .map_err(SetVariableError::InvalidValue)?;
+        self.replace_slot(slot, value, footprint)
+            .map_err(SetVariableError::StateBudget)
     }
 
     /// Reads a slot's current value by name.
@@ -183,10 +236,7 @@ impl Machine {
             let value = value.ok_or_else(|| {
                 EvalError::new(pending.line, "bound host effect returned no value")
             })?;
-            value
-                .validate_data()
-                .map_err(|error| EvalError::new(pending.line, error))?;
-            self.frame[slot as usize] = Some(value);
+            self.assign(slot, value, pending.line)?;
         }
         self.pending_host = None;
         self.run()
@@ -198,7 +248,8 @@ impl Machine {
         match self.program.ops[self.pc].clone() {
             Op::Set { slot, value } => {
                 let result = self.eval(value)?;
-                self.frame[slot as usize] = Some(result);
+                let line = self.program.chunks[value as usize].line;
+                self.assign(slot, result, line)?;
                 self.pc += 1;
             }
             Op::Jump(target) => self.pc = target as usize,
@@ -218,10 +269,23 @@ impl Machine {
                 bind,
                 line,
             } => {
-                let values = args
-                    .iter()
-                    .map(|chunk| self.eval(*chunk))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let mut values = Vec::with_capacity(args.len());
+                let mut payload = DataFootprint::default();
+                for chunk in args {
+                    let value = self.eval(chunk)?;
+                    let footprint = value
+                        .data_footprint()
+                        .map_err(|error| EvalError::new(line, error))?;
+                    payload = checked_total(
+                        payload,
+                        footprint,
+                        MAX_HOST_PAYLOAD_VALUES,
+                        MAX_HOST_PAYLOAD_TEXT_BYTES,
+                        "host payload",
+                    )
+                    .map_err(|error| EvalError::new(line, error))?;
+                    values.push(value);
+                }
                 self.pc += 1; // resume past the effect, never re-run it
                 self.pending_host = Some(PendingHost { bind, line });
                 return Ok(Some(Yield::Host { host_id, values }));
@@ -239,6 +303,39 @@ impl Machine {
         })
     }
 
+    fn assign(&mut self, slot: u32, value: Value, line: usize) -> Result<(), EvalError> {
+        let footprint = value
+            .data_footprint()
+            .map_err(|error| EvalError::new(line, error))?;
+        self.replace_slot(slot, value, footprint)
+            .map_err(|error| EvalError::new(line, error))
+    }
+
+    fn replace_slot(
+        &mut self,
+        slot: u32,
+        value: Value,
+        footprint: DataFootprint,
+    ) -> Result<(), &'static str> {
+        let index = slot as usize;
+        let old = self.frame_slots[index];
+        let retained = DataFootprint {
+            values: self.frame_total.values - old.values,
+            text_bytes: self.frame_total.text_bytes - old.text_bytes,
+        };
+        let total = checked_total(
+            retained,
+            footprint,
+            MAX_MACHINE_DATA_VALUES,
+            MAX_MACHINE_TEXT_BYTES,
+            "machine state",
+        )?;
+        self.frame[index] = Some(value);
+        self.frame_slots[index] = footprint;
+        self.frame_total = total;
+        Ok(())
+    }
+
     fn current_line(&self) -> usize {
         self.program
             .ops
@@ -253,6 +350,36 @@ impl Machine {
             })
             .unwrap_or(0)
     }
+}
+
+fn checked_total(
+    current: DataFootprint,
+    added: DataFootprint,
+    max_values: usize,
+    max_text_bytes: usize,
+    context: &'static str,
+) -> Result<DataFootprint, &'static str> {
+    let values = current
+        .values
+        .checked_add(added.values)
+        .ok_or("runtime data value count overflow")?;
+    let text_bytes = current
+        .text_bytes
+        .checked_add(added.text_bytes)
+        .ok_or("runtime data text size overflow")?;
+    if values > max_values {
+        return Err(match context {
+            "host payload" => "host payload exceeds 100,000 values",
+            _ => "machine state exceeds 100,000 values",
+        });
+    }
+    if text_bytes > max_text_bytes {
+        return Err(match context {
+            "host payload" => "host payload text exceeds 16 MiB",
+            _ => "machine state text exceeds 16 MiB",
+        });
+    }
+    Ok(DataFootprint { values, text_bytes })
 }
 
 #[cfg(test)]
@@ -486,6 +613,75 @@ mod tests {
         let oversized = Value::String("x".repeat(velin_syntax::MAX_DATA_TEXT_BYTES + 1));
         assert!(!machine.set_variable("seed", oversized));
         assert!(machine.variable("seed").is_none());
+
+        assert_eq!(
+            machine
+                .try_set_variable("missing", Value::Integer(1))
+                .unwrap_err(),
+            SetVariableError::UnknownVariable("missing".into())
+        );
+    }
+
+    #[test]
+    fn aggregate_machine_state_text_is_bounded_and_replacements_release_budget() {
+        let mut builder = ProgramBuilder::new();
+        let names: Vec<String> = (0..=16).map(|index| format!("value_{index}")).collect();
+        for name in &names {
+            builder.slot(name);
+        }
+        let mut machine = Machine::new(builder.build()).unwrap();
+        let payload = Value::String("x".repeat(velin_syntax::MAX_DATA_TEXT_BYTES));
+
+        for name in &names[..16] {
+            machine.try_set_variable(name, payload.clone()).unwrap();
+        }
+        let error = machine
+            .try_set_variable(&names[16], payload.clone())
+            .unwrap_err();
+        assert_eq!(
+            error,
+            SetVariableError::StateBudget("machine state text exceeds 16 MiB")
+        );
+        assert!(machine.variable(&names[16]).is_none());
+
+        machine
+            .try_set_variable(&names[0], Value::Integer(1))
+            .unwrap();
+        machine.try_set_variable(&names[16], payload).unwrap();
+    }
+
+    #[test]
+    fn script_assignments_and_host_payloads_have_aggregate_budgets() {
+        let payload = Value::String("x".repeat(velin_syntax::MAX_DATA_TEXT_BYTES));
+
+        let mut assignments = ProgramBuilder::new();
+        let chunk = assignments.expr(&Expr::Value(payload.clone()), 4);
+        let slots: Vec<u32> = (0..=16)
+            .map(|index| assignments.slot(&format!("value_{index}")))
+            .collect();
+        for slot in &slots {
+            assignments.push(Op::Set {
+                slot: *slot,
+                value: chunk,
+            });
+        }
+        let mut machine = Machine::new(assignments.build()).unwrap();
+        let error = machine.run().unwrap_err();
+        assert_eq!(error.line, 4);
+        assert_eq!(error.message, "machine state text exceeds 16 MiB");
+        assert!(machine.variable("value_16").is_none());
+
+        let mut host = ProgramBuilder::new();
+        let argument = host.expr(&Expr::Value(payload), 7);
+        host.push(Op::Host {
+            host_id: 1,
+            args: vec![argument; 17],
+            bind: None,
+            line: 7,
+        });
+        let error = Machine::new(host.build()).unwrap().run().unwrap_err();
+        assert_eq!(error.line, 7);
+        assert_eq!(error.message, "host payload text exceeds 16 MiB");
     }
 
     #[test]

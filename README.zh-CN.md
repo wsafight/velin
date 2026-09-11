@@ -30,6 +30,8 @@ Velin 是一门**可嵌入、可复现的字节码脚本语言**。它负责表�
 - [架构](docs/ARCHITECTURE.zh-CN.md)解释 crate 边界、字节码校验、静态分析和资源预算。
 - [静态检查](docs/CHECKING.zh-CN.md)说明类型、`Unknown` 和确定赋值。
 - [资源预算](docs/LIMITS.zh-CN.md)列出全部已公布的限制。
+- [更新记录](CHANGELOG.md)记录发布级别的变更。
+- [安全策略](SECURITY.md)说明支持版本与私密报告方式。
 
 ## Workspace
 
@@ -87,8 +89,8 @@ cargo run -p velin-cli -- run examples/counting.velin
 echo 1 | cargo run -p velin-cli -- run examples/adventure.velin
 ```
 
-- `velin check <file>`：编译并打印全部诊断；仅 error 导致退出码 1。
-- `velin run <file>`：检查通过后由行式参考宿主执行；`say` 输出文本，`ask` 从 stdin 读取一个值。
+- `velin check [--json] <file|->`：编译源码并输出文本或结构化诊断；仅 error 导致退出码 1。
+- `velin run <file|->`：检查通过后由行式参考宿主执行；`say` 输出文本，`ask` 从 stdin 读取一个值。
 
 ## 嵌入 Rust
 
@@ -148,7 +150,7 @@ match machine.run().unwrap() {
 - 每份源码最多 1 MiB、10,000 个物理行，语句块最多嵌套 64 层。
 - 单个表达式最多 64 KiB、512 个 token、32 层括号和 32 层插值；嵌套插值共享累计工作量与 token 预算。
 - 单个值最多包含 4,096 个节点、16 层集合和 1 MiB 文本；`Program` 另有操作数、chunk、槽位、常量、文本、栈高和宿主参数预算。
-- VM 每次让出宿主前最多立即执行 10,000 步；CLI 与 Playground 输出最多 1 MiB，Playground 最多处理 1,000 次宿主效果和 1 MiB 回复 JSON。
+- VM 每次让出宿主前最多立即执行 10,000 步；CLI 与 Playground 每次运行最多处理 1,000 次宿主效果和 1 MiB 输出；Playground 还会把回复 JSON 限制为 1 MiB，并把 Worker 执行限制为 5 秒。
 - LSP 限制单条 JSON-RPC 消息为 4 MiB、整个头部为 64 KiB、单行头部为 8 KiB。
 
 ## 浏览器 Playground

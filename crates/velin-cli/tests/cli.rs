@@ -83,17 +83,81 @@ fn temp_script(source: &str) -> String {
 }
 
 #[test]
-fn binary_help_and_unknown_subcommand_exit_2() {
-    for args in [
-        &["--help"][..],
-        &["help"],
-        &["-h"],
-        &[],
-        &["build", "x.velin"],
-    ] {
+fn binary_help_and_version_succeed_while_invalid_commands_exit_2() {
+    for args in [&["--help"][..], &["help"], &["-h"]] {
+        let output = velin().args(args).output().unwrap();
+        assert!(output.status.success(), "args={args:?}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("usage:"));
+    }
+    for args in [&["--version"][..], &["-V"]] {
+        let output = velin().args(args).output().unwrap();
+        assert!(output.status.success(), "args={args:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            concat!("velin ", env!("CARGO_PKG_VERSION"))
+        );
+    }
+    for args in [&[][..], &["build", "x.velin"]] {
         let output = velin().args(args).output().unwrap();
         assert_eq!(output.status.code(), Some(2), "args={args:?}");
     }
+}
+
+#[test]
+fn binary_reads_source_from_stdin() {
+    let mut check = velin()
+        .args(["check", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    check
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"set value = 1\n")
+        .unwrap();
+    let checked = check.wait_with_output().unwrap();
+    assert!(checked.status.success());
+    assert!(String::from_utf8_lossy(&checked.stdout).contains("<stdin>: ok"));
+
+    let mut run = velin()
+        .args(["run", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    run.stdin
+        .take()
+        .unwrap()
+        .write_all(b"perform say(\"from stdin\")\n")
+        .unwrap();
+    let output = run.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("from stdin"));
+}
+
+#[test]
+fn binary_check_json_is_machine_readable_for_success_and_failure() {
+    let clean = temp_script("set value = 1\n");
+    let checked = velin().args(["check", "--json", &clean]).output().unwrap();
+    assert!(checked.status.success());
+    let payload: serde_json::Value = serde_json::from_slice(&checked.stdout).unwrap();
+    assert_eq!(payload["ok"], true);
+    assert_eq!(payload["diagnostics"], serde_json::json!([]));
+
+    let broken = temp_script("set total = missing + 1\n");
+    let checked = velin().args(["check", &broken, "--json"]).output().unwrap();
+    assert_eq!(checked.status.code(), Some(1));
+    let payload: serde_json::Value = serde_json::from_slice(&checked.stdout).unwrap();
+    assert_eq!(payload["ok"], false);
+    assert_eq!(payload["diagnostics"][0]["severity"], "error");
+    assert!(
+        payload["diagnostics"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("missing")
+    );
 }
 
 #[test]

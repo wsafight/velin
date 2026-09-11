@@ -113,18 +113,12 @@ pub(crate) fn eval_validated_chunk(
                     pc = *target as usize;
                     continue;
                 }
-                // Not taken: this is the guard for `and`, so the surviving
-                // left operand (any non-`false` value) is discarded and the
-                // right operand becomes the result. A non-boolean left is a
-                // type error, surfaced by the trailing evaluation.
-                guard_pop_boolean(&mut stack, BinaryOp::And, line)?;
             }
             ExprOp::JumpIfTrue(target) => {
                 if stack.last() == Some(&Value::Boolean(true)) {
                     pc = *target as usize;
                     continue;
                 }
-                guard_pop_boolean(&mut stack, BinaryOp::Or, line)?;
             }
             ExprOp::AssertBoolean(op) => {
                 let value = stack.last().expect("boolean operand present");
@@ -154,22 +148,6 @@ fn rng_state(frame: &mut Frame, slot: u32, line: usize) -> Result<&mut i64, Eval
         return Err(EvalError::new(line, "RNG state must be an integer"));
     };
     Ok(state)
-}
-
-/// Pops the guard operand of a short-circuit op, verifying it is boolean.
-///
-/// When an `and`/`or` guard is *not* taken, the left operand has served its
-/// purpose and is dropped so the right operand can replace it. The tree-walker
-/// rejects a non-boolean operand in a boolean operation, so we do the same here
-/// to keep behaviour identical.
-fn guard_pop_boolean(stack: &mut Vec<Value>, op: BinaryOp, line: usize) -> Result<(), EvalError> {
-    let value = stack.pop().expect("short-circuit guard operand present");
-    if matches!(value, Value::Boolean(_)) {
-        Ok(())
-    } else {
-        // Reuse the exact wording of velin-eval by combining through it.
-        apply_binary(value, op, Value::Boolean(true), line).map(|_| ())
-    }
 }
 
 #[cfg(test)]

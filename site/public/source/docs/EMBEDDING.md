@@ -13,7 +13,7 @@ While working from this workspace, use a path dependency:
 velin = { path = "../velin/crates/velin" }
 ```
 
-The project is pre-release and does not currently promise backward compatibility for its Rust API or serialized program format.
+The project is in its pre-stable `0.x` line and does not currently promise backward compatibility for its Rust API or serialized program format.
 
 ## Compile and check
 
@@ -35,6 +35,10 @@ if diagnostics.iter().any(velin::Diagnostic::is_error) {
 ```
 
 `check_script` runs CFG-aware type propagation and definite-assignment analysis. It does not mutate the program.
+
+For a known host vocabulary, build a `HostSchema` from `HostSignature::exact` or `HostSignature::variadic`, then call `check_script_with_host_schema`. This adds command-name, arity, argument, binding, and return-flow checks without putting host-specific names into the language.
+
+For most surface-language hosts, prefer `ScriptRunner`: it validates bytecode, installs defaults, resolves host IDs to names, enforces a cumulative host-effect budget, and can apply the same `HostSchema` at runtime. Use `Machine` directly when an embedder needs lower-level control.
 
 ## Create a machine
 

@@ -31,6 +31,8 @@ cargo run -p velin-cli -- check examples/adventure.velin
 
 `check` 会打印解析、降级、类型和确定赋值诊断。存在 error 时退出码为 1；只有 warning 不会导致命令失败。
 
+使用 `velin check --json <file>` 可得到稳定的 `{ ok, diagnostics, error }` JSON 结果。两个子命令都接受 `-` 作为源码路径，从 stdin 读取 UTF-8 源码；`velin --help` 与 `velin --version` 会打印命令信息并成功退出。
+
 通过行式参考宿主运行：
 
 ```sh
@@ -60,20 +62,21 @@ cargo build -p velin-lsp
 - 实时解析、降级、类型与确定赋值诊断。
 - 关键字、内置函数、变量和标签补全。
 - 标签文档符号。
+- 语言名称悬停说明，以及标签定义跳转与引用查找。
 - 对不支持的请求返回标准 JSON-RPC `MethodNotFound`。
 
 服务器将 JSON-RPC 消息限制为 4 MiB，并在分配正文前检查头部预算。
 
 ## VS Code 扩展
 
-扩展位于 `editors/vscode-velin`，提供 `.velin` 文件注册、TextMate 高亮、缩进规则、补全、诊断和标签大纲。
+扩展位于 `editors/vscode-velin`，提供 `.velin` 文件注册、TextMate 高亮、缩进规则、补全、诊断和标签大纲。各平台发布的 VSIX 会内置对应的 `velin-lsp`；下面的设置仅用于覆盖内置服务器或本地开发。
 
 ```sh
 cd editors/vscode-velin
 npm ci
 ```
 
-在 VS Code 中打开该目录，按 `F5` 启动 Extension Development Host。扩展默认从 `PATH` 启动 `velin-lsp`。使用本地二进制时设置：
+在 VS Code 中打开该目录，按 `F5` 启动 Extension Development Host。没有内置服务器时，扩展会从 `PATH` 启动 `velin-lsp`。使用本地二进制时设置：
 
 ```json
 { "velin.server.path": "${workspaceFolder}/target/debug/velin-lsp" }
@@ -109,7 +112,7 @@ npm test
 
 ## 持续集成
 
-`.github/workflows/core.yml` 运行格式检查、Clippy、workspace 测试和 Wasm target 构建。`.github/workflows/site.yml` 构建并测试完整静态站，上传产物，并从仓库默认分支部署到 GitHub Pages。
+`.github/workflows/core.yml` 运行格式检查、Clippy、workspace 测试、Wasm target 构建和整个 workspace 的 crate 打包验证。`.github/workflows/site.yml` 构建并测试完整静态站，上传产物，并从仓库默认分支部署到 GitHub Pages。`.github/workflows/release.yml` 在手动运行时构建 CLI/LSP 压缩包与各平台 VSIX；推送与 manifest 版本一致的 `v*` tag 时还会创建带 SHA-256 校验和的 GitHub Release。
 
 ## Workspace 验证
 
@@ -120,4 +123,5 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 cargo build -p velin-wasm --target wasm32-unknown-unknown
+cargo package --workspace
 ```

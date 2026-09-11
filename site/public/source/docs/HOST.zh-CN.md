@@ -44,7 +44,7 @@ answer = perform ask("Continue?")
 | 未绑定 `perform name(...)` | `None` | 日志、界面更新、一次性动作 |
 | 绑定 `name = perform name(...)` | `Some(Value)` | 提问、查询、宿主持有的数据 |
 
-给绑定命令传 `None`，或给未绑定命令传 `Some`，都是宿主错误。返回值在进入槽位前会按 Velin 的数据预算检查。
+给绑定命令传 `None` 是错误。底层 `Machine` 会忽略传给未绑定命令的值；宿主按约定应传 `None`，带 schema 的 `ScriptRunner` 会拒绝给声明为无返回值的命令传回复。返回值在进入槽位前会按 Velin 的数据预算检查。
 
 ## 名字是不透明的
 
@@ -58,6 +58,28 @@ answer = perform ask("Continue?")
 
 未知命令仍然是合法的 Velin。CLI 会打印它们并继续；生产宿主应当拒绝未在允许名单中的名字。
 
+## 声明宿主契约
+
+核心保持宿主无关，但嵌入方可以在边界提供 `HostSchema`。严格 schema 会报告未声明命令，并检查参数数量、参数类型、绑定命令是否返回值，以及该返回值向后传播的类型。
+
+```rust
+use velin::{HostSchema, HostSignature, Type, check_script_with_host_schema};
+
+let schema = HostSchema::new()
+    .command(
+        "say",
+        HostSignature::variadic(Vec::new(), Type::Unknown, None),
+    )
+    .command(
+        "ask",
+        HostSignature::exact(vec![Type::String], Some(Type::Integer)),
+    );
+
+let diagnostics = check_script_with_host_schema("rules.velin", &script, &schema);
+```
+
+当工具只建模宿主词汇的一部分时，使用 `.allow_unknown(true)`。`ScriptRunner::configured` 接受同一 schema，在运行时校验参数与回复。回复类型错误可修正后重试；非法调用或效果预算耗尽对该 runner 是终止错误。
+
 ## CLI 与 Playground 约定
 
 面向行的参考宿主实现了两个名字，这样示例不必先写自定义嵌入方也能运行：
@@ -67,12 +89,12 @@ answer = perform ask("Continue?")
 | `say(values...)` | 把值以空格分隔写入 stdout | 追加到输出面板 |
 | `ask(prompt...)` | 写出提示、读一行，解析成整数、布尔或字符串 | 从回复数组取出下一个 JSON 值 |
 
-Playground 最多接受 1,000 次宿主效果和 1 MiB 的回复 JSON。CLI 与 Playground 的输出上限是 1 MiB。这些是工具限制，不是语言语义。
+CLI 与 Playground 每次运行最多接受 1,000 次宿主效果和 1 MiB 输出。Playground 还把回复 JSON 限制为 1 MiB。这些是工具限制，不是语言语义。
 
 ## 最小 Rust 宿主
 
 ```rust
-use velin::{compile, Machine, Value, Yield};
+use velin::{ScriptRunner, ScriptYield, Value, compile};
 
 fn reply_for(name: &str, values: &[Value]) -> Result<Option<Value>, String> {
     match name {
@@ -93,18 +115,14 @@ fn reply_for(name: &str, values: &[Value]) -> Result<Option<Value>, String> {
 
 fn drive(source: &str) -> Result<(), String> {
     let script = compile("rules.velin", source).map_err(|e| e.to_string())?;
-    let mut machine = Machine::new(script.program.clone()).map_err(|e| e.to_string())?;
-    for (name, value) in &script.defaults {
-        machine.set_variable(name, value.clone());
-    }
-    let mut outcome = machine.run().map_err(|e| e.to_string())?;
+    let mut runner = ScriptRunner::new(&script).map_err(|e| e.to_string())?;
+    let mut outcome = runner.run().map_err(|e| e.to_string())?;
     loop {
         match outcome {
-            Yield::Finished => return Ok(()),
-            Yield::Host { host_id, values } => {
-                let name = script.host_name(host_id).ok_or("unknown host id")?;
-                let reply = reply_for(name, &values)?;
-                outcome = machine.resume(reply).map_err(|e| e.to_string())?;
+            ScriptYield::Finished => return Ok(()),
+            ScriptYield::Host { name, values } => {
+                let reply = reply_for(&name, &values)?;
+                outcome = runner.resume(reply).map_err(|e| e.to_string())?;
             }
         }
     }

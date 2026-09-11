@@ -8,6 +8,16 @@ pub const MAX_DATA_DEPTH: usize = 16;
 /// Maximum UTF-8 text bytes in one validated value tree or rendered string.
 pub const MAX_DATA_TEXT_BYTES: usize = 1024 * 1024;
 
+/// Logical size of one value tree.
+///
+/// Shared collection storage is counted each time it is referenced. This keeps
+/// resource accounting deterministic and independent of `Arc` ownership.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DataFootprint {
+    pub values: usize,
+    pub text_bytes: usize,
+}
+
 /// The closed set of built-in functions available to expressions.
 ///
 /// These are deterministic helpers with no host, I/O, network, or foreign-code
@@ -63,19 +73,38 @@ impl Value {
     /// # Errors
     /// Rejects more than 4096 values, 16 collection levels or 1 MiB of text.
     pub fn validate_data(&self) -> Result<(), &'static str> {
+        self.data_footprint().map(|_| ())
+    }
+
+    /// Measures this value while enforcing the per-value data budget.
+    ///
+    /// Hosts and the VM use the returned footprint to enforce aggregate
+    /// budgets without giving up the existing per-value limits.
+    ///
+    /// # Errors
+    /// Rejects more than 4096 values, 16 collection levels or 1 MiB of text.
+    pub fn data_footprint(&self) -> Result<DataFootprint, &'static str> {
         let mut pending = vec![(self, 0)];
-        let mut items = 0;
-        let mut bytes = 0;
+        let mut items: usize = 0;
+        let mut bytes: usize = 0;
         while let Some((value, depth)) = pending.pop() {
-            items += 1;
+            items = items.checked_add(1).ok_or("data value count overflow")?;
             if items > MAX_DATA_VALUES || depth > MAX_DATA_DEPTH {
                 return Err("data exceeds 4096 values or 16 nesting levels");
             }
             match value {
-                Self::String(text) => bytes += text.len(),
+                Self::String(text) => {
+                    bytes = bytes
+                        .checked_add(text.len())
+                        .ok_or("data text size overflow")?;
+                }
                 Self::List(values) => pending.extend(values.iter().map(|value| (value, depth + 1))),
                 Self::Record(values) => {
-                    bytes += values.keys().map(String::len).sum::<usize>();
+                    for key in values.keys() {
+                        bytes = bytes
+                            .checked_add(key.len())
+                            .ok_or("data text size overflow")?;
+                    }
                     pending.extend(values.values().map(|value| (value, depth + 1)));
                 }
                 Self::Integer(_) | Self::Boolean(_) => {}
@@ -84,7 +113,10 @@ impl Value {
                 return Err("data text exceeds 1 MiB");
             }
         }
-        Ok(())
+        Ok(DataFootprint {
+            values: items,
+            text_bytes: bytes,
+        })
     }
 }
 
@@ -123,7 +155,20 @@ mod tests {
 
     #[test]
     fn data_budget_rejects_wide_deep_and_heavy_values() {
-        Value::Integer(1).validate_data().unwrap();
+        assert_eq!(
+            Value::Integer(1).data_footprint().unwrap(),
+            DataFootprint {
+                values: 1,
+                text_bytes: 0
+            }
+        );
+        assert_eq!(
+            Value::String("hello".into()).data_footprint().unwrap(),
+            DataFootprint {
+                values: 1,
+                text_bytes: 5
+            }
+        );
         let wide = Value::List(Arc::new(vec![Value::Integer(0); 4096]));
         assert!(wide.validate_data().is_err());
         let mut nested = Value::Integer(1);

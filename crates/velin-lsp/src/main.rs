@@ -1,6 +1,6 @@
 //! `velin-lsp` — a minimal Language Server for the Velin statement language.
 //!
-//! It speaks LSP over stdio and offers three capabilities, all thin adaptors
+//! It speaks LSP over stdio and offers editor capabilities as thin adaptors
 //! over the `velin` library:
 //!
 //! * **diagnostics** — pushed on open/change; a compile error, or the
@@ -8,6 +8,7 @@
 //! * **completion** — the fixed keyword/builtin vocabulary plus the variables
 //!   and labels the current document declares.
 //! * **document symbols** — the script's labels, for the outline view.
+//! * **hover and navigation** — language help plus label definitions/references.
 //!
 //! The wire framing lives in [`protocol`], the language analysis in
 //! [`analysis`], and the request loop in [`server`]. Point any LSP client at

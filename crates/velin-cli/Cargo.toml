@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 velin.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

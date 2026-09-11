@@ -23,7 +23,7 @@ Choose something else when you need:
 
 - General-purpose programming with modules, classes, or a large standard library.
 - Floating-point math, clocks, or operating-system APIs inside the script.
-- A stable public language and Rust API. Velin is still pre-release.
+- A stable public language and Rust API. Velin `0.x` is still pre-stable.
 
 Lua, Rhai, JavaScript, and WASM guests are better fits for open-ended extension. Velin is the narrower tool: deterministic values, conservative checks, and one host-effect protocol.
 
@@ -73,7 +73,7 @@ Yes. `velin-wasm` exposes `check` and `run` to JavaScript. The site Playground l
 
 ## Is the language stable?
 
-Not yet. Syntax, the serialized program format, and the Rust API may change before the first release. The architectural rules in [Architecture](ARCHITECTURE.md) describe how the project intends to evolve: no VM I/O, deterministic values, conservative checking, and host effects for every external action.
+Not yet. Version `0.1.0` is published, but syntax, the serialized program format, and the Rust API may still change during the `0.x` line. The architectural rules in [Architecture](ARCHITECTURE.md) describe how the project intends to evolve: no VM I/O, deterministic values, conservative checking, and host effects for every external action.
 
 ## Where should I start?
 

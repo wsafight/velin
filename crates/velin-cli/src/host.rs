@@ -15,17 +15,15 @@
 //! their own effect handlers.
 
 use std::io::{self, BufRead, Write};
-use velin::{CompiledScript, EvalError, Machine, ProgramValidationError, Value, Yield};
+use velin::{CompiledScript, ScriptRunError, ScriptRunner, ScriptYield, Value};
 
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 
 /// A failure while running a script against the reference host.
 #[derive(Debug)]
 pub enum RunError {
-    /// The virtual machine raised an evaluation error (e.g. a type mismatch).
-    Eval(EvalError),
-    /// The compiled or externally supplied bytecode failed validation.
-    Program(ProgramValidationError),
+    /// Shared script initialization, evaluation, or execution-budget failure.
+    Script(ScriptRunError),
     /// Reading a reply or writing output failed.
     Io(io::Error),
     /// The reference host exceeded its bounded execution or output budget.
@@ -35,10 +33,7 @@ pub enum RunError {
 impl std::fmt::Display for RunError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Eval(error) => {
-                write!(f, "runtime error at line {}: {}", error.line, error.message)
-            }
-            Self::Program(error) => write!(f, "invalid bytecode: {error}"),
+            Self::Script(error) => error.fmt(f),
             Self::Io(error) => write!(f, "i/o error: {error}"),
             Self::Budget(message) => write!(f, "execution budget exceeded: {message}"),
         }
@@ -48,6 +43,12 @@ impl std::fmt::Display for RunError {
 impl From<io::Error> for RunError {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
+    }
+}
+
+impl From<ScriptRunError> for RunError {
+    fn from(error: ScriptRunError) -> Self {
+        Self::Script(error)
     }
 }
 
@@ -63,26 +64,15 @@ pub fn run(
     input: &mut impl BufRead,
     output: &mut impl Write,
 ) -> Result<(), RunError> {
-    const MAX_HOST_EFFECTS: usize = 1_000;
-    let mut machine = Machine::new(script.program.clone()).map_err(RunError::Program)?;
-    for (name, value) in &script.defaults {
-        machine.set_variable(name, value.clone());
-    }
-
-    let mut outcome = machine.run().map_err(RunError::Eval)?;
-    let mut host_effects = 0;
+    let mut runner = ScriptRunner::new(script)?;
+    let mut outcome = runner.run()?;
     let mut output_bytes = 0;
     loop {
         match outcome {
-            Yield::Finished => break,
-            Yield::Host { host_id, values } => {
-                host_effects += 1;
-                if host_effects > MAX_HOST_EFFECTS {
-                    return Err(RunError::Budget("too many host effects"));
-                }
-                let name = script.host_name(host_id).unwrap_or("<unknown>");
-                let reply = perform(name, &values, input, output, &mut output_bytes)?;
-                outcome = machine.resume(reply).map_err(RunError::Eval)?;
+            ScriptYield::Finished => break,
+            ScriptYield::Host { name, values } => {
+                let reply = perform(&name, &values, input, output, &mut output_bytes)?;
+                outcome = runner.resume(reply)?;
             }
         }
     }
@@ -217,7 +207,10 @@ mod tests {
         let mut input = Cursor::new(String::new());
         let mut output = Vec::new();
         let error = run(&script, &mut input, &mut output).unwrap_err();
-        assert!(matches!(error, RunError::Budget("too many host effects")));
+        assert!(matches!(
+            error,
+            RunError::Script(ScriptRunError::HostEffectsExceeded { limit: 1_000 })
+        ));
         assert_eq!(output.lines().count(), 1_000);
     }
 
@@ -256,7 +249,7 @@ else:
 
     #[test]
     fn run_error_display_and_io_conversion() {
-        let eval = RunError::Eval(velin::EvalError::new(4, "boom"));
+        let eval = RunError::Script(ScriptRunError::Evaluation(velin::EvalError::new(4, "boom")));
         assert_eq!(eval.to_string(), "runtime error at line 4: boom");
         let io = RunError::from(std::io::Error::other("disk"));
         assert!(io.to_string().contains("i/o error"));
@@ -272,7 +265,10 @@ else:
         let mut input = Cursor::new(String::new());
         let mut output = Vec::new();
         let error = run(&script, &mut input, &mut output).unwrap_err();
-        assert!(matches!(error, RunError::Eval(_)));
+        assert!(matches!(
+            error,
+            RunError::Script(ScriptRunError::Evaluation(_))
+        ));
         assert!(String::from_utf8(output).unwrap().contains("pick:"));
 
         let compounds = run_capture("perform say(list(1, true), record(\"a\", \"b\"))\n", "");
@@ -282,7 +278,10 @@ else:
         let mut input = Cursor::new(String::new());
         let mut output = Vec::new();
         let error = run(&script, &mut input, &mut output).unwrap_err();
-        assert!(matches!(error, RunError::Eval(_)));
+        assert!(matches!(
+            error,
+            RunError::Script(ScriptRunError::Evaluation(_))
+        ));
         assert!(error.to_string().contains("division by zero"));
     }
 

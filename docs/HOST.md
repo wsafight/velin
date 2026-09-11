@@ -44,7 +44,7 @@ answer = perform ask("Continue?")
 | Unbound `perform name(...)` | `None` | Logs, UI updates, fire-and-forget actions |
 | Bound `name = perform name(...)` | `Some(Value)` | Prompts, queries, host-owned data |
 
-Passing `None` to a bound command, or `Some` to an unbound one, is a host error. Return values are checked against Velin's data budget before they enter a slot.
+Passing `None` to a bound command is an error. The low-level `Machine` ignores a value supplied to an unbound command; hosts should conventionally pass `None`, and a `ScriptRunner` with a schema rejects replies for commands declared as non-returning. Return values are checked against Velin's data budget before they enter a slot.
 
 ## Names are opaque
 
@@ -58,6 +58,28 @@ Passing `None` to a bound command, or `Some` to an unbound one, is a host error.
 
 Unknown commands are still valid Velin. The CLI prints them and continues; a production host should reject names it did not allow-list.
 
+## Declare host contracts
+
+The core stays host-agnostic, but an embedder can supply a `HostSchema` at its boundary. A strict schema reports undeclared commands and checks arity, argument types, whether a bound command returns a value, and the type propagated from that return value.
+
+```rust
+use velin::{HostSchema, HostSignature, Type, check_script_with_host_schema};
+
+let schema = HostSchema::new()
+    .command(
+        "say",
+        HostSignature::variadic(Vec::new(), Type::Unknown, None),
+    )
+    .command(
+        "ask",
+        HostSignature::exact(vec![Type::String], Some(Type::Integer)),
+    );
+
+let diagnostics = check_script_with_host_schema("rules.velin", &script, &schema);
+```
+
+Use `.allow_unknown(true)` when a tool intentionally models only part of a host vocabulary. `ScriptRunner::configured` accepts the same schema for runtime argument and reply validation. A reply type error can be corrected and retried; an invalid call or exhausted effect budget is terminal for that runner.
+
 ## CLI and Playground conventions
 
 The line-oriented reference host implements two names so examples can run without a custom embedder:
@@ -67,12 +89,12 @@ The line-oriented reference host implements two names so examples can run withou
 | `say(values...)` | Writes values to stdout, separated by spaces | Appends them to the output panel |
 | `ask(prompt...)` | Writes the prompt, reads one line, parses an integer, boolean, or string | Consumes the next JSON value from the replies array |
 
-The Playground accepts at most 1,000 host effects and 1 MiB of reply JSON. CLI and Playground output is capped at 1 MiB. These caps are tooling limits, not language semantics.
+CLI and Playground runs accept at most 1,000 host effects and 1 MiB of output. The Playground also caps reply JSON at 1 MiB. These caps are tooling limits, not language semantics.
 
 ## A minimal Rust host
 
 ```rust
-use velin::{compile, Machine, Value, Yield};
+use velin::{ScriptRunner, ScriptYield, Value, compile};
 
 fn reply_for(name: &str, values: &[Value]) -> Result<Option<Value>, String> {
     match name {
@@ -93,18 +115,14 @@ fn reply_for(name: &str, values: &[Value]) -> Result<Option<Value>, String> {
 
 fn drive(source: &str) -> Result<(), String> {
     let script = compile("rules.velin", source).map_err(|e| e.to_string())?;
-    let mut machine = Machine::new(script.program.clone()).map_err(|e| e.to_string())?;
-    for (name, value) in &script.defaults {
-        machine.set_variable(name, value.clone());
-    }
-    let mut outcome = machine.run().map_err(|e| e.to_string())?;
+    let mut runner = ScriptRunner::new(&script).map_err(|e| e.to_string())?;
+    let mut outcome = runner.run().map_err(|e| e.to_string())?;
     loop {
         match outcome {
-            Yield::Finished => return Ok(()),
-            Yield::Host { host_id, values } => {
-                let name = script.host_name(host_id).ok_or("unknown host id")?;
-                let reply = reply_for(name, &values)?;
-                outcome = machine.resume(reply).map_err(|e| e.to_string())?;
+            ScriptYield::Finished => return Ok(()),
+            ScriptYield::Host { name, values } => {
+                let reply = reply_for(&name, &values)?;
+                outcome = runner.resume(reply).map_err(|e| e.to_string())?;
             }
         }
     }

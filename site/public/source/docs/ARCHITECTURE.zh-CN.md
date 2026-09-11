@@ -141,7 +141,7 @@ Const / Load
 Unary / Binary
 Call
 Random / Chance
-JumpIfFalse / JumpIfTrue / AssertBoolean
+JumpIfFalse / JumpIfTrue
 Concat
 ```
 
@@ -217,7 +217,7 @@ Integer / Boolean / String / List / Record / Unknown
 | 值 | 每棵值树 4,096 个节点、16 层集合、1 MiB 文本 |
 | 程序字节码 | 100,000 个控制流 op、100,000 个 chunk、65,536 个槽位、100,000 个常量值节点、16 MiB 常量及槽位文本 |
 | 表达式字节码 | 每个 chunk 4,096 个 op、最大栈高 1,024；每条宿主指令最多 128 个参数 |
-| 工具层 | CLI / Playground 输出 1 MiB；Playground 1,000 次宿主效果与 1 MiB 回复 JSON；LSP JSON 正文 4 MiB、头部 64 KiB、单行头部 8 KiB |
+| 工具层 | CLI / Playground 输出 1 MiB、宿主效果 1,000 次；Playground 回复 JSON 1 MiB、Worker 请求 5 秒；LSP JSON 正文 4 MiB、头部 64 KiB、单行头部 8 KiB |
 
 CLI、WebAssembly 或其他宿主仍应按自己的风险模型增加时间、效果权限和外部资源预算；这些限制属于宿主层，不能由语言核心统一决定。
 
@@ -225,23 +225,23 @@ CLI、WebAssembly 或其他宿主仍应按自己的风险模型增加时间、�
 
 ### CLI
 
-`velin check` 运行编译与静态检查；`velin run` 使用仅供示例的行式宿主。参考宿主对 `say` 和 `ask` 提供行为，其他效果按名称和参数回显。
+`velin check` 对文件或 stdin 源码运行编译与静态检查，并可输出 JSON 诊断；`velin run` 使用有界、仅供示例的行式宿主。参考宿主对 `say` 和 `ask` 提供行为，其他效果按名称和参数回显。
 
 ### LSP 与 VS Code
 
-`velin-lsp` 使用 stdio JSON-RPC，提供实时诊断、关键字/内置函数/变量/标签补全以及标签文档符号。它直接调用 `velin-lang` 和 `velin-check`，不维护第二套语言语义；文档查询借用已保存文本，诊断复用一次构建的行索引，未知请求返回标准 `MethodNotFound`。
+`velin-lsp` 使用 stdio JSON-RPC，提供可恢复的多错误诊断、补全、标签文档符号、悬停说明，以及标签定义/引用导航。它直接调用 `velin-lang` 和 `velin-check`，不维护第二套语言语义；未知请求返回标准 `MethodNotFound`。
 
-VS Code 扩展只负责 `.velin` 文件注册、TextMate 高亮和启动 LSP。
+VS Code 扩展负责 `.velin` 文件注册、TextMate 高亮和启动 LSP。各平台发布的 VSIX 内置对应原生服务器，也允许用显式配置覆盖。
 
 ### WebAssembly
 
-`velin-wasm` 暴露 `check(source)` 和 `run(source, replies_json)`。绑定层只处理有界字符串与 JSON；解析、检查和执行仍由门面 crate 完成。输出按剩余预算增量渲染，不先分配一份完整的中间字符串。
+`velin-wasm` 暴露 `check(source)` 和 `run(source, replies_json)`。绑定层只处理有界字符串与严格校验的 JSON；解析、检查和执行仍由门面 crate 完成。Playground 在可终止 Worker 中运行它，保证 UI 可响应。输出按剩余预算增量渲染，不先分配一份完整的中间字符串。
 
 `#[wasm_bindgen]` 会生成 `unsafe` 胶水，因此 wasm shim 无法继承 workspace 的 `unsafe_code = "forbid"`。所有手写 wasm 代码保持安全 Rust，核心 crate 继续执行 forbid 门禁。
 
 ## 11. 稳定性规则
 
-项目尚处于首次发布前，当前不承诺源码、序列化格式或 Rust API 的向后兼容；优先保持边界清晰和实现正确。稳定后，以下规则用于约束演进：
+项目处于预稳定的 `0.x` 阶段，当前不承诺源码、序列化格式或 Rust API 的向后兼容；优先保持边界清晰和实现正确。稳定后，以下规则用于约束演进：
 
 - `velin-eval` 是值语义参考实现；VM 变更必须通过差分测试。
 - 新的外部行为必须建模为宿主效果，不能直接加入 VM I/O。

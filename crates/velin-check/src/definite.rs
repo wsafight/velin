@@ -283,14 +283,11 @@ fn abstract_step(
                 AbstractValue::Boolean(Some(value)) if value == jump_on => {
                     next.push((*target as usize, stack));
                 }
-                AbstractValue::Boolean(Some(_)) => {
-                    stack.pop();
+                AbstractValue::Boolean(Some(_)) | AbstractValue::NonBoolean => {
                     next.push((pc + 1, stack));
                 }
-                AbstractValue::NonBoolean => {}
                 AbstractValue::Boolean(None) | AbstractValue::Unknown => {
                     next.push((*target as usize, stack.clone()));
-                    stack.pop();
                     next.push((pc + 1, stack));
                 }
             }

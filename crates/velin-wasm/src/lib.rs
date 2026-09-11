@@ -32,12 +32,21 @@ pub fn check(source: &str) -> String {
 /// Runs a `.velin` `source` against the scripted host and returns a JSON
 /// `RunResult`. `replies_json` is a JSON array of answers for `ask` effects,
 /// consumed in order (integers, `true`/`false`, or strings); pass `"[]"` for
-/// none. Malformed JSON is treated as an empty reply list.
+/// none. Malformed JSON or unsupported values return a failed `RunResult`
+/// without executing the script.
 #[wasm_bindgen]
 #[must_use]
 pub fn run(source: &str, replies_json: &str) -> String {
-    let replies = engine::parse_replies(replies_json);
-    to_json(&engine::run("playground.velin", source, replies))
+    let result = match engine::parse_replies(replies_json) {
+        Ok(replies) => engine::run("playground.velin", source, replies),
+        Err(error) => engine::RunResult {
+            ok: false,
+            diagnostics: Vec::new(),
+            output: Vec::new(),
+            error: Some(error.to_string()),
+        },
+    };
+    to_json(&result)
 }
 
 /// Serializes a result to JSON, falling back to a minimal error object so the
@@ -60,7 +69,15 @@ mod tests {
             "[1]",
         );
         assert!(replies.contains('1'), "{replies}");
-        let garbage = super::run("perform say(\"ok\")\n", "not-json");
-        assert!(garbage.contains("ok"), "{garbage}");
+        let garbage = super::run("perform say(\"must not run\")\n", "not-json");
+        assert!(garbage.contains("invalid replies JSON"), "{garbage}");
+        assert!(!garbage.contains("must not run"), "{garbage}");
+
+        let shifted = super::run(
+            "first = perform ask(\"first\")\nsecond = perform ask(\"second\")\n",
+            "[1, null, 2]",
+        );
+        assert!(shifted.contains("item 2"), "{shifted}");
+        assert!(!shifted.contains("first\""), "{shifted}");
     }
 }

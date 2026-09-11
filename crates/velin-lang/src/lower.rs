@@ -16,7 +16,7 @@
 //! before running.
 
 use crate::ast::Stmt;
-use crate::host::{CompiledScript, HostTable};
+use crate::host::{CompiledScript, HostCheckSite, HostTable};
 use crate::limits::MAX_STATEMENT_DEPTH;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -70,6 +70,7 @@ struct Lowerer {
     hosts: HostTable,
     defaults: BTreeMap<String, Value>,
     type_sites: Vec<TypeCheckSite>,
+    host_sites: Vec<HostCheckSite>,
     labels: BTreeMap<String, Pc>,
     /// `Op::Jump`s emitted before their target label's `Pc` was known, to
     /// back-patch once every label has been placed.
@@ -197,6 +198,12 @@ impl Lowerer {
             bind,
             line,
         });
+        self.host_sites.push(HostCheckSite {
+            host_id,
+            arguments: arguments.len(),
+            bind: bind.is_some(),
+            line,
+        });
         self.type_sites
             .extend(arguments.iter().cloned().map(|expression| TypeCheckSite {
                 pc: pc as usize,
@@ -307,6 +314,7 @@ impl Lowerer {
             labels: self.labels,
             defaults: self.defaults,
             type_sites: self.type_sites,
+            host_sites: self.host_sites,
         })
     }
 }

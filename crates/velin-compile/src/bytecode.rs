@@ -45,10 +45,11 @@ pub enum ExprOp {
     /// writing the deterministic RNG state in `state_slot`.
     Chance { state_slot: u32 },
     /// If the top of the stack is boolean `false`, leave it and jump to the
-    /// target op index; otherwise pop it and continue. Used for `and`.
+    /// target op index; otherwise leave it and continue. Used for `and`; the
+    /// fallthrough path evaluates the right operand and combines both values.
     JumpIfFalse(u32),
     /// If the top of the stack is boolean `true`, leave it and jump to the
-    /// target op index; otherwise pop it and continue. Used for `or`.
+    /// target op index; otherwise leave it and continue. Used for `or`.
     JumpIfTrue(u32),
     /// Require the top stack value to be boolean without consuming it.
     /// Emitted after the right operand of `and`/`or`, whose value becomes the

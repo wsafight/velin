@@ -146,6 +146,16 @@ test('Wasm Playground checks and runs the sample', async ({page}) => {
   await expect(page.locator('#output')).toContainText('40');
 });
 
+test('Playground rejects invalid replies without shifting later answers', async ({page}) => {
+  await page.goto(playground);
+  const run = page.getByRole('button', {name: 'Run'});
+  await expect(run).toBeEnabled({timeout: 30000});
+  await page.locator('#replies').fill('[1, null, 2]');
+  await run.click();
+  await expect(page.locator('#output')).toContainText('invalid replies: item 2');
+  await expect(page.locator('#output')).not.toContainText('You feel restored.');
+});
+
 test('Playground links to every main documentation area', async ({page}, testInfo) => {
   await page.goto(playground);
   await expect(page.getByRole('link', {name: 'Velin home'})).toHaveAttribute('href', '../');

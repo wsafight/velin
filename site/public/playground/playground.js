@@ -1,5 +1,3 @@
-import init, {check, run} from './pkg/velin_wasm.js';
-
 const SAMPLE = `default hp = 30
 
 choice = perform ask("Drink the potion?")
@@ -13,11 +11,14 @@ perform say("HP is now")
 perform say(hp)
 `;
 
+const ENGINE_TIMEOUT_MS = 5_000;
+
 const elements = {
   source: document.getElementById('source'),
   replies: document.getElementById('replies'),
   run: document.getElementById('run'),
   check: document.getElementById('check'),
+  stop: document.getElementById('stop'),
   language: document.getElementById('language'),
   theme: document.getElementById('theme'),
   menu: document.getElementById('mobile-menu'),
@@ -25,6 +26,82 @@ const elements = {
   diagnostics: document.getElementById('diagnostics'),
   output: document.getElementById('output'),
 };
+
+class EngineWorker {
+  constructor(url) {
+    this.url = url;
+    this.worker = null;
+    this.ready = null;
+    this.rejectReady = null;
+    this.pending = new Map();
+    this.nextId = 1;
+  }
+
+  start() {
+    if (this.ready) return this.ready;
+
+    const worker = new Worker(this.url, {type: 'module'});
+    this.worker = worker;
+    this.ready = new Promise((resolve, reject) => {
+      this.rejectReady = reject;
+      worker.addEventListener('message', event => {
+        if (worker !== this.worker) return;
+        const message = event.data;
+        if (message?.type === 'ready') {
+          this.rejectReady = null;
+          resolve();
+          return;
+        }
+        if (message?.type === 'init-error') {
+          this.reset(new Error(message.error));
+          return;
+        }
+        if (message?.type !== 'result' && message?.type !== 'error') return;
+        const request = this.pending.get(message.id);
+        if (!request) return;
+        clearTimeout(request.timer);
+        this.pending.delete(message.id);
+        if (message.type === 'result') request.resolve(message.result);
+        else request.reject(new Error(message.error));
+      });
+      worker.addEventListener('error', event => {
+        if (worker === this.worker) this.reset(new Error(event.message || 'Wasm worker failed'));
+      });
+    });
+    return this.ready;
+  }
+
+  async request(operation, payload) {
+    await this.start();
+    return new Promise((resolve, reject) => {
+      const id = this.nextId++;
+      const timer = setTimeout(() => {
+        this.reset(new Error(`${operation === 'run' ? 'Execution' : 'Check'} timed out after 5 seconds.`));
+      }, ENGINE_TIMEOUT_MS);
+      this.pending.set(id, {resolve, reject, timer});
+      this.worker.postMessage({type: 'request', id, operation, ...payload});
+    });
+  }
+
+  stop(message) {
+    this.reset(new Error(message));
+  }
+
+  reset(error) {
+    this.worker?.terminate();
+    this.worker = null;
+    this.ready = null;
+    this.rejectReady?.(error);
+    this.rejectReady = null;
+    for (const request of this.pending.values()) {
+      clearTimeout(request.timer);
+      request.reject(error);
+    }
+    this.pending.clear();
+  }
+}
+
+const engine = new EngineWorker(new URL('./worker.js', import.meta.url));
 
 function currentLang() {
   return document.documentElement.dataset.lang === 'zh' ? 'zh' : 'en';
@@ -69,34 +146,47 @@ function renderOutput(lines) {
   elements.output.dataset.empty = elements.output.textContent ? 'false' : 'true';
 }
 
-function busy(active) {
+function busy(active, stoppable = false) {
   elements.run.disabled = active;
   elements.check.disabled = active;
+  elements.stop.disabled = !stoppable;
   document.body.classList.toggle('is-busy', active);
 }
 
-function onCheck() {
-  busy(true);
+async function onCheck() {
+  busy(true, true);
   try {
-    const result = JSON.parse(check(elements.source.value));
+    const result = await engine.request('check', {source: elements.source.value});
     renderDiagnostics(result.diagnostics);
     renderOutput([]);
+  } catch (error) {
+    renderOutput([`Error: ${String(error.message || error)}`]);
   } finally {
     busy(false);
   }
 }
 
-function onRun() {
-  busy(true);
+async function onRun() {
+  busy(true, true);
   try {
-    const result = JSON.parse(run(elements.source.value, elements.replies.value));
+    const result = await engine.request('run', {
+      source: elements.source.value,
+      replies: elements.replies.value,
+    });
     renderDiagnostics(result.diagnostics);
     const lines = [...(result.output ?? [])];
     if (result.error) lines.push(`Error: ${result.error}`);
     renderOutput(lines);
+  } catch (error) {
+    renderOutput([`Error: ${String(error.message || error)}`]);
   } finally {
     busy(false);
   }
+}
+
+function onStop() {
+  const message = currentLang() === 'zh' ? '执行已停止。' : 'Execution stopped.';
+  engine.stop(message);
 }
 
 function showLoadError(error) {
@@ -134,7 +224,7 @@ async function main() {
   applyLang(currentLang(), false);
   busy(true);
   try {
-    await init();
+    await engine.start();
   } catch (error) {
     showLoadError(error);
     return;
@@ -142,6 +232,7 @@ async function main() {
   busy(false);
   elements.run.addEventListener('click', onRun);
   elements.check.addEventListener('click', onCheck);
+  elements.stop.addEventListener('click', onStop);
   onCheck();
 }
 

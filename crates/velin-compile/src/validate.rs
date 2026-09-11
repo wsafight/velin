@@ -227,7 +227,7 @@ fn validate_chunk(
         match op {
             ExprOp::JumpIfFalse(target) | ExprOp::JumpIfTrue(target) => {
                 pending.push_back((*target as usize, height));
-                pending.push_back((pc + 1, height - 1));
+                pending.push_back((pc + 1, height));
             }
             _ => pending.push_back((pc + 1, next_height(op, height))),
         }

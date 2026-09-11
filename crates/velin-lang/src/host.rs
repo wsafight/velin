@@ -11,7 +11,10 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
-use velin_check::{Environment, Type, TypeCheckSite, check_program_types, definite_assignment};
+use velin_check::{
+    Environment, HostSignature, HostSignatures, Type, TypeCheckSite, check_program_types,
+    check_program_types_with_hosts, definite_assignment,
+};
 use velin_compile::{Pc, Program};
 use velin_syntax::{Diagnostic, Value};
 
@@ -30,6 +33,65 @@ pub struct CompiledScript {
     /// Source expressions retained at their program counters for CFG-aware
     /// type propagation and precise diagnostics.
     pub(crate) type_sites: Vec<TypeCheckSite>,
+    pub(crate) host_sites: Vec<HostCheckSite>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct HostCheckSite {
+    pub host_id: u32,
+    pub arguments: usize,
+    pub bind: bool,
+    pub line: usize,
+}
+
+/// Host-owned command contracts used by static checking.
+#[derive(Debug, Clone, Default)]
+pub struct HostSchema {
+    commands: BTreeMap<String, HostSignature>,
+    allow_unknown: bool,
+}
+
+impl HostSchema {
+    /// Creates a strict schema that reports every undeclared command.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Controls whether commands absent from the schema remain valid opaque
+    /// effects. This is useful for reference tools that know only part of a
+    /// host application's vocabulary.
+    #[must_use]
+    pub const fn allow_unknown(mut self, allow: bool) -> Self {
+        self.allow_unknown = allow;
+        self
+    }
+
+    /// Adds or replaces a command contract.
+    #[must_use]
+    pub fn command(mut self, name: impl Into<String>, signature: HostSignature) -> Self {
+        self.commands.insert(name.into(), signature);
+        self
+    }
+
+    /// Adds or replaces a command contract, returning the previous contract.
+    pub fn insert(
+        &mut self,
+        name: impl Into<String>,
+        signature: HostSignature,
+    ) -> Option<HostSignature> {
+        self.commands.insert(name.into(), signature)
+    }
+
+    #[must_use]
+    pub fn get(&self, name: &str) -> Option<&HostSignature> {
+        self.commands.get(name)
+    }
+
+    #[must_use]
+    pub const fn allows_unknown(&self) -> bool {
+        self.allow_unknown
+    }
 }
 
 impl CompiledScript {
@@ -46,6 +108,16 @@ impl CompiledScript {
     /// are attributed to `file`.
     #[must_use]
     pub fn check(&self, file: &str) -> Vec<Diagnostic> {
+        self.check_inner(file, None)
+    }
+
+    /// Runs static checks with host-owned command contracts.
+    #[must_use]
+    pub fn check_with_host_schema(&self, file: &str, schema: &HostSchema) -> Vec<Diagnostic> {
+        self.check_inner(file, Some(schema))
+    }
+
+    fn check_inner(&self, file: &str, schema: Option<&HostSchema>) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
         let preset: BTreeSet<String> = self.defaults.keys().cloned().collect();
@@ -66,12 +138,64 @@ impl CompiledScript {
             .iter()
             .map(|(name, value)| (name.clone(), Type::from(value)))
             .collect();
-        diagnostics.extend(check_program_types(
-            &self.program,
-            &env,
-            &self.type_sites,
-            file,
-        ));
+        if let Some(schema) = schema {
+            let mut signatures = HostSignatures::new();
+            for (host_id, name) in self.hosts.iter().enumerate() {
+                if let (Ok(host_id), Some(signature)) = (u32::try_from(host_id), schema.get(name)) {
+                    signatures.insert(host_id, signature.clone());
+                }
+            }
+            diagnostics.extend(check_program_types_with_hosts(
+                &self.program,
+                &env,
+                &self.type_sites,
+                &signatures,
+                file,
+            ));
+            for site in &self.host_sites {
+                let name = self.host_name(site.host_id).unwrap_or("<unknown>");
+                match schema.get(name) {
+                    None if !schema.allow_unknown => diagnostics.push(Diagnostic::new(
+                        file,
+                        site.line,
+                        1,
+                        format!("host command `{name}` is not declared"),
+                    )),
+                    Some(signature) if !signature.accepts(site.arguments) => {
+                        let expected = if signature.is_variadic() {
+                            format!("at least {}", signature.minimum_arguments())
+                        } else {
+                            signature.minimum_arguments().to_string()
+                        };
+                        diagnostics.push(Diagnostic::new(
+                            file,
+                            site.line,
+                            1,
+                            format!(
+                                "host command `{name}` expects {expected} argument(s), found {}",
+                                site.arguments
+                            ),
+                        ));
+                    }
+                    Some(signature) if site.bind && signature.returns().is_none() => {
+                        diagnostics.push(Diagnostic::new(
+                            file,
+                            site.line,
+                            1,
+                            format!("host command `{name}` does not return a value"),
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        } else {
+            diagnostics.extend(check_program_types(
+                &self.program,
+                &env,
+                &self.type_sites,
+                file,
+            ));
+        }
 
         diagnostics
     }

@@ -1,0 +1,14 @@
+# Dependencies and generated bundles
+node_modules/
+dist/
+
+# Platform binaries are injected by the release workflow
+bin/
+
+# Local packages and test output
+*.vsix
+*.log
+coverage/
+.nyc_output/
+.vscode-test/
+.vsce/

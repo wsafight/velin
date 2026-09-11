@@ -1,11 +1,11 @@
 //! The LSP server: a synchronous request/notification loop over the stdio
 //! transport in [`crate::protocol`], backed by an in-memory document store.
 //!
-//! It advertises three capabilities — full-text sync (so it always has the
-//! current buffer), completion, and document symbols — and pushes diagnostics
-//! on every open/change. Every language decision is delegated to
-//! [`crate::analysis`]; this module only speaks JSON-RPC and converts between
-//! Velin's 1-based line/column diagnostics and LSP's 0-based positions.
+//! It advertises full-text sync, completion, document symbols, hover, and label
+//! navigation, and pushes diagnostics on every open/change. Every language
+//! decision is delegated to [`crate::analysis`]; this module only speaks
+//! JSON-RPC and converts between Velin's 1-based line/column diagnostics and
+//! LSP's 0-based positions.
 
 use crate::analysis::{self, CompletionKind};
 use crate::protocol::{read_message, write_message};
@@ -60,6 +60,9 @@ impl<W: Write> Server<W> {
             }
             "textDocument/completion" => self.completion(message),
             "textDocument/documentSymbol" => self.document_symbol(message),
+            "textDocument/hover" => self.hover(message),
+            "textDocument/definition" => self.definition(message),
+            "textDocument/references" => self.references(message),
             // Unknown notifications are ignored; requests receive the JSON-RPC
             // MethodNotFound error required by the protocol.
             _ if message.get("id").is_some() => {
@@ -152,6 +155,50 @@ impl<W: Write> Server<W> {
         self.respond(message, &Value::Array(symbols))
     }
 
+    fn hover(&mut self, message: &Value) -> std::io::Result<()> {
+        let result = self.document_for(message).and_then(|text| {
+            let (line, column) = request_position(message, text)?;
+            let lines: Vec<&str> = text.lines().collect();
+            let hover = analysis::hover(text, line, column)?;
+            Some(json!({
+                "contents": { "kind": "markdown", "value": hover.contents },
+                "range": lsp_source_range(hover.range, &lines),
+            }))
+        });
+        self.respond(message, &result.unwrap_or(Value::Null))
+    }
+
+    fn definition(&mut self, message: &Value) -> std::io::Result<()> {
+        let result = self.document_for(message).and_then(|text| {
+            let uri = document_uri(message)?;
+            let (line, column) = request_position(message, text)?;
+            let lines: Vec<&str> = text.lines().collect();
+            let range = analysis::label_definition(text, line, column)?;
+            Some(json!({ "uri": uri, "range": lsp_source_range(range, &lines) }))
+        });
+        self.respond(message, &result.unwrap_or(Value::Null))
+    }
+
+    fn references(&mut self, message: &Value) -> std::io::Result<()> {
+        let result = if let Some(text) = self.document_for(message) {
+            let uri = document_uri(message).unwrap_or_default();
+            let position = request_position(message, text);
+            let include_declaration = message["params"]["context"]["includeDeclaration"]
+                .as_bool()
+                .unwrap_or(true);
+            let lines: Vec<&str> = text.lines().collect();
+            position.map_or_else(Vec::new, |(line, column)| {
+                analysis::label_references(text, line, column, include_declaration)
+                    .into_iter()
+                    .map(|range| json!({ "uri": uri, "range": lsp_source_range(range, &lines) }))
+                    .collect()
+            })
+        } else {
+            Vec::new()
+        };
+        self.respond(message, &Value::Array(result))
+    }
+
     /// Runs diagnostics for `uri`'s current text and pushes them to the client.
     fn publish_diagnostics(&mut self, uri: &str) -> std::io::Result<()> {
         let Some(text) = self.documents.get(uri) else {
@@ -205,6 +252,9 @@ fn initialize_result() -> Value {
             "textDocumentSync": 1, // full document sync
             "completionProvider": { "triggerCharacters": [] },
             "documentSymbolProvider": true,
+            "hoverProvider": true,
+            "definitionProvider": true,
+            "referencesProvider": true,
         },
         "serverInfo": { "name": "velin-lsp", "version": env!("CARGO_PKG_VERSION") },
     })
@@ -254,6 +304,55 @@ fn line_range(line: usize, lines: &[&str]) -> Value {
     json!({
         "start": { "line": zero, "character": 0 },
         "end": { "line": zero, "character": width },
+    })
+}
+
+fn document_uri(message: &Value) -> Option<&str> {
+    message["params"]["textDocument"]
+        .get("uri")
+        .and_then(Value::as_str)
+}
+
+/// Converts an LSP UTF-16 position to Velin's 1-based Unicode-scalar position.
+fn request_position(message: &Value, text: &str) -> Option<(usize, usize)> {
+    let line = usize::try_from(message["params"]["position"]["line"].as_u64()?).ok()?;
+    let requested = usize::try_from(message["params"]["position"]["character"].as_u64()?).ok()?;
+    let source_line = text.lines().nth(line)?;
+    let mut utf16 = 0;
+    let mut scalars = 0;
+    for character in source_line.chars() {
+        if utf16 >= requested {
+            break;
+        }
+        let width = character.len_utf16();
+        if utf16 + width > requested {
+            break;
+        }
+        utf16 += width;
+        scalars += 1;
+    }
+    if requested > utf16 && utf16 == source_line.encode_utf16().count() {
+        return None;
+    }
+    Some((line + 1, scalars + 1))
+}
+
+fn lsp_source_range(range: analysis::SourceRange, lines: &[&str]) -> Value {
+    let line = range.line.saturating_sub(1);
+    let source_line = lines.get(line).copied().unwrap_or_default();
+    let start: usize = source_line
+        .chars()
+        .take(range.start_column.saturating_sub(1))
+        .map(char::len_utf16)
+        .sum();
+    let end: usize = source_line
+        .chars()
+        .take(range.end_column.saturating_sub(1))
+        .map(char::len_utf16)
+        .sum();
+    json!({
+        "start": { "line": line, "character": start },
+        "end": { "line": line, "character": end },
     })
 }
 
@@ -313,6 +412,11 @@ mod tests {
         let messages = parse_all(output);
         // First message answers initialize with capabilities.
         assert!(messages[0]["result"]["capabilities"]["completionProvider"].is_object());
+        assert_eq!(messages[0]["result"]["capabilities"]["hoverProvider"], true);
+        assert_eq!(
+            messages[0]["result"]["capabilities"]["definitionProvider"],
+            true
+        );
         // Second is a diagnostics push for the parse error.
         let diags = &messages[1]["params"]["diagnostics"];
         assert_eq!(messages[1]["method"], "textDocument/publishDiagnostics");
@@ -412,6 +516,66 @@ mod tests {
             .collect();
         assert_eq!(names, vec!["start", "done"]);
         assert_eq!(symbols["result"][0]["range"]["end"]["character"], 12);
+    }
+
+    #[test]
+    fn hover_definition_and_references_use_lsp_positions() {
+        let source = "label start:\n    jump start\n    set broken\n    jump start\n";
+        let mut input = stream(&[
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didOpen",
+                "params": { "textDocument": { "uri": "file:///nav.velin", "text": source } },
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///nav.velin" },
+                    "position": { "line": 1, "character": 9 },
+                },
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "textDocument/definition",
+                "params": {
+                    "textDocument": { "uri": "file:///nav.velin" },
+                    "position": { "line": 3, "character": 9 },
+                },
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 12,
+                "method": "textDocument/references",
+                "params": {
+                    "textDocument": { "uri": "file:///nav.velin" },
+                    "position": { "line": 0, "character": 6 },
+                    "context": { "includeDeclaration": false },
+                },
+            }),
+            json!({ "jsonrpc": "2.0", "method": "exit" }),
+        ]);
+        let mut output = Vec::new();
+        Server::new(&mut output).run(&mut input).unwrap();
+        let messages = parse_all(output);
+
+        let response = |id| {
+            messages
+                .iter()
+                .find(|message| message.get("id") == Some(&json!(id)))
+                .unwrap()
+        };
+        assert!(
+            response(10)["result"]["contents"]["value"]
+                .as_str()
+                .unwrap()
+                .contains("defined on line 1")
+        );
+        assert_eq!(response(11)["result"]["uri"], "file:///nav.velin");
+        assert_eq!(response(11)["result"]["range"]["start"]["line"], 0);
+        assert_eq!(response(12)["result"].as_array().unwrap().len(), 2);
     }
 
     #[test]

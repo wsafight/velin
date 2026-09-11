@@ -27,14 +27,15 @@ Buttons:
 
 - **Run** checks, then executes. Errors in the checker skip execution.
 - **Check only** compiles and analyses without running.
+- **Stop** terminates the current Worker request. The next action starts a fresh Worker.
 
-The `ask` replies field is a JSON array consumed in order. The sample drinks the potion when the field is `[1]`. Use `[0]` to take the other branch. Strings and booleans are also valid entries: `["east"]`, `[true]`.
+The `ask` replies field is a JSON array consumed in order. The sample drinks the potion when the field is `[1]`. Use `[0]` to take the other branch. Strings and booleans are also valid entries: `["east"]`, `[true]`. Malformed JSON or one unsupported item rejects the entire list, so later answers cannot shift to the wrong `ask`.
 
 Language follows the site (`?lang=zh` or the header toggle). Theme follows `velin-theme` in `localStorage`.
 
 ## Limits in the browser
 
-A run stops after 1,000 host effects or 1 MiB of output. Reply JSON is capped at 1 MiB. Immediate VM steps stay at 10,000 between yields. See [Resource limits](LIMITS.md) and [WebAssembly](WASM.md).
+A run stops after 1,000 host effects, 1 MiB of output, or 5 seconds in the page Worker. Reply JSON is capped at 1 MiB. Immediate VM steps stay at 10,000 between yields. See [Resource limits](LIMITS.md) and [WebAssembly](WASM.md).
 
 ## Local copy
 

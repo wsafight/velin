@@ -24,9 +24,13 @@
 | 一棵值树的节点 | 4,096 |
 | 集合嵌套 | 16 层 |
 | 一棵值树中的文本 | 1 MiB |
+| 一台 Machine 保留的值 | 100,000 |
+| 一台 Machine 保留的文本 | 16 MiB |
+| 一次宿主载荷中的值 | 100,000 |
+| 一次宿主载荷中的文本 | 16 MiB |
 | `list(...)` 的参数 | 128 |
 
-经 `set_variable` 或 `resume` 传入的每个值都按同一预算检查。
+经 `set_variable` 或 `resume` 传入的每个值都按同一单值预算检查。VM 还会统计整个 frame 和每次产出的宿主载荷；结构共享的值按逻辑大小计数，因此上限不依赖具体分配方式。
 
 ## 字节码与 VM
 
@@ -51,8 +55,9 @@
 | 工具 | 上限 |
 | --- | --- |
 | CLI / Playground 输出 | 1 MiB |
-| Playground 宿主效果 | 1,000 |
+| CLI / Playground 宿主效果 | 1,000 |
 | Playground 回复 JSON | 1 MiB |
+| Playground Worker 请求 | 5 秒 |
 | LSP JSON-RPC 正文 | 4 MiB |
 | LSP 头 | 合计 64 KiB，每行 8 KiB |
 

@@ -24,9 +24,13 @@ Tabs are rejected. Indentation is exactly four spaces per level.
 | Nodes in one value tree | 4,096 |
 | Collection nesting | 16 levels |
 | Text in one value tree | 1 MiB |
+| Values retained by one machine | 100,000 |
+| Text retained by one machine | 16 MiB |
+| Values in one host payload | 100,000 |
+| Text in one host payload | 16 MiB |
 | Arguments to `list(...)` | 128 |
 
-Every value passed into `set_variable` or `resume` is checked against the same budget.
+Every value passed into `set_variable` or `resume` is checked against the same per-value budget. The VM also accounts for the complete frame and each yielded host payload, counting structurally shared values by logical size so limits do not depend on allocation details.
 
 ## Bytecode and the VM
 
@@ -51,8 +55,9 @@ These are not language semantics. They apply to specific tools:
 | Tool | Cap |
 | --- | --- |
 | CLI / Playground output | 1 MiB |
-| Playground host effects | 1,000 |
+| CLI / Playground host effects | 1,000 |
 | Playground reply JSON | 1 MiB |
+| Playground Worker request | 5 seconds |
 | LSP JSON-RPC body | 4 MiB |
 | LSP headers | 64 KiB total, 8 KiB per line |
 

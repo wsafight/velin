@@ -3,7 +3,10 @@
 //! toy host — the full parse → lower → check → run path an embedder uses.
 
 use std::collections::BTreeMap;
-use velin::{Machine, Value, Yield, check_script, compile};
+use velin::{
+    HostSchema, HostSignature, Machine, Type, Value, Yield, check_script,
+    check_script_with_host_schema, compile,
+};
 
 /// A tiny host that records every effect and answers `ask` effects from a fixed
 /// script of replies keyed by call order.
@@ -223,4 +226,65 @@ fn surface_random_calls_are_seeded_and_pass_static_checks() {
     assert_eq!(first.variable("hit"), Some(&Value::Boolean(true)));
     assert_eq!(first.variable("miss"), Some(&Value::Boolean(false)));
     assert_eq!(first.rng_state(), replay.rng_state());
+}
+
+#[test]
+fn host_schema_checks_names_arity_arguments_bindings_and_return_flow() {
+    let schema = HostSchema::new()
+        .command(
+            "ask_number",
+            HostSignature::exact(vec![Type::String], Some(Type::Integer)),
+        )
+        .command(
+            "say",
+            HostSignature::variadic(Vec::new(), Type::Unknown, None),
+        );
+    let script = compile(
+        "host.velin",
+        "answer = perform ask_number(1, 2)\n\
+         set bad = answer + \"x\"\n\
+         captured = perform say(\"hello\")\n\
+         perform missing()\n",
+    )
+    .unwrap();
+    assert!(check_script("host.velin", &script).is_empty());
+
+    let diagnostics = check_script_with_host_schema("host.velin", &script, &schema);
+    let messages: Vec<&str> = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("expects 1 argument"))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("host argument 1 expects string"))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("cannot combine"))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("does not return"))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("not declared"))
+    );
+
+    let permissive = schema.clone().allow_unknown(true);
+    let diagnostics = check_script_with_host_schema("host.velin", &script, &permissive);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("not declared"))
+    );
 }

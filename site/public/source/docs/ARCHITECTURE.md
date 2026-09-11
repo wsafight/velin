@@ -141,7 +141,7 @@ Const / Load
 Unary / Binary
 Call
 Random / Chance
-JumpIfFalse / JumpIfTrue / AssertBoolean
+JumpIfFalse / JumpIfTrue
 Concat
 ```
 
@@ -217,7 +217,7 @@ Current built-in limits:
 | Value | 4,096 nodes, 16 collection levels, and 1 MiB of text per value tree |
 | Program bytecode | 100,000 control-flow ops, 100,000 chunks, 65,536 slots, 100,000 constant-value nodes, and 16 MiB of constant/slot text |
 | Expression bytecode | 4,096 ops and stack height 1,024 per chunk; 128 arguments per host instruction |
-| Tooling | 1 MiB CLI/Playground output; 1,000 Playground host effects and 1 MiB reply JSON; 4 MiB LSP JSON body, 64 KiB headers, and 8 KiB per header line |
+| Tooling | 1 MiB CLI/Playground output; 1,000 CLI/Playground host effects; 1 MiB Playground reply JSON and 5-second Worker request; 4 MiB LSP JSON body, 64 KiB headers, and 8 KiB per header line |
 
 CLI, WebAssembly, and other hosts should add time, effect permission, and external resource limits appropriate to their own risk models. Those are host-layer concerns and cannot be unified by the language core.
 
@@ -225,23 +225,23 @@ CLI, WebAssembly, and other hosts should add time, effect permission, and extern
 
 ### CLI
 
-`velin check` compiles and statically checks a script. `velin run` uses a line-oriented reference host intended only for examples. That host implements `say` and `ask`; other effects are printed by name and arguments.
+`velin check` compiles and statically checks a file or stdin source, with optional JSON diagnostics. `velin run` uses a bounded line-oriented reference host intended only for examples. That host implements `say` and `ask`; other effects are printed by name and arguments.
 
 ### LSP and VS Code
 
-`velin-lsp` speaks JSON-RPC over stdio and provides live diagnostics, keyword/built-in/variable/label completion, and label document symbols. It directly calls `velin-lang` and `velin-check` instead of maintaining a second set of language semantics. Document queries borrow saved text, diagnostics reuse one constructed line index, and unknown requests return the standard `MethodNotFound` response.
+`velin-lsp` speaks JSON-RPC over stdio and provides recovering multi-error diagnostics, completion, label document symbols, hover, and label definition/reference navigation. It directly calls `velin-lang` and `velin-check` instead of maintaining a second set of language semantics. Unknown requests return the standard `MethodNotFound` response.
 
-The VS Code extension only registers `.velin` files, provides TextMate highlighting, and launches the LSP.
+The VS Code extension registers `.velin` files, provides TextMate highlighting, and launches the LSP. Platform release VSIX packages bundle the matching native server; explicit configuration can override it.
 
 ### WebAssembly
 
-`velin-wasm` exposes `check(source)` and `run(source, replies_json)`. The binding layer only handles bounded strings and JSON; the facade crate still performs parsing, checking, and execution. Output is rendered incrementally against the remaining budget without allocating a complete intermediate string.
+`velin-wasm` exposes `check(source)` and `run(source, replies_json)`. The binding layer only handles bounded strings and strictly validated JSON; the facade crate still performs parsing, checking, and execution. The Playground runs it in a terminable Worker so the UI remains responsive. Output is rendered incrementally against the remaining budget without allocating a complete intermediate string.
 
 `#[wasm_bindgen]` generates `unsafe` glue, so the Wasm shim cannot inherit the workspace's `unsafe_code = "forbid"`. All handwritten Wasm code remains safe Rust, and core crates retain the prohibition.
 
 ## 11. Stability rules
 
-The project is still before its first release and currently makes no backward-compatibility promise for source syntax, serialization formats, or Rust APIs. Clear boundaries and correctness take priority. Once stabilized, these rules constrain evolution:
+The project is in its pre-stable `0.x` line and currently makes no backward-compatibility promise for source syntax, serialization formats, or Rust APIs. Clear boundaries and correctness take priority. Once stabilized, these rules constrain evolution:
 
 - `velin-eval` is the reference value semantics; VM changes must pass differential tests.
 - New external behavior must be modeled as a host effect, never direct VM I/O.
@@ -260,4 +260,4 @@ cargo clippy --all-targets --workspace -- -D warnings
 cargo build --workspace --target wasm32-unknown-unknown
 ```
 
-Benchmarks are used only to detect relative regressions, not as a pre-release compatibility promise.
+Benchmarks are used only to detect relative regressions, not as a pre-stable compatibility promise.

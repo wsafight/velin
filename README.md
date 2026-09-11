@@ -30,6 +30,8 @@ The name comes from the French *velin* (vellum): scripts write down the rules; t
 - [Architecture](docs/ARCHITECTURE.md) explains crate boundaries, bytecode validation, static analysis, and resource budgets.
 - [Static checking](docs/CHECKING.md) explains types, `Unknown`, and definite assignment.
 - [Resource limits](docs/LIMITS.md) lists every published budget.
+- [Changelog](CHANGELOG.md) records release-level changes.
+- [Security policy](SECURITY.md) explains supported versions and private reporting.
 
 ## Workspace
 
@@ -87,8 +89,8 @@ cargo run -p velin-cli -- run examples/counting.velin
 echo 1 | cargo run -p velin-cli -- run examples/adventure.velin
 ```
 
-- `velin check <file>` compiles a file and prints every diagnostic; only errors produce exit code 1.
-- `velin run <file>` executes a checked script with the line-oriented reference host; `say` prints text and `ask` reads one value from stdin.
+- `velin check [--json] <file|->` compiles source and prints text or structured diagnostics; only errors produce exit code 1.
+- `velin run <file|->` executes a checked script with the line-oriented reference host; `say` prints text and `ask` reads one value from stdin.
 
 ## Embed in Rust
 
@@ -148,7 +150,7 @@ Built-ins are `list`, `record`, `get`, `put`, `push`, `remove`, `len`, `contains
 - A source file is limited to 1 MiB, 10,000 physical lines, and 64 nested statement blocks.
 - An expression is limited to 64 KiB, 512 tokens, 32 parenthesis levels, and 32 interpolation levels; nested interpolation shares cumulative work and token budgets.
 - A value is limited to 4,096 nodes, 16 collection levels, and 1 MiB of text. `Program` has additional budgets for operations, chunks, slots, constants, text, stack height, and host arguments.
-- The VM executes at most 10,000 immediate steps before yielding. CLI and Playground output is capped at 1 MiB; the Playground accepts at most 1,000 host effects and 1 MiB of reply JSON.
+- The VM executes at most 10,000 immediate steps before yielding. CLI and Playground runs accept at most 1,000 host effects and 1 MiB of output; the Playground additionally limits reply JSON to 1 MiB and worker execution to 5 seconds.
 - The LSP limits one JSON-RPC message to 4 MiB, the entire header to 64 KiB, and one header line to 8 KiB.
 
 ## Browser Playground

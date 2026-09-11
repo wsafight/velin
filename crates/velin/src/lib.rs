@@ -37,6 +37,7 @@
 //!   bytecode.
 //! * [`evaluate`] — the reference tree-walking evaluator.
 //! * [`Machine`] — the bytecode VM with host-effect yielding.
+//! * [`ScriptRunner`] — checked script instantiation and bounded host driving.
 //!
 //! # Example: compile and run a `.velin` script
 //!
@@ -110,14 +111,24 @@ pub use velin_compile::{
     compile_expression,
 };
 
-pub use velin_vm::{DEFAULT_RNG_SEED, MAX_IMMEDIATE_STEPS, Machine, Yield};
+pub use velin_vm::{
+    DEFAULT_RNG_SEED, MAX_HOST_PAYLOAD_TEXT_BYTES, MAX_HOST_PAYLOAD_VALUES, MAX_IMMEDIATE_STEPS,
+    MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES, Machine, SetVariableError, Yield,
+};
+
+pub use runtime::{
+    DEFAULT_MAX_HOST_EFFECTS, ExecutionLimits, ScriptRunError, ScriptRunner, ScriptYield,
+};
 
 pub use velin_check::{
-    Environment, Type, TypeCheckKind, TypeCheckSite, TypeError, UnassignedUse, check_condition,
-    check_expression, check_program_types, definite_assignment, infer,
+    Environment, HostSignature, HostSignatures, Type, TypeCheckKind, TypeCheckSite, TypeError,
+    UnassignedUse, check_condition, check_expression, check_program_types,
+    check_program_types_with_hosts, definite_assignment, infer,
 };
 
 pub use velin_lang::{
-    CompiledScript, Condition, LowerError, MAX_SOURCE_BYTES, MAX_SOURCE_LINES, MAX_STATEMENT_DEPTH,
-    ParseError, Stmt, check_script, compile, parse_program,
+    CompiledScript, Condition, HostSchema, LowerError, MAX_SOURCE_BYTES, MAX_SOURCE_LINES,
+    MAX_STATEMENT_DEPTH, ParseError, RecoveredProgram, Stmt, check_script,
+    check_script_with_host_schema, compile, parse_program, parse_program_recovering,
 };
+mod runtime;

@@ -118,11 +118,12 @@ main {width: min(calc(100% - (var(--page-gutter) * 2)), 1280px); margin-inline: 
 .panel-heading > span {color: var(--page-muted); font: 11px var(--mono);}
 textarea {display: block; width: 100%; min-height: 0; resize: none; padding: 23px; border: 0; border-radius: 0; background: var(--carbon); color: #d7d2c8; font: 14px/1.65 var(--mono); tab-size: 4;}
 textarea:focus {outline: 0; box-shadow: inset 0 0 0 2px var(--signal);}
-.controls {display: grid; grid-template-columns: auto auto minmax(190px, 1fr); align-items: center; gap: 8px; min-height: 64px; padding: 10px 13px; border-top: 1px solid var(--page-line);}
+.controls {display: grid; grid-template-columns: auto auto auto minmax(190px, 1fr); align-items: center; gap: 8px; min-height: 64px; padding: 10px 13px; border-top: 1px solid var(--page-line);}
 .controls button {height: 40px; padding: 0 15px; border: 1px solid var(--page-line); border-radius: 8px; background: var(--page-raised); color: var(--page-fg); font-size: 13px; font-weight: 560;}
 .controls button.primary {border-color: var(--signal); background: var(--signal); color: #111;}
 .controls button:hover {border-color: var(--signal);}
-.controls button:disabled {cursor: progress; opacity: .55;}
+.controls button:disabled {cursor: not-allowed; opacity: .55;}
+.is-busy .controls #run:disabled, .is-busy .controls #check:disabled {cursor: progress;}
 .replies {display: flex; align-items: center; justify-content: flex-end; gap: 9px; color: var(--page-muted); font-size: 11px;}
 .replies code {color: var(--page-fg); font-family: var(--mono);}
 .replies input {width: 105px; height: 36px; padding: 0 9px; border: 1px solid var(--page-line); border-radius: 6px; background: var(--page-bg); color: var(--page-fg); font: 12px var(--mono);}
