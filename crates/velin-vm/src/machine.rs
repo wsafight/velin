@@ -9,7 +9,7 @@
 
 use crate::chunk::eval_validated_chunk;
 use std::sync::Arc;
-use velin_compile::{Op, Program, ProgramValidationError};
+use velin_compile::{Op, Program, ProgramValidationError, ValidatedProgram};
 use velin_eval::EvalError;
 use velin_syntax::{DataFootprint, Value};
 
@@ -104,8 +104,23 @@ impl Machine {
         program: impl Into<Arc<Program>>,
         seed: i64,
     ) -> Result<Self, ProgramValidationError> {
-        let program = program.into();
-        program.validate()?;
+        let program = ValidatedProgram::new(program)?;
+        Ok(Self::from_validated_with_seed(&program, seed))
+    }
+
+    /// Creates a machine from a program that has already passed validation.
+    #[must_use]
+    pub fn from_validated(program: &ValidatedProgram) -> Self {
+        Self::from_validated_with_seed(program, DEFAULT_RNG_SEED)
+    }
+
+    /// Creates a seeded machine without rescanning already validated bytecode.
+    #[must_use]
+    pub fn from_validated_with_seed(program: &ValidatedProgram, seed: i64) -> Self {
+        Self::initialize(program.shared(), seed)
+    }
+
+    fn initialize(program: Arc<Program>, seed: i64) -> Self {
         let width = program.slots.len();
         let mut frame = vec![None; width];
         let mut frame_slots = vec![DataFootprint::default(); width];
@@ -118,7 +133,7 @@ impl Machine {
             };
             frame_total.values = 1;
         }
-        Ok(Self {
+        Self {
             program,
             frame,
             frame_slots,
@@ -126,7 +141,7 @@ impl Machine {
             pc: 0,
             pending_host: None,
             finished: false,
-        })
+        }
     }
 
     /// Returns the immutable bytecode shared by this machine and its snapshots.

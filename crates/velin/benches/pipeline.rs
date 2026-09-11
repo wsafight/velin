@@ -33,19 +33,23 @@ fn bench_check(c: &mut Criterion) {
 }
 
 fn bench_check_wide_script(c: &mut Criterion) {
-    const VARIABLES: usize = 512;
-    let mut source = String::new();
-    for index in 0..VARIABLES {
-        writeln!(source, "default value_{index} = 0").expect("writing to a string cannot fail");
-    }
-    for index in 0..VARIABLES {
-        writeln!(source, "set value_{index} = value_{index} + 1")
-            .expect("writing to a string cannot fail");
-    }
+    let source = wide_linear_source(512);
     let script = compile("bench.velin", &source).unwrap();
     c.bench_function("check/wide_linear_script", |b| {
         b.iter(|| check_script("bench.velin", black_box(&script)));
     });
+}
+
+fn wide_linear_source(variables: usize) -> String {
+    let mut source = String::new();
+    for index in 0..variables {
+        writeln!(source, "default value_{index} = 0").expect("writing to a string cannot fail");
+    }
+    for index in 0..variables {
+        writeln!(source, "set value_{index} = value_{index} + 1")
+            .expect("writing to a string cannot fail");
+    }
+    source
 }
 
 fn bench_compile(c: &mut Criterion) {
@@ -76,6 +80,19 @@ fn bench_growing_list(c: &mut Criterion) {
             black_box(runner.run().unwrap())
         });
     });
+}
+
+fn bench_machine_creation(c: &mut Criterion) {
+    let source = wide_linear_source(512);
+    let script = compile("bench.velin", &source).unwrap();
+    let mut group = c.benchmark_group("machine/create_wide");
+    group.bench_function("validate", |b| {
+        b.iter(|| Machine::new(black_box(script.program.clone())).unwrap());
+    });
+    group.bench_function("reuse_validation", |b| {
+        b.iter(|| Machine::from_validated(black_box(script.validated_program())));
+    });
+    group.finish();
 }
 
 fn bench_eval_tree(c: &mut Criterion) {
@@ -161,6 +178,7 @@ criterion_group!(
     bench_check_wide_script,
     bench_compile,
     bench_growing_list,
+    bench_machine_creation,
     bench_eval_tree,
     bench_vm_run
 );

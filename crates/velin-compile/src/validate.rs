@@ -2,7 +2,8 @@
 
 use crate::{ExprChunk, ExprOp, Op, Program};
 use std::collections::VecDeque;
-use velin_syntax::{BinaryOp, Value};
+use std::sync::Arc;
+use velin_syntax::BinaryOp;
 
 /// Maximum number of control-flow instructions in an executable program.
 pub const MAX_PROGRAM_OPS: usize = 100_000;
@@ -42,6 +43,44 @@ impl std::fmt::Display for ProgramValidationError {
 }
 
 impl std::error::Error for ProgramValidationError {}
+
+/// An immutable shared program that has passed full structural and budget
+/// validation.
+#[derive(Debug, Clone)]
+pub struct ValidatedProgram {
+    program: Arc<Program>,
+}
+
+impl ValidatedProgram {
+    /// Validates `program` and retains an immutable shared reference.
+    ///
+    /// # Errors
+    /// Returns the same errors as [`Program::validate`].
+    pub fn new(program: impl Into<Arc<Program>>) -> Result<Self, ProgramValidationError> {
+        let program = program.into();
+        program.validate()?;
+        Ok(Self { program })
+    }
+
+    /// Returns the validated program.
+    #[must_use]
+    pub fn program(&self) -> &Program {
+        &self.program
+    }
+
+    /// Clones the immutable program reference while this validation proof
+    /// remains alive.
+    #[must_use]
+    pub fn shared(&self) -> Arc<Program> {
+        self.program.clone()
+    }
+
+    /// Returns whether `program` is the allocation covered by this proof.
+    #[must_use]
+    pub fn refers_to(&self, program: &Arc<Program>) -> bool {
+        Arc::ptr_eq(&self.program, program)
+    }
+}
 
 impl Program {
     /// Verifies every index, expression stack path, jump and bytecode budget.
@@ -177,17 +216,16 @@ fn validate_chunk(
     let mut constant_values = 0usize;
     let mut text_bytes = 0usize;
     for value in &chunk.constants {
-        value.validate_data().map_err(|message| {
+        let footprint = value.data_footprint().map_err(|message| {
             ProgramValidationError::new(format!(
                 "expression chunk {id} has an invalid constant: {message}"
             ))
         })?;
-        let (values, bytes) = data_usage(value)?;
         constant_values = constant_values
-            .checked_add(values)
+            .checked_add(footprint.values)
             .ok_or_else(|| ProgramValidationError::new("constant value budget overflow"))?;
         text_bytes = text_bytes
-            .checked_add(bytes)
+            .checked_add(footprint.text_bytes)
             .ok_or_else(|| ProgramValidationError::new("program text budget overflow"))?;
     }
 
@@ -306,39 +344,11 @@ fn check_limit(subject: &str, actual: usize, limit: usize) -> Result<(), Program
     Ok(())
 }
 
-fn data_usage(value: &Value) -> Result<(usize, usize), ProgramValidationError> {
-    let mut pending = vec![value];
-    let mut values = 0usize;
-    let mut bytes = 0usize;
-    while let Some(value) = pending.pop() {
-        values = values
-            .checked_add(1)
-            .ok_or_else(|| ProgramValidationError::new("constant value budget overflow"))?;
-        match value {
-            Value::String(text) => {
-                bytes = bytes
-                    .checked_add(text.len())
-                    .ok_or_else(|| ProgramValidationError::new("program text budget overflow"))?;
-            }
-            Value::List(items) => pending.extend(items.iter()),
-            Value::Record(fields) => {
-                for (key, value) in fields.iter() {
-                    bytes = bytes.checked_add(key.len()).ok_or_else(|| {
-                        ProgramValidationError::new("program text budget overflow")
-                    })?;
-                    pending.push(value);
-                }
-            }
-            Value::Integer(_) | Value::Boolean(_) => {}
-        }
-    }
-    Ok((values, bytes))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::SlotTable;
+    use velin_syntax::Value;
 
     fn program(chunk: ExprChunk) -> Program {
         Program {
@@ -435,5 +445,23 @@ mod tests {
             line: 1,
         };
         assert!(oversized.validate(0).is_err());
+    }
+
+    #[test]
+    fn validated_program_requires_a_valid_program_and_keeps_it_shared() {
+        let valid = Arc::new(program(ExprChunk {
+            ops: vec![ExprOp::Const(0)],
+            constants: vec![Value::Integer(1)],
+            line: 1,
+        }));
+        let validated = ValidatedProgram::new(valid.clone()).unwrap();
+        assert!(Arc::ptr_eq(&valid, &validated.shared()));
+
+        let invalid = Program {
+            ops: vec![Op::Jump(2)],
+            chunks: Vec::new(),
+            slots: SlotTable::new(),
+        };
+        assert!(ValidatedProgram::new(invalid).is_err());
     }
 }

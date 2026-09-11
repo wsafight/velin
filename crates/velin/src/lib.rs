@@ -108,7 +108,7 @@ pub use velin_eval::{EvalError, Variables, evaluate, evaluate_with_rng};
 
 pub use velin_compile::{
     ChunkId, ExprChunk, ExprOp, Op, Pc, Program, ProgramBuilder, ProgramValidationError, SlotTable,
-    compile_expression,
+    ValidatedProgram, compile_expression,
 };
 
 pub use velin_vm::{

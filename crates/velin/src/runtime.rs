@@ -124,8 +124,11 @@ impl<'a> ScriptRunner<'a> {
         limits: ExecutionLimits,
         schema: Option<&'a HostSchema>,
     ) -> Result<Self, ScriptRunError> {
-        let mut machine =
-            Machine::with_seed(script.program.clone(), seed).map_err(ScriptRunError::Program)?;
+        let mut machine = if script.validated_program().refers_to(&script.program) {
+            Machine::from_validated_with_seed(script.validated_program(), seed)
+        } else {
+            Machine::with_seed(script.program.clone(), seed).map_err(ScriptRunError::Program)?
+        };
         for (name, value) in &script.defaults {
             machine
                 .try_set_variable(name, value.clone())
@@ -281,7 +284,8 @@ impl<'a> ScriptRunner<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{HostSignature, compile};
+    use crate::{HostSignature, Op, Program, SlotTable, compile};
+    use std::sync::Arc;
 
     #[test]
     fn initializes_defaults_resolves_names_and_counts_effects() {
@@ -350,5 +354,19 @@ mod tests {
             runner.machine().variable("answer"),
             Some(&Value::Integer(7))
         );
+    }
+
+    #[test]
+    fn replacing_the_public_program_invalidates_the_cached_proof() {
+        let mut script = compile("runner.velin", "set value = 1\n").unwrap();
+        script.program = Arc::new(Program {
+            ops: vec![Op::Jump(2)],
+            chunks: Vec::new(),
+            slots: SlotTable::new(),
+        });
+        assert!(matches!(
+            ScriptRunner::new(&script),
+            Err(ScriptRunError::Program(_))
+        ));
     }
 }

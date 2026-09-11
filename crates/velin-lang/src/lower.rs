@@ -21,7 +21,7 @@ use crate::limits::MAX_STATEMENT_DEPTH;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use velin_check::{TypeCheckKind, TypeCheckSite};
-use velin_compile::{Op, Pc, ProgramBuilder};
+use velin_compile::{Op, Pc, ProgramBuilder, ValidatedProgram};
 use velin_eval::{Variables, evaluate};
 use velin_syntax::{Diagnostic, Expr, Value};
 
@@ -308,8 +308,13 @@ impl Lowerer {
             })?;
             self.builder.patch(jump.pc, Op::Jump(target));
         }
+        let program = Arc::new(self.builder.build());
+        let validated_program = ValidatedProgram::new(program.clone()).map_err(|error| {
+            LowerError::new(1, format!("compiled program failed validation: {error}"))
+        })?;
         Ok(CompiledScript {
-            program: Arc::new(self.builder.build()),
+            program,
+            validated_program,
             hosts: self.hosts.into_names(),
             labels: self.labels,
             defaults: self.defaults,

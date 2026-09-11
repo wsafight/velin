@@ -28,5 +28,5 @@ pub use slots::{RNG_STATE_SLOT, SlotTable};
 pub use validate::{
     MAX_EXPR_OPS, MAX_EXPR_STACK, MAX_HOST_ARGUMENTS, MAX_PROGRAM_CHUNKS,
     MAX_PROGRAM_CONSTANT_VALUES, MAX_PROGRAM_OPS, MAX_PROGRAM_SLOTS, MAX_PROGRAM_TEXT_BYTES,
-    ProgramValidationError,
+    ProgramValidationError, ValidatedProgram,
 };

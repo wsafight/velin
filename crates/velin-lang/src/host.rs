@@ -15,7 +15,7 @@ use velin_check::{
     Environment, HostSignature, HostSignatures, Type, TypeCheckSite, check_program_types,
     check_program_types_with_hosts, definite_assignment,
 };
-use velin_compile::{Pc, Program};
+use velin_compile::{Pc, Program, ValidatedProgram};
 use velin_syntax::{Diagnostic, Value};
 
 /// A parsed, lowered, runnable script.
@@ -23,6 +23,7 @@ use velin_syntax::{Diagnostic, Value};
 pub struct CompiledScript {
     /// The bytecode program; feed directly to `velin_vm::Machine::new`.
     pub program: Arc<Program>,
+    pub(crate) validated_program: ValidatedProgram,
     /// `host_id → command name`; index `i` is the name of host command `i`.
     pub hosts: Vec<String>,
     /// `label name → program-counter target`, for host-driven external jumps.
@@ -95,6 +96,12 @@ impl HostSchema {
 }
 
 impl CompiledScript {
+    /// Returns the validation proof shared by fast machine constructors.
+    #[must_use]
+    pub const fn validated_program(&self) -> &ValidatedProgram {
+        &self.validated_program
+    }
+
     /// Returns the command name a `host_id` was interned from.
     #[must_use]
     pub fn host_name(&self, host_id: u32) -> Option<&str> {
