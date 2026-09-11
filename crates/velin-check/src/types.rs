@@ -86,10 +86,22 @@ pub type Environment = BTreeMap<String, Type>;
 /// `errors`. Always returns a best-effort type (possibly [`Type::Unknown`]) so
 /// checking can continue past an error without cascading false positives.
 pub fn infer(expression: &Expr, env: &Environment, errors: &mut Vec<TypeError>) -> Type {
+    infer_with(
+        expression,
+        &|name| env.get(name).copied().unwrap_or(Type::Unknown),
+        errors,
+    )
+}
+
+pub(crate) fn infer_with(
+    expression: &Expr,
+    variable_type: &impl Fn(&str) -> Type,
+    errors: &mut Vec<TypeError>,
+) -> Type {
     match expression {
         Expr::Spanned { span, expression } => {
             let first_error = errors.len();
-            let inferred = infer(expression, env, errors);
+            let inferred = infer_with(expression, variable_type, errors);
             for error in &mut errors[first_error..] {
                 if error.span.is_none() {
                     error.span = Some(span.clone());
@@ -98,9 +110,9 @@ pub fn infer(expression: &Expr, env: &Environment, errors: &mut Vec<TypeError>) 
             inferred
         }
         Expr::Value(value) => Type::from(value),
-        Expr::Variable(name) => env.get(name).copied().unwrap_or(Type::Unknown),
+        Expr::Variable(name) => variable_type(name),
         Expr::Unary { op, value } => {
-            let inner = infer(value, env, errors);
+            let inner = infer_with(value, variable_type, errors);
             match op {
                 UnaryOp::Negate => {
                     expect(inner, Type::Integer, "unary `-`", errors);
@@ -113,8 +125,8 @@ pub fn infer(expression: &Expr, env: &Environment, errors: &mut Vec<TypeError>) 
             }
         }
         Expr::Binary { left, op, right } => {
-            let l = infer(left, env, errors);
-            let r = infer(right, env, errors);
+            let l = infer_with(left, variable_type, errors);
+            let r = infer_with(right, variable_type, errors);
             infer_binary(*op, l, r, errors)
         }
         Expr::Invoke {
@@ -123,7 +135,7 @@ pub fn infer(expression: &Expr, env: &Environment, errors: &mut Vec<TypeError>) 
         } => {
             let argument_types: Vec<Type> = arguments
                 .iter()
-                .map(|arg| infer(arg, env, errors))
+                .map(|arg| infer_with(arg, variable_type, errors))
                 .collect();
             infer_builtin(*function, &argument_types, errors)
         }
@@ -133,7 +145,7 @@ pub fn infer(expression: &Expr, env: &Environment, errors: &mut Vec<TypeError>) 
             // result is always a string.
             for part in parts {
                 if let velin_syntax::StrPart::Hole(expr) = part {
-                    infer(expr, env, errors);
+                    infer_with(expr, variable_type, errors);
                 }
             }
             Type::String

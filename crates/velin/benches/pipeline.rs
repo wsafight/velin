@@ -5,10 +5,11 @@
 //! regressions show up as relative shifts, not absolute wall-clock claims.
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use std::fmt::Write as _;
 use std::hint::black_box;
 use velin::{
     Environment, Expr, Machine, Op, ProgramBuilder, SlotTable, Value, Variables, Yield,
-    check_expression, compile_expression, evaluate, parse_expression,
+    check_expression, check_script, compile, compile_expression, evaluate, parse_expression,
 };
 
 /// A non-trivial arithmetic/boolean guard, the shape a real script branches on.
@@ -28,6 +29,22 @@ fn bench_check(c: &mut Criterion) {
     env.insert("defeated".into(), velin::Type::Boolean);
     c.bench_function("check/guard", |b| {
         b.iter(|| check_expression(black_box(&expr), &env, "bench", 1, 1));
+    });
+}
+
+fn bench_check_wide_script(c: &mut Criterion) {
+    const VARIABLES: usize = 512;
+    let mut source = String::new();
+    for index in 0..VARIABLES {
+        writeln!(source, "default value_{index} = 0").expect("writing to a string cannot fail");
+    }
+    for index in 0..VARIABLES {
+        writeln!(source, "set value_{index} = value_{index} + 1")
+            .expect("writing to a string cannot fail");
+    }
+    let script = compile("bench.velin", &source).unwrap();
+    c.bench_function("check/wide_linear_script", |b| {
+        b.iter(|| check_script("bench.velin", black_box(&script)));
     });
 }
 
@@ -121,6 +138,7 @@ criterion_group!(
     benches,
     bench_parse,
     bench_check,
+    bench_check_wide_script,
     bench_compile,
     bench_eval_tree,
     bench_vm_run

@@ -1,7 +1,9 @@
 //! Control-flow-aware type propagation for surface-language expressions.
 
-use crate::{Environment, Type, check_condition, check_expression, infer};
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use crate::cfg::ControlFlow;
+use crate::types::infer_with;
+use crate::{Environment, Type, TypeError};
+use std::collections::{BTreeMap, VecDeque};
 use velin_compile::{Op, Program};
 use velin_syntax::{Diagnostic, Expr};
 
@@ -116,115 +118,175 @@ pub fn check_program_types_with_hosts(
         return Vec::new();
     }
 
-    let mut assignments: Vec<Option<&Expr>> = vec![None; program.ops.len()];
-    for site in sites {
-        if site.kind == TypeCheckKind::Assignment
-            && let Some(target) = assignments.get_mut(site.pc)
+    let sites_by_pc = index_sites(program, sites);
+    let entry = entry_state(program, initial);
+
+    let flow = ControlFlow::new(&program.ops);
+    let mut incoming = vec![None; flow.blocks.len()];
+    incoming[0] = Some(entry);
+    let mut pending = VecDeque::from([0usize]);
+    let mut queued = vec![false; flow.blocks.len()];
+    queued[0] = true;
+    while let Some(block_id) = pending.pop_front() {
+        queued[block_id] = false;
+        let Some(mut outgoing) = incoming[block_id].clone() else {
+            continue;
+        };
+        let block = flow.blocks[block_id];
+        for (pc, pc_sites) in sites_by_pc
+            .iter()
+            .enumerate()
+            .take(block.end)
+            .skip(block.start)
         {
-            *target = Some(&site.expression);
+            transfer(&program.ops[pc], pc_sites, program, hosts, &mut outgoing);
+        }
+        for successor in &flow.successors[block_id] {
+            if merge_into(&mut incoming[*successor], &outgoing) && !queued[*successor] {
+                queued[*successor] = true;
+                pending.push_back(*successor);
+            }
         }
     }
 
+    let mut diagnostics = Vec::new();
+    for (block_id, block) in flow.blocks.iter().enumerate() {
+        if !flow.reachable[block_id] {
+            continue;
+        }
+        let Some(mut state) = incoming[block_id].clone() else {
+            continue;
+        };
+        for (pc, pc_sites) in sites_by_pc
+            .iter()
+            .enumerate()
+            .take(block.end)
+            .skip(block.start)
+        {
+            let mut host_argument = 0;
+            for site in pc_sites {
+                let (inferred, errors) = check_site(site, program, &state);
+                diagnostics.extend(errors.into_iter().map(|error| {
+                    let (line, column) = error.span.map_or((0, 1), |span| (span.line, span.column));
+                    Diagnostic::new(file, line, column, error.message)
+                }));
+                if site.kind == TypeCheckKind::Expression
+                    && let Op::Host { host_id, .. } = &program.ops[pc]
+                {
+                    if let Some(expected) = hosts
+                        .get(host_id)
+                        .and_then(|signature| signature.argument(host_argument))
+                        && !inferred.could_be(expected)
+                    {
+                        let span = site.expression.span();
+                        diagnostics.push(Diagnostic::new(
+                            file,
+                            span.map_or(0, |span| span.line),
+                            span.map_or(1, |span| span.column),
+                            format!(
+                                "host argument {} expects {}, found {}",
+                                host_argument + 1,
+                                expected.name(),
+                                inferred.name()
+                            ),
+                        ));
+                    }
+                    host_argument += 1;
+                }
+            }
+            transfer(&program.ops[pc], pc_sites, program, hosts, &mut state);
+        }
+    }
+    diagnostics
+}
+
+fn index_sites<'a>(program: &Program, sites: &'a [TypeCheckSite]) -> Vec<Vec<&'a TypeCheckSite>> {
+    let mut sites_by_pc = vec![Vec::new(); program.ops.len()];
+    for site in sites {
+        if let Some(target) = sites_by_pc.get_mut(site.pc) {
+            target.push(site);
+        }
+    }
+    sites_by_pc
+}
+
+fn entry_state(program: &Program, initial: &Environment) -> Vec<Type> {
     let mut entry = vec![Type::Unknown; program.slots.len()];
     for (name, kind) in initial {
         if let Some(slot) = program.slots.get(name) {
             entry[slot as usize] = *kind;
         }
     }
-
-    let mut incoming = vec![None; program.ops.len()];
-    incoming[0] = Some(entry);
-    let mut pending = VecDeque::from([0usize]);
-    while let Some(pc) = pending.pop_front() {
-        let Some(mut outgoing) = incoming[pc].clone() else {
-            continue;
-        };
-        match &program.ops[pc] {
-            Op::Set { slot, .. } => {
-                if let Some(expression) = assignments[pc] {
-                    let env = environment(program, &outgoing);
-                    let inferred = infer(expression, &env, &mut Vec::new());
-                    if let Some(target) = outgoing.get_mut(*slot as usize) {
-                        *target = inferred;
-                    }
-                }
-            }
-            Op::Host {
-                host_id,
-                bind: Some(slot),
-                ..
-            } => {
-                if let Some(target) = outgoing.get_mut(*slot as usize) {
-                    *target = hosts
-                        .get(host_id)
-                        .and_then(HostSignature::returns)
-                        .unwrap_or(Type::Unknown);
-                }
-            }
-            _ => {}
-        }
-        for successor in successors(pc, &program.ops[pc]) {
-            let Some(target) = incoming.get_mut(successor) else {
-                continue;
-            };
-            if merge_into(target, &outgoing) {
-                pending.push_back(successor);
-            }
-        }
-    }
-
-    let mut diagnostics = Vec::new();
-    let mut host_argument_indices = HashMap::<usize, usize>::new();
-    for site in sites {
-        let Some(Some(state)) = incoming.get(site.pc) else {
-            continue;
-        };
-        let env = environment(program, state);
-        diagnostics.extend(match site.kind {
-            TypeCheckKind::Condition => check_condition(&site.expression, &env, file, 0, 1),
-            TypeCheckKind::Expression | TypeCheckKind::Assignment => {
-                check_expression(&site.expression, &env, file, 0, 1)
-            }
-        });
-        if site.kind == TypeCheckKind::Expression
-            && let Some(Op::Host { host_id, .. }) = program.ops.get(site.pc)
-        {
-            let index = host_argument_indices.entry(site.pc).or_default();
-            if let Some(expected) = hosts
-                .get(host_id)
-                .and_then(|signature| signature.argument(*index))
-            {
-                let actual = infer(&site.expression, &env, &mut Vec::new());
-                if !actual.could_be(expected) {
-                    let span = site.expression.span();
-                    diagnostics.push(Diagnostic::new(
-                        file,
-                        span.map_or(0, |span| span.line),
-                        span.map_or(1, |span| span.column),
-                        format!(
-                            "host argument {} expects {}, found {}",
-                            *index + 1,
-                            expected.name(),
-                            actual.name()
-                        ),
-                    ));
-                }
-            }
-            *index += 1;
-        }
-    }
-    diagnostics
+    entry
 }
 
-fn environment(program: &Program, state: &[Type]) -> Environment {
-    program
-        .slots
-        .names()
-        .iter()
-        .zip(state)
-        .filter(|(_, kind)| **kind != Type::Unknown)
-        .map(|(name, kind)| (name.clone(), *kind))
-        .collect()
+fn transfer(
+    op: &Op,
+    sites: &[&TypeCheckSite],
+    program: &Program,
+    hosts: &HostSignatures,
+    state: &mut [Type],
+) {
+    match op {
+        Op::Set { slot, .. } => {
+            let Some(expression) = sites
+                .iter()
+                .find(|site| site.kind == TypeCheckKind::Assignment)
+                .map(|site| &site.expression)
+            else {
+                return;
+            };
+            let inferred = infer_in_state(expression, program, state, &mut Vec::new());
+            if let Some(target) = state.get_mut(*slot as usize) {
+                *target = inferred;
+            }
+        }
+        Op::Host {
+            host_id,
+            bind: Some(slot),
+            ..
+        } => {
+            if let Some(target) = state.get_mut(*slot as usize) {
+                *target = hosts
+                    .get(host_id)
+                    .and_then(HostSignature::returns)
+                    .unwrap_or(Type::Unknown);
+            }
+        }
+        Op::Jump(_) | Op::JumpIfFalse { .. } | Op::Host { bind: None, .. } | Op::Halt => {}
+    }
+}
+
+fn check_site(site: &TypeCheckSite, program: &Program, state: &[Type]) -> (Type, Vec<TypeError>) {
+    let mut errors = Vec::new();
+    let inferred = infer_in_state(&site.expression, program, state, &mut errors);
+    if site.kind == TypeCheckKind::Condition && !matches!(inferred, Type::Boolean | Type::Unknown) {
+        errors.push(TypeError {
+            message: format!("condition expects boolean, found {}", inferred.name()),
+            span: site.expression.span().cloned(),
+        });
+    }
+    (inferred, errors)
+}
+
+fn infer_in_state(
+    expression: &Expr,
+    program: &Program,
+    state: &[Type],
+    errors: &mut Vec<TypeError>,
+) -> Type {
+    infer_with(
+        expression,
+        &|name| {
+            program
+                .slots
+                .get(name)
+                .and_then(|slot| state.get(slot as usize))
+                .copied()
+                .unwrap_or(Type::Unknown)
+        },
+        errors,
+    )
 }
 
 fn merge_into(target: &mut Option<Vec<Type>>, incoming: &[Type]) -> bool {
@@ -245,13 +307,4 @@ fn merge_into(target: &mut Option<Vec<Type>>, incoming: &[Type]) -> bool {
         }
     }
     changed
-}
-
-fn successors(pc: usize, op: &Op) -> Vec<usize> {
-    match op {
-        Op::Jump(target) => vec![*target as usize],
-        Op::JumpIfFalse { target, .. } => vec![pc + 1, *target as usize],
-        Op::Halt => Vec::new(),
-        Op::Set { .. } | Op::Host { .. } => vec![pc + 1],
-    }
 }

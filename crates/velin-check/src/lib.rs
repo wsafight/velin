@@ -13,6 +13,7 @@
 //! Both feed the shared [`velin_syntax::Diagnostic`] type so a host reports
 //! them through one channel with a stable exit-code contract.
 
+mod cfg;
 mod definite;
 mod flow;
 mod types;

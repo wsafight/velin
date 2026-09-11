@@ -11,6 +11,7 @@
 //! only reports a read it can prove is always unassigned, so it never rejects a
 //! program the runtime would have accepted.
 
+use crate::cfg::ControlFlow;
 use std::collections::{BTreeSet, VecDeque};
 use velin_compile::{ExprChunk, ExprOp, Op, Program};
 use velin_syntax::{BinaryOp, Builtin, UnaryOp, Value};
@@ -30,8 +31,11 @@ pub struct UnassignedUse {
 /// Returns every read that is not definitely assigned, in program order.
 #[must_use]
 pub fn definite_assignment(program: &Program, preset: &BTreeSet<String>) -> Vec<UnassignedUse> {
-    let op_count = program.ops.len();
     let slot_count = program.slots.len();
+    let flow = ControlFlow::new(&program.ops);
+    if flow.blocks.is_empty() {
+        return Vec::new();
+    }
 
     // `assigned_in[pc]` = slots definitely assigned when control reaches `pc`.
     // Must-analysis: initialise every non-entry block to "all slots" (top) and
@@ -44,47 +48,65 @@ pub fn definite_assignment(program: &Program, preset: &BTreeSet<String>) -> Vec<
             set
         });
 
-    let predecessors = predecessors(program);
-    let reachable = reachable_ops(program);
-    let mut assigned_out = vec![BitSet::full(slot_count); op_count];
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for pc in 0..op_count {
-            if !reachable[pc] {
-                continue;
+    let mut assigned_out = vec![BitSet::full(slot_count); flow.blocks.len()];
+    let mut pending = VecDeque::from([0]);
+    let mut queued = vec![false; flow.blocks.len()];
+    queued[0] = true;
+    while let Some(block_id) = pending.pop_front() {
+        queued[block_id] = false;
+        let mut outgoing = incoming_set(block_id, &flow, &assigned_out, &entry);
+        let block = flow.blocks[block_id];
+        for op in &program.ops[block.start..block.end] {
+            if let Some(slot) = assigned_slot(op) {
+                outgoing.insert(slot);
             }
-            let mut incoming = incoming_set(pc, &predecessors, &assigned_out, &entry, &reachable);
-            // Executing this op assigns its slot (Set / a binding Host).
-            if let Some(slot) = assigned_slot(&program.ops[pc]) {
-                incoming.insert(slot);
-            }
-            if incoming != assigned_out[pc] {
-                assigned_out[pc] = incoming;
-                changed = true;
+        }
+        if outgoing != assigned_out[block_id] {
+            assigned_out[block_id] = outgoing;
+            for successor in &flow.successors[block_id] {
+                if !queued[*successor] {
+                    queued[*successor] = true;
+                    pending.push_back(*successor);
+                }
             }
         }
     }
 
     // Report reads not covered by the incoming (pre-assignment) set.
     let mut findings = Vec::new();
-    for (pc, op) in program.ops.iter().enumerate() {
-        if !reachable[pc] {
+    let mut load_cache = vec![None; program.chunks.len()];
+    for (block_id, block) in flow.blocks.iter().enumerate() {
+        if !flow.reachable[block_id] {
             continue;
         }
-        let incoming = incoming_set(pc, &predecessors, &assigned_out, &entry, &reachable);
-        for chunk_id in read_chunks(op) {
-            let Some(chunk) = program.chunks.get(chunk_id as usize) else {
-                continue;
-            };
-            for (slot, column) in reachable_loads(chunk) {
-                if !incoming.contains(slot) {
-                    findings.push(UnassignedUse {
-                        name: program.slots.name(slot).unwrap_or("?").to_owned(),
-                        line: chunk.line,
-                        column,
-                    });
+        let mut assigned = incoming_set(block_id, &flow, &assigned_out, &entry);
+        for op in &program.ops[block.start..block.end] {
+            match op {
+                Op::Set { value, .. } => {
+                    record_unassigned(*value, program, &assigned, &mut load_cache, &mut findings);
                 }
+                Op::JumpIfFalse { condition, .. } => record_unassigned(
+                    *condition,
+                    program,
+                    &assigned,
+                    &mut load_cache,
+                    &mut findings,
+                ),
+                Op::Host { args, .. } => {
+                    for chunk in args {
+                        record_unassigned(
+                            *chunk,
+                            program,
+                            &assigned,
+                            &mut load_cache,
+                            &mut findings,
+                        );
+                    }
+                }
+                Op::Jump(_) | Op::Halt => {}
+            }
+            if let Some(slot) = assigned_slot(op) {
+                assigned.insert(slot);
             }
         }
     }
@@ -94,22 +116,22 @@ pub fn definite_assignment(program: &Program, preset: &BTreeSet<String>) -> Vec<
 /// The set of slots definitely assigned on entry to `pc`: the intersection of
 /// its predecessors' out-sets, or the program `entry` set for the root.
 fn incoming_set(
-    pc: usize,
-    predecessors: &[Vec<usize>],
+    block_id: usize,
+    flow: &ControlFlow,
     assigned_out: &[BitSet],
     entry: &BitSet,
-    reachable: &[bool],
 ) -> BitSet {
-    let mut incoming = (pc == 0).then(|| entry.clone());
-    for predecessor in predecessors[pc]
+    let mut incoming = (block_id == 0).then(|| entry.clone());
+    for predecessor in flow.predecessors[block_id]
         .iter()
         .copied()
-        .filter(|predecessor| reachable[*predecessor])
+        .filter(|predecessor| flow.reachable[*predecessor])
     {
-        incoming = Some(match incoming {
-            Some(current) => current.intersect(&assigned_out[predecessor]),
-            None => assigned_out[predecessor].clone(),
-        });
+        if let Some(current) = &mut incoming {
+            current.intersect_assign(&assigned_out[predecessor]);
+        } else {
+            incoming = Some(assigned_out[predecessor].clone());
+        }
     }
     incoming.unwrap_or_else(|| entry.clone())
 }
@@ -124,51 +146,29 @@ fn assigned_slot(op: &Op) -> Option<u32> {
     }
 }
 
-fn read_chunks(op: &Op) -> Vec<u32> {
-    match op {
-        Op::Set { value, .. } => vec![*value],
-        Op::JumpIfFalse { condition, .. } => vec![*condition],
-        Op::Host { args, .. } => args.clone(),
-        Op::Jump(_) | Op::Halt => Vec::new(),
-    }
-}
-
-fn predecessors(program: &Program) -> Vec<Vec<usize>> {
-    let mut predecessors = vec![Vec::new(); program.ops.len()];
-    for (pc, op) in program.ops.iter().enumerate() {
-        for successor in successors(pc, op) {
-            if successor < program.ops.len() {
-                predecessors[successor].push(pc);
-            }
+fn record_unassigned(
+    chunk_id: u32,
+    program: &Program,
+    assigned: &BitSet,
+    load_cache: &mut [Option<BTreeSet<(u32, usize)>>],
+    findings: &mut Vec<UnassignedUse>,
+) {
+    let Some(chunk) = program.chunks.get(chunk_id as usize) else {
+        return;
+    };
+    let Some(cache) = load_cache.get_mut(chunk_id as usize) else {
+        return;
+    };
+    let loads = cache.get_or_insert_with(|| reachable_loads(chunk));
+    for (slot, column) in &*loads {
+        if !assigned.contains(*slot) {
+            findings.push(UnassignedUse {
+                name: program.slots.name(*slot).unwrap_or("?").to_owned(),
+                line: chunk.line,
+                column: *column,
+            });
         }
     }
-    predecessors
-}
-
-fn successors(pc: usize, op: &Op) -> Vec<usize> {
-    match op {
-        Op::Jump(target) => vec![*target as usize],
-        Op::JumpIfFalse { target, .. } => vec![pc + 1, *target as usize],
-        Op::Halt => Vec::new(),
-        Op::Set { .. } | Op::Host { .. } => vec![pc + 1],
-    }
-}
-
-/// Marks control-flow operations reachable from the program entry.
-fn reachable_ops(program: &Program) -> Vec<bool> {
-    let mut reachable = vec![false; program.ops.len()];
-    if program.ops.is_empty() {
-        return reachable;
-    }
-    let mut pending = vec![0];
-    while let Some(pc) = pending.pop() {
-        if pc >= program.ops.len() || reachable[pc] {
-            continue;
-        }
-        reachable[pc] = true;
-        pending.extend(successors(pc, &program.ops[pc]));
-    }
-    reachable
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -389,16 +389,9 @@ impl BitSet {
         slot < self.len && (self.bits[slot / 64] >> (slot % 64)) & 1 == 1
     }
 
-    fn intersect(&self, other: &Self) -> Self {
-        let bits = self
-            .bits
-            .iter()
-            .zip(&other.bits)
-            .map(|(a, b)| a & b)
-            .collect();
-        Self {
-            bits,
-            len: self.len,
+    fn intersect_assign(&mut self, other: &Self) {
+        for (current, incoming) in self.bits.iter_mut().zip(&other.bits) {
+            *current &= incoming;
         }
     }
 }
