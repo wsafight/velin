@@ -174,4 +174,16 @@ export const pages = [
     },
     see: ['docs/checking', 'docs/host', 'docs/architecture'],
   },
+  {
+    sources: {en: 'docs/PERFORMANCE.md', zh: 'docs/PERFORMANCE.zh-CN.md'},
+    generated: 'performance.md',
+    slug: 'docs/performance',
+    group: 'engine',
+    title: {en: 'Performance', zh: '性能'},
+    description: {
+      en: 'Measured costs, optimization results, benchmark commands, and runtime trade-offs.',
+      zh: '性能测量、优化结果、基准命令和运行时取舍。',
+    },
+    see: ['docs/architecture', 'docs/limits', 'docs/embedding'],
+  },
 ];
