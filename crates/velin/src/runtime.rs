@@ -4,6 +4,7 @@ use crate::{
     CompiledScript, DEFAULT_RNG_SEED, EvalError, HostSchema, Machine, ProgramValidationError,
     SetVariableError, Type, Value, Yield,
 };
+use velin_compile::InitialFrame;
 
 /// Default total host effects accepted during one script run.
 pub const DEFAULT_MAX_HOST_EFFECTS: usize = 1_000;
@@ -168,6 +169,43 @@ impl<'a> ScriptRunner<'a> {
     #[must_use]
     pub const fn host_effects(&self) -> usize {
         self.host_effects
+    }
+
+    /// Restarts this runner from the script's current defaults while reusing
+    /// the machine's frame and expression-stack allocations.
+    ///
+    /// Defaults are rebuilt when the public map was changed after compilation;
+    /// the machine is only modified after that frame and its budget pass.
+    ///
+    /// # Errors
+    /// Returns an initialization or machine-state budget error without
+    /// changing the current runner state.
+    pub fn restart(&mut self, seed: i64) -> Result<(), ScriptRunError> {
+        let frame = if let Some(frame) = self.script.initial_frame() {
+            frame.clone()
+        } else {
+            InitialFrame::from_named_values(
+                &self.script.program.slots,
+                self.script
+                    .defaults
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value)),
+            )
+            .map_err(|error| ScriptRunError::InitialValue {
+                name: error.name,
+                source: SetVariableError::InvalidValue(error.message),
+            })?
+        };
+        self.machine
+            .restart(&frame, seed)
+            .map_err(|message| ScriptRunError::InitialValue {
+                name: "<frame>".to_owned(),
+                source: SetVariableError::StateBudget(message),
+            })?;
+        self.host_effects = 0;
+        self.pending_host = None;
+        self.pending_failure = None;
+        Ok(())
     }
 
     /// Runs until the next host effect or completion.
@@ -399,5 +437,27 @@ mod tests {
             ScriptRunner::new(&script),
             Err(ScriptRunError::InitialValue { ref name, .. }) if name == "unknown"
         ));
+    }
+
+    #[test]
+    fn restart_matches_a_new_runner_after_host_yield() {
+        let script = compile(
+            "runner.velin",
+            "default hp = 3\nperform emit(hp)\nset hp = hp + 1\n",
+        )
+        .unwrap();
+        let mut reused = ScriptRunner::new(&script).unwrap();
+        let mut fresh = ScriptRunner::new(&script).unwrap();
+        let first_yield = reused.run().unwrap();
+        assert_eq!(first_yield, fresh.run().unwrap());
+        assert_eq!(reused.host_effects(), 1);
+        reused.restart(0).unwrap();
+        assert_eq!(reused.host_effects(), 0);
+        assert_eq!(reused.run().unwrap(), first_yield);
+        assert_eq!(reused.resume(None).unwrap(), fresh.resume(None).unwrap());
+        assert_eq!(
+            reused.machine().variable("hp"),
+            fresh.machine().variable("hp")
+        );
     }
 }

@@ -1,11 +1,75 @@
 use super::support::{cache_metrics, checked_total, eval_chunk_for};
 use super::{
-    BinaryOp, DataFootprint, DataMetrics, EvalError, MAX_HOST_PAYLOAD_TEXT_BYTES,
+    BinaryOp, DataFootprint, DataMetrics, EvalError, InitialFrame, MAX_HOST_PAYLOAD_TEXT_BYTES,
     MAX_HOST_PAYLOAD_VALUES, MAX_IMMEDIATE_STEPS, MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES,
     Machine, Op, PendingHost, UpdateOp, Value, Yield,
 };
 
 impl Machine {
+    /// Restarts execution from a prevalidated initial frame while reusing the
+    /// machine's frame and expression-stack allocations.
+    ///
+    /// The frame width and aggregate budget are checked before any state is
+    /// changed, so a failed restart leaves the current machine untouched.
+    ///
+    /// # Errors
+    /// Returns an error when the frame width or aggregate machine-state budget
+    /// is incompatible with this machine.
+    pub fn restart(&mut self, initial: &InitialFrame, seed: i64) -> Result<(), &'static str> {
+        if initial.values().len() != self.program.slots.len() {
+            return Err("initial frame width does not match program slots");
+        }
+        let mut total = initial.total();
+        if let Some(slot) = self.program.slots.rng_state() {
+            let index = slot as usize;
+            let old = initial.footprints()[index];
+            total.values = total
+                .values
+                .checked_sub(old.values)
+                .and_then(|values| values.checked_add(1))
+                .ok_or("machine state value count overflow")?;
+            total.text_bytes = total
+                .text_bytes
+                .checked_sub(old.text_bytes)
+                .ok_or("machine state text size overflow")?;
+            if total.values > MAX_MACHINE_DATA_VALUES {
+                return Err("machine state exceeds 100,000 values");
+            }
+            if total.text_bytes > MAX_MACHINE_TEXT_BYTES {
+                return Err("machine state text exceeds 16 MiB");
+            }
+        } else if total.values > MAX_MACHINE_DATA_VALUES {
+            return Err("machine state exceeds 100,000 values");
+        } else if total.text_bytes > MAX_MACHINE_TEXT_BYTES {
+            return Err("machine state text exceeds 16 MiB");
+        }
+
+        self.frame.values.clone_from_slice(initial.values());
+        self.frame.footprints.clone_from_slice(initial.footprints());
+        self.frame.depths.clone_from_slice(initial.depths());
+        self.frame_total = total;
+        if let Some(slot) = self.program.slots.rng_state() {
+            let index = slot as usize;
+            self.frame.values[index] = Some(Value::Integer(seed));
+            cache_metrics(
+                &mut self.frame,
+                index,
+                DataMetrics {
+                    footprint: DataFootprint {
+                        values: 1,
+                        text_bytes: 0,
+                    },
+                    max_depth: 0,
+                },
+            );
+        }
+        self.expression_stack.clear();
+        self.pc = 0;
+        self.pending_host = None;
+        self.finished = false;
+        Ok(())
+    }
+
     fn step_update(
         &mut self,
         slot: u32,

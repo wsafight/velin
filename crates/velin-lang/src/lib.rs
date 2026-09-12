@@ -36,6 +36,7 @@
 //! assert_eq!(script.hosts, vec!["say".to_string()]);
 //! ```
 
+mod artifact;
 mod ast;
 mod error;
 mod host;
@@ -45,6 +46,10 @@ mod lower;
 mod parser;
 mod token;
 
+pub use artifact::{
+    ARTIFACT_MAGIC, ARTIFACT_VERSION, ArtifactError, BytecodeArtifact, MAX_ARTIFACT_BYTES,
+    decode_artifact, encode_artifact,
+};
 pub use ast::{Condition, Stmt};
 pub use error::ParseError;
 pub use host::{CompiledScript, HostSchema};

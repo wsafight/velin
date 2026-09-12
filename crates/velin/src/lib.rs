@@ -104,9 +104,9 @@ pub use velin_parse::parse_expression;
 pub use velin_eval::{EvalError, Variables, evaluate, evaluate_with_rng};
 
 pub use velin_compile::{
-    ChunkId, ExprChunk, ExprChunkRef, ExprOp, HostOp, Op, Pc, Program, ProgramBuilder,
-    ProgramChunk, ProgramValidationError, SlotTable, UpdateOp, ValidatedProgram,
-    compile_expression,
+    ChunkId, ExprChunk, ExprChunkRef, ExprOp, HostOp, InitialFrame, InitialFrameError,
+    InitialValue, Op, Pc, Program, ProgramBuilder, ProgramChunk, ProgramValidationError, SlotTable,
+    UpdateOp, ValidatedProgram, compile_expression,
 };
 
 pub use velin_vm::{
@@ -125,8 +125,10 @@ pub use velin_check::{
 };
 
 pub use velin_lang::{
-    CompiledScript, Condition, HostSchema, LowerError, MAX_SOURCE_BYTES, MAX_SOURCE_LINES,
+    ARTIFACT_MAGIC, ARTIFACT_VERSION, ArtifactError, BytecodeArtifact, CompiledScript, Condition,
+    HostSchema, LowerError, MAX_ARTIFACT_BYTES, MAX_SOURCE_BYTES, MAX_SOURCE_LINES,
     MAX_STATEMENT_DEPTH, ParseError, RecoveredProgram, Stmt, check_script,
-    check_script_with_host_schema, compile, parse_program, parse_program_recovering,
+    check_script_with_host_schema, compile, decode_artifact, encode_artifact, parse_program,
+    parse_program_recovering,
 };
 mod runtime;

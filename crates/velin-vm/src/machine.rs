@@ -311,3 +311,7 @@ mod updates;
 #[cfg(test)]
 #[path = "machine_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "restart_tests.rs"]
+mod restart_tests;

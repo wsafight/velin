@@ -100,6 +100,28 @@ impl HostSchema {
 }
 
 impl CompiledScript {
+    pub(crate) fn from_artifact(
+        program: Arc<Program>,
+        validated_program: ValidatedProgram,
+        hosts: Vec<String>,
+        labels: BTreeMap<String, Pc>,
+        defaults: BTreeMap<String, Value>,
+        initial_frame: InitialFrame,
+        initial_types: Box<[Type]>,
+    ) -> Self {
+        Self {
+            program,
+            validated_program,
+            hosts,
+            labels,
+            defaults,
+            initial_frame,
+            initial_types,
+            type_sites: Vec::new(),
+            host_sites: Vec::new(),
+        }
+    }
+
     /// Returns the validation proof shared by fast machine constructors.
     #[must_use]
     pub const fn validated_program(&self) -> &ValidatedProgram {

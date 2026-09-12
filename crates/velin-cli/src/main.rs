@@ -16,12 +16,16 @@ mod host;
 
 use std::io::{self, Read, Write};
 use std::process::ExitCode;
-use velin::{MAX_SOURCE_BYTES, check_script, compile};
+use velin::{
+    ARTIFACT_MAGIC, MAX_ARTIFACT_BYTES, MAX_SOURCE_BYTES, check_script, compile, decode_artifact,
+    encode_artifact,
+};
 
 /// Parsed command line: a verb and the script path it applies to.
 enum Command {
     Check { path: String, json: bool },
     Run(String),
+    Compile { input: String, output: String },
     Help,
     Version,
 }
@@ -50,7 +54,8 @@ Velin deterministic scripting language
 
 usage:
     velin check [--json] <file.velin|->    parse + static-check a script
-    velin run            <file.velin|->    check, then run against the reference host
+    velin run            <file.velin|.velinc|->  check/run against the reference host
+    velin compile        <file.velin> -o <file.velinc>  write a reusable bytecode artifact
     velin --help                              show this help
     velin --version                           show the version
 
@@ -68,8 +73,28 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Command, String>
     match verb.as_str() {
         "check" => parse_check_args(args),
         "run" => parse_path_arg("run", args).map(Command::Run),
+        "compile" => parse_compile_args(args),
         other => Err(format!("unknown subcommand `{other}`")),
     }
+}
+
+fn parse_compile_args(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
+    let input = args.next().ok_or("`compile` needs an input file")?;
+    if input.starts_with('-') && input != "-" {
+        return Err(format!("unknown option `{input}` for `compile`"));
+    }
+    let option = args.next().ok_or("`compile` needs `-o <output>`")?;
+    if option != "-o" {
+        return Err("`compile` expects `-o <output>`".to_owned());
+    }
+    let output = args.next().ok_or("`compile` needs an output file")?;
+    if output.starts_with('-') && output != "-" {
+        return Err(format!("unknown option `{output}` for `compile`"));
+    }
+    if let Some(extra) = args.next() {
+        return Err(format!("unexpected extra argument `{extra}`"));
+    }
+    Ok(Command::Compile { input, output })
 }
 
 fn ensure_no_extra(
@@ -120,16 +145,49 @@ fn run(command: Command) -> ExitCode {
     match command {
         Command::Check { path, json } => check(&path, json),
         Command::Run(path) => execute(&path),
+        Command::Compile { input, output } => compile_artifact(&input, &output),
         Command::Help | Command::Version => ExitCode::SUCCESS,
     }
 }
 
 /// `velin check`: report every diagnostic; fail only on errors.
 fn check(path: &str, json: bool) -> ExitCode {
-    let file = source_name(path);
-    let source = match read(path) {
-        Ok(source) => source,
+    let bytes = match read_bytes(path, MAX_ARTIFACT_BYTES.max(MAX_SOURCE_BYTES)) {
+        Ok(bytes) => bytes,
         Err(message) => {
+            if json {
+                print_check_json(false, &[], Some(&message));
+            } else {
+                eprintln!("{message}");
+            }
+            return ExitCode::from(2);
+        }
+    };
+    if bytes.starts_with(ARTIFACT_MAGIC) {
+        return match decode_artifact(&bytes) {
+            Ok(_) => {
+                if json {
+                    print_check_json(true, &[], None);
+                } else {
+                    println!("{path}: ok");
+                }
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                if json {
+                    print_check_json(false, &[], Some(&error.to_string()));
+                } else {
+                    eprintln!("{path}: {error}");
+                }
+                ExitCode::FAILURE
+            }
+        };
+    }
+    let file = source_name(path);
+    let source = match String::from_utf8(bytes) {
+        Ok(source) => source,
+        Err(error) => {
+            let message = format!("cannot read `{path}`: {error}");
             if json {
                 print_check_json(false, &[], Some(&message));
             } else {
@@ -181,33 +239,51 @@ fn print_check_json(ok: bool, diagnostics: &[velin::Diagnostic], error: Option<&
 
 /// `velin run`: check for errors, then drive the reference host.
 fn execute(path: &str) -> ExitCode {
-    let file = source_name(path);
-    let source = match read(path) {
-        Ok(source) => source,
+    let bytes = match read_bytes(path, MAX_ARTIFACT_BYTES.max(MAX_SOURCE_BYTES)) {
+        Ok(bytes) => bytes,
         Err(message) => {
             eprintln!("{message}");
             return ExitCode::from(2);
         }
     };
-
-    let script = match compile(file, &source) {
-        Ok(script) => script,
-        Err(diagnostic) => {
-            eprintln!("{diagnostic}");
+    let artifact = bytes
+        .starts_with(ARTIFACT_MAGIC)
+        .then(|| decode_artifact(&bytes));
+    let script = match artifact {
+        Some(Ok(artifact)) => artifact.into_script(),
+        Some(Err(error)) => {
+            eprintln!("{path}: {error}");
             return ExitCode::FAILURE;
         }
-    };
-
-    // A definite-assignment or type error would run into undefined behaviour at
-    // the host boundary, so refuse to run a script that fails the checks.
-    let diagnostics = check_script(file, &script);
-    let errors: Vec<_> = diagnostics.iter().filter(|d| d.is_error()).collect();
-    if !errors.is_empty() {
-        for diagnostic in &errors {
-            eprintln!("{diagnostic}");
+        None => {
+            let file = source_name(path);
+            let source = match String::from_utf8(bytes) {
+                Ok(source) => source,
+                Err(error) => {
+                    eprintln!("cannot read `{path}`: {error}");
+                    return ExitCode::from(2);
+                }
+            };
+            let script = match compile(file, &source) {
+                Ok(script) => script,
+                Err(diagnostic) => {
+                    eprintln!("{diagnostic}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            // Source runs retain the static-check gate. Artifacts have already
+            // passed compilation and perform structural validation on load.
+            let diagnostics = check_script(file, &script);
+            let errors: Vec<_> = diagnostics.iter().filter(|d| d.is_error()).collect();
+            if !errors.is_empty() {
+                for diagnostic in &errors {
+                    eprintln!("{diagnostic}");
+                }
+                return ExitCode::FAILURE;
+            }
+            script
         }
-        return ExitCode::FAILURE;
-    }
+    };
 
     let stdin = io::stdin();
     let mut input = stdin.lock();
@@ -226,6 +302,78 @@ fn execute(path: &str) -> ExitCode {
     }
 }
 
+fn compile_artifact(input: &str, output: &str) -> ExitCode {
+    if input == "-" {
+        eprintln!("`compile` cannot write an artifact when reading source from stdin");
+        return ExitCode::from(2);
+    }
+    let source = match read(input) {
+        Ok(source) => source,
+        Err(message) => {
+            eprintln!("{message}");
+            return ExitCode::from(2);
+        }
+    };
+    let script = match compile(input, &source) {
+        Ok(script) => script,
+        Err(diagnostic) => {
+            eprintln!("{diagnostic}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let diagnostics = check_script(input, &script);
+    if diagnostics.iter().any(velin::Diagnostic::is_error) {
+        for diagnostic in diagnostics {
+            eprintln!("{diagnostic}");
+        }
+        return ExitCode::FAILURE;
+    }
+    let artifact = match encode_artifact(input, &script) {
+        Ok(artifact) => artifact,
+        Err(error) => {
+            eprintln!("cannot encode `{output}`: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match write_atomic(output, &artifact) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("cannot write `{output}`: {error}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn write_atomic(path: &str, bytes: &[u8]) -> io::Result<()> {
+    let target = std::path::Path::new(path);
+    let parent = target.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let name = target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("artifact");
+    let temporary = parent.join(format!(
+        ".{name}.{}.{}.tmp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, target)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
 /// Reads a bounded UTF-8 source file, or stdin when `path` is `-`.
 fn read(path: &str) -> Result<String, String> {
     if path == "-" {
@@ -235,6 +383,29 @@ fn read(path: &str) -> Result<String, String> {
     let file =
         std::fs::File::open(path).map_err(|error| format!("cannot read `{path}`: {error}"))?;
     read_source(file, path)
+}
+
+fn read_bytes(path: &str, limit: usize) -> Result<Vec<u8>, String> {
+    if path == "-" {
+        let stdin = io::stdin();
+        return read_bounded(stdin.lock(), "<stdin>", limit);
+    }
+    let file =
+        std::fs::File::open(path).map_err(|error| format!("cannot read `{path}`: {error}"))?;
+    read_bounded(file, path, limit)
+}
+
+fn read_bounded(mut input: impl Read, name: &str, limit: usize) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    input
+        .by_ref()
+        .take((limit + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("cannot read `{name}`: {error}"))?;
+    if bytes.len() > limit {
+        return Err(format!("cannot read `{name}`: input exceeds {limit} bytes"));
+    }
+    Ok(bytes)
 }
 
 fn read_source(mut input: impl Read, name: &str) -> Result<String, String> {
@@ -270,7 +441,6 @@ mod tests {
         std::fs::write(&path, source).expect("write temp script");
         path.to_str().expect("utf8 path").to_owned()
     }
-
     #[test]
     fn parse_args_accepts_check_and_run_and_rejects_the_rest() {
         match parse_args(["check".into(), "--json".into(), "a.velin".into()].into_iter()) {
@@ -278,12 +448,18 @@ mod tests {
                 assert_eq!(path, "a.velin");
                 assert!(json);
             }
-            Ok(Command::Run(_) | Command::Help | Command::Version) => panic!("expected check"),
+            Ok(Command::Run(_) | Command::Compile { .. } | Command::Help | Command::Version) => {
+                panic!("expected check")
+            }
             Err(message) => panic!("expected check, got error {message}"),
         }
         match parse_args(["run".into(), "b.velin".into()].into_iter()) {
             Ok(Command::Run(path)) => assert_eq!(path, "b.velin"),
-            Ok(Command::Check { .. } | Command::Help | Command::Version) => panic!("expected run"),
+            Ok(
+                Command::Check { .. } | Command::Compile { .. } | Command::Help | Command::Version,
+            ) => {
+                panic!("expected run")
+            }
             Err(message) => panic!("expected run, got error {message}"),
         }
         assert!(parse_args(std::iter::empty()).is_err());
@@ -299,7 +475,6 @@ mod tests {
         assert!(parse_args(["check".into(), "a".into(), "extra".into()].into_iter()).is_err());
         assert!(parse_args(["build".into(), "a.velin".into()].into_iter()).is_err());
     }
-
     #[test]
     fn check_and_execute_cover_success_and_failure_paths() {
         let ok = temp_script("set x = 1\nperform say(x)\n");

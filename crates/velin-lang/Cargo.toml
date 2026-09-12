@@ -16,6 +16,8 @@ velin-parse.workspace = true
 velin-eval.workspace = true
 velin-compile.workspace = true
 velin-check.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true
