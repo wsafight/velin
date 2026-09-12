@@ -1,6 +1,6 @@
 //! Control-flow-aware type propagation for surface-language expressions.
 
-use crate::cfg::ControlFlow;
+use crate::cfg::{ControlFlow, is_straight_line};
 use crate::types::infer_with;
 use crate::{Environment, Type, TypeError};
 use std::collections::{BTreeMap, VecDeque};
@@ -114,12 +114,73 @@ pub fn check_program_types_with_hosts(
     hosts: &HostSignatures,
     file: &str,
 ) -> Vec<Diagnostic> {
+    check_program_types_from_entry(program, entry_state(program, initial), sites, hosts, file)
+}
+
+/// Propagates types from a dense slot-indexed entry state.
+#[must_use]
+pub fn check_program_types_with_slot_types(
+    program: &Program,
+    initial: &[Type],
+    sites: &[TypeCheckSite],
+    file: &str,
+) -> Vec<Diagnostic> {
+    check_program_types_with_hosts_and_slot_types(
+        program,
+        initial,
+        sites,
+        &HostSignatures::new(),
+        file,
+    )
+}
+
+/// Propagates dense slot-indexed entry types and applies host contracts.
+#[must_use]
+pub fn check_program_types_with_hosts_and_slot_types(
+    program: &Program,
+    initial: &[Type],
+    sites: &[TypeCheckSite],
+    hosts: &HostSignatures,
+    file: &str,
+) -> Vec<Diagnostic> {
+    let mut entry = vec![Type::Unknown; program.slots.len()];
+    let copied = entry.len().min(initial.len());
+    entry[..copied].copy_from_slice(&initial[..copied]);
+    check_program_types_from_entry(program, entry, sites, hosts, file)
+}
+
+fn check_program_types_from_entry(
+    program: &Program,
+    entry: Vec<Type>,
+    sites: &[TypeCheckSite],
+    hosts: &HostSignatures,
+    file: &str,
+) -> Vec<Diagnostic> {
     if program.ops.is_empty() {
         return Vec::new();
     }
 
-    let sites_by_pc = index_sites(program, sites);
-    let entry = entry_state(program, initial);
+    let straight_line = is_straight_line(&program.ops);
+    if straight_line && sites_are_ordered_and_valid(program.ops.len(), sites) {
+        return check_ordered_linear(program, entry, sites, hosts, file);
+    }
+
+    let sites_by_pc = SiteIndex::new(program.ops.len(), sites);
+    if straight_line {
+        let mut state = entry;
+        let mut diagnostics = Vec::new();
+        check_range(
+            program,
+            0,
+            program.ops.len(),
+            &sites_by_pc,
+            hosts,
+            file,
+            &mut state,
+            &mut diagnostics,
+        );
+        return diagnostics;
+    }
 
     let flow = ControlFlow::new(&program.ops);
     let mut incoming = vec![None; flow.blocks.len()];
@@ -133,12 +194,8 @@ pub fn check_program_types_with_hosts(
             continue;
         };
         let block = flow.blocks[block_id];
-        for (pc, pc_sites) in sites_by_pc
-            .iter()
-            .enumerate()
-            .take(block.end)
-            .skip(block.start)
-        {
+        for pc in block.start..block.end {
+            let pc_sites = sites_by_pc.at(pc);
             transfer(&program.ops[pc], pc_sites, program, hosts, &mut outgoing);
         }
         for successor in &flow.successors[block_id] {
@@ -157,57 +214,151 @@ pub fn check_program_types_with_hosts(
         let Some(mut state) = incoming[block_id].clone() else {
             continue;
         };
-        for (pc, pc_sites) in sites_by_pc
-            .iter()
-            .enumerate()
-            .take(block.end)
-            .skip(block.start)
-        {
-            let mut host_argument = 0;
-            for site in pc_sites {
-                let (inferred, errors) = check_site(site, program, &state);
-                diagnostics.extend(errors.into_iter().map(|error| {
-                    let (line, column) = error.span.map_or((0, 1), |span| (span.line, span.column));
-                    Diagnostic::new(file, line, column, error.message)
-                }));
-                if site.kind == TypeCheckKind::Expression
-                    && let Op::Host { host_id, .. } = &program.ops[pc]
-                {
-                    if let Some(expected) = hosts
-                        .get(host_id)
-                        .and_then(|signature| signature.argument(host_argument))
-                        && !inferred.could_be(expected)
-                    {
-                        let span = site.expression.span();
-                        diagnostics.push(Diagnostic::new(
-                            file,
-                            span.map_or(0, |span| span.line),
-                            span.map_or(1, |span| span.column),
-                            format!(
-                                "host argument {} expects {}, found {}",
-                                host_argument + 1,
-                                expected.name(),
-                                inferred.name()
-                            ),
-                        ));
-                    }
-                    host_argument += 1;
-                }
-            }
-            transfer(&program.ops[pc], pc_sites, program, hosts, &mut state);
-        }
+        check_range(
+            program,
+            block.start,
+            block.end,
+            &sites_by_pc,
+            hosts,
+            file,
+            &mut state,
+            &mut diagnostics,
+        );
     }
     diagnostics
 }
 
-fn index_sites<'a>(program: &Program, sites: &'a [TypeCheckSite]) -> Vec<Vec<&'a TypeCheckSite>> {
-    let mut sites_by_pc = vec![Vec::new(); program.ops.len()];
+fn sites_are_ordered_and_valid(op_count: usize, sites: &[TypeCheckSite]) -> bool {
+    sites.iter().all(|site| site.pc < op_count)
+        && sites.windows(2).all(|pair| pair[0].pc <= pair[1].pc)
+}
+
+fn check_ordered_linear(
+    program: &Program,
+    mut state: Vec<Type>,
+    sites: &[TypeCheckSite],
+    hosts: &HostSignatures,
+    file: &str,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let mut site_at = 0;
+    for pc in 0..program.ops.len() {
+        let start = site_at;
+        while sites.get(site_at).is_some_and(|site| site.pc == pc) {
+            site_at += 1;
+        }
+        check_sites(
+            program,
+            pc,
+            sites[start..site_at].iter(),
+            hosts,
+            file,
+            &mut state,
+            &mut diagnostics,
+        );
+    }
+    diagnostics
+}
+
+#[allow(clippy::too_many_arguments)]
+fn check_range(
+    program: &Program,
+    start: usize,
+    end: usize,
+    sites_by_pc: &SiteIndex<'_>,
+    hosts: &HostSignatures,
+    file: &str,
+    state: &mut [Type],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for pc in start..end {
+        check_sites(
+            program,
+            pc,
+            sites_by_pc.at(pc).iter().copied(),
+            hosts,
+            file,
+            state,
+            diagnostics,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn check_sites<'a>(
+    program: &Program,
+    pc: usize,
+    sites: impl Iterator<Item = &'a TypeCheckSite>,
+    hosts: &HostSignatures,
+    file: &str,
+    state: &mut [Type],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut host_argument = 0;
+    let mut assignment = None;
     for site in sites {
-        if let Some(target) = sites_by_pc.get_mut(site.pc) {
-            target.push(site);
+        let (inferred, errors) = check_site(site, program, state);
+        if site.kind == TypeCheckKind::Assignment && assignment.is_none() {
+            assignment = Some(inferred);
+        }
+        diagnostics.extend(errors.into_iter().map(|error| {
+            let (line, column) = error.span.map_or((0, 1), |span| (span.line, span.column));
+            Diagnostic::new(file, line, column, error.message)
+        }));
+        if site.kind == TypeCheckKind::Expression
+            && let Op::Host(host) = &program.ops[pc]
+        {
+            if let Some(expected) = hosts
+                .get(&host.host_id)
+                .and_then(|signature| signature.argument(host_argument))
+                && !inferred.could_be(expected)
+            {
+                let span = site.expression.span();
+                diagnostics.push(Diagnostic::new(
+                    file,
+                    span.map_or(0, |span| span.line),
+                    span.map_or(1, |span| span.column),
+                    format!(
+                        "host argument {} expects {}, found {}",
+                        host_argument + 1,
+                        expected.name(),
+                        inferred.name()
+                    ),
+                ));
+            }
+            host_argument += 1;
         }
     }
-    sites_by_pc
+    apply_transfer(&program.ops[pc], assignment, hosts, state);
+}
+
+struct SiteIndex<'a> {
+    sites: Vec<&'a TypeCheckSite>,
+    offsets: Vec<usize>,
+}
+
+impl<'a> SiteIndex<'a> {
+    fn new(op_count: usize, sites: &'a [TypeCheckSite]) -> Self {
+        let mut indexed: Vec<_> = sites.iter().filter(|site| site.pc < op_count).collect();
+        if indexed.windows(2).any(|pair| pair[0].pc > pair[1].pc) {
+            indexed.sort_by_key(|site| site.pc);
+        }
+        let mut offsets = vec![0; op_count + 1];
+        for site in &indexed {
+            offsets[site.pc + 1] += 1;
+        }
+        for pc in 1..offsets.len() {
+            offsets[pc] += offsets[pc - 1];
+        }
+        Self {
+            sites: indexed,
+            offsets,
+        }
+    }
+
+    fn at(&self, pc: usize) -> &[&'a TypeCheckSite] {
+        &self.sites[self.offsets[pc]..self.offsets[pc + 1]]
+    }
 }
 
 fn entry_state(program: &Program, initial: &Environment) -> Vec<Type> {
@@ -227,33 +378,41 @@ fn transfer(
     hosts: &HostSignatures,
     state: &mut [Type],
 ) {
+    let assignment = match op {
+        Op::Set { .. } | Op::SetConst { .. } | Op::CopySlot { .. } | Op::Update { .. } => sites
+            .iter()
+            .find(|site| site.kind == TypeCheckKind::Assignment)
+            .map(|site| &site.expression)
+            .map(|expression| infer_in_state(expression, program, state, &mut Vec::new())),
+        _ => None,
+    };
+    apply_transfer(op, assignment, hosts, state);
+}
+
+fn apply_transfer(op: &Op, assignment: Option<Type>, hosts: &HostSignatures, state: &mut [Type]) {
     match op {
-        Op::Set { slot, .. } => {
-            let Some(expression) = sites
-                .iter()
-                .find(|site| site.kind == TypeCheckKind::Assignment)
-                .map(|site| &site.expression)
-            else {
-                return;
-            };
-            let inferred = infer_in_state(expression, program, state, &mut Vec::new());
-            if let Some(target) = state.get_mut(*slot as usize) {
+        Op::Set { slot, .. }
+        | Op::SetConst { slot, .. }
+        | Op::CopySlot { slot, .. }
+        | Op::Update { slot, .. } => {
+            if let (Some(target), Some(inferred)) = (state.get_mut(*slot as usize), assignment) {
                 *target = inferred;
             }
         }
-        Op::Host {
-            host_id,
-            bind: Some(slot),
-            ..
-        } => {
-            if let Some(target) = state.get_mut(*slot as usize) {
+        Op::Host(host) if host.bind.is_some() => {
+            let slot = host.bind.expect("guard checked host binding");
+            if let Some(target) = state.get_mut(slot as usize) {
                 *target = hosts
-                    .get(host_id)
+                    .get(&host.host_id)
                     .and_then(HostSignature::returns)
                     .unwrap_or(Type::Unknown);
             }
         }
-        Op::Jump(_) | Op::JumpIfFalse { .. } | Op::Host { bind: None, .. } | Op::Halt => {}
+        Op::Jump(_)
+        | Op::JumpIfFalse { .. }
+        | Op::JumpIfIntegerCompare { .. }
+        | Op::Host(_)
+        | Op::Halt => {}
     }
 }
 

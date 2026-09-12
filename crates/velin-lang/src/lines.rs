@@ -24,14 +24,14 @@ pub const INDENT_WIDTH: usize = 4;
 
 /// A single meaningful source line.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Line {
+pub struct Line<'source> {
     /// 1-based source line number, for diagnostics.
     pub number: usize,
     /// Indentation depth in levels (0 = column 1).
     pub indent: usize,
     /// The line content after indentation, with any trailing comment removed
     /// and surrounding whitespace trimmed. Never empty.
-    pub content: String,
+    pub content: &'source str,
     /// 1-based column where `content` begins, for anchoring diagnostics into
     /// the embedded expression grammar.
     pub column: usize,
@@ -42,7 +42,7 @@ pub struct Line {
 /// # Errors
 /// Returns a [`Diagnostic`] for a tab in leading whitespace or an indentation
 /// width that is not a multiple of [`INDENT_WIDTH`].
-pub fn read(source: &str, file: &str) -> Result<Vec<Line>, Diagnostic> {
+pub fn read<'source>(source: &'source str, file: &str) -> Result<Vec<Line<'source>>, Diagnostic> {
     if source.len() > MAX_SOURCE_BYTES {
         return Err(Diagnostic::new(
             file,
@@ -79,7 +79,7 @@ pub fn read(source: &str, file: &str) -> Result<Vec<Line>, Diagnostic> {
         lines.push(Line {
             number,
             indent: spaces / INDENT_WIDTH,
-            content: content.to_owned(),
+            content,
             column: spaces + 1,
         });
     }
@@ -89,10 +89,10 @@ pub fn read(source: &str, file: &str) -> Result<Vec<Line>, Diagnostic> {
 /// Counts leading spaces, rejecting tabs so indentation depth is unambiguous.
 fn leading_spaces(raw: &str, file: &str, number: usize) -> Result<usize, Diagnostic> {
     let mut spaces = 0;
-    for ch in raw.chars() {
-        match ch {
-            ' ' => spaces += 1,
-            '\t' => {
+    for byte in raw.bytes() {
+        match byte {
+            b' ' => spaces += 1,
+            b'\t' => {
                 return Err(Diagnostic::new(
                     file,
                     number,
@@ -108,6 +108,14 @@ fn leading_spaces(raw: &str, file: &str, number: usize) -> Result<usize, Diagnos
 
 /// Removes a trailing `#` comment, but not one inside a string literal.
 fn strip_comment(text: &str) -> &str {
+    if !text
+        .as_bytes()
+        .iter()
+        .any(|byte| matches!(byte, b'"' | b'#'))
+    {
+        return text;
+    }
+
     let mut in_string = false;
     let mut escaped = false;
     let mut hole_depth = 0usize;

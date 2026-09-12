@@ -133,11 +133,22 @@ pub(crate) fn infer_with(
             function,
             arguments,
         } => {
-            let argument_types: Vec<Type> = arguments
-                .iter()
-                .map(|arg| infer_with(arg, variable_type, errors))
-                .collect();
-            infer_builtin(*function, &argument_types, errors)
+            const INLINE_ARGUMENTS: usize = 4;
+            let mut inline = [Type::Unknown; INLINE_ARGUMENTS];
+            let overflow;
+            let argument_types = if let Some(slots) = inline.get_mut(..arguments.len()) {
+                for (slot, argument) in slots.iter_mut().zip(arguments) {
+                    *slot = infer_with(argument, variable_type, errors);
+                }
+                &*slots
+            } else {
+                overflow = arguments
+                    .iter()
+                    .map(|argument| infer_with(argument, variable_type, errors))
+                    .collect::<Vec<_>>();
+                overflow.as_slice()
+            };
+            infer_builtin(*function, argument_types, errors)
         }
         Expr::Interpolate { parts } => {
             // Every hole is checked recursively; any value renders to a string,
@@ -355,6 +366,7 @@ mod tests {
         assert!(errors_for("hp + 1", &env).is_empty());
         assert!(errors_for("\"a\" + \"b\"", &env).is_empty());
         assert!(errors_for("len(list(1, 2))", &env).is_empty());
+        assert!(errors_for("len(list(1, 2, 3, 4, 5))", &env).is_empty());
         assert!(errors_for("get(list(1, 2), 0)", &env).is_empty());
         assert!(errors_for("contains(\"abc\", \"b\")", &env).is_empty());
         assert!(errors_for("random(1, 6)", &env).is_empty());

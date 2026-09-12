@@ -50,11 +50,11 @@ fn agree_rng(source: &str, vars: &Variables, seed: i64) {
 
     let mut slots = SlotTable::new();
     let chunk = compile_expression(&expr, &mut slots, 1);
-    let rng_slot = slots.rng_state().expect("random expression reserves state");
+    let rng_slot = slots.rng_state();
     let slot_count = u32::try_from(slots.len()).expect("slot count fits in u32");
     let mut frame: Vec<Option<Value>> = (0..slot_count)
         .map(|slot| {
-            if slot == rng_slot {
+            if Some(slot) == rng_slot {
                 Some(Value::Integer(seed))
             } else {
                 slots.name(slot).and_then(|name| vars.get(name).cloned())
@@ -73,9 +73,12 @@ fn agree_rng(source: &str, vars: &Variables, seed: i64) {
         ),
         (a, b) => panic!("outcome mismatch for `{source}`: walk={a:?} bytecode={b:?}"),
     }
+    let compiled_state = rng_slot.map_or(seed, |slot| match frame[slot as usize].as_ref() {
+        Some(Value::Integer(state)) => *state,
+        _ => unreachable!("RNG slot must contain integer state"),
+    });
     assert_eq!(
-        frame[rng_slot as usize],
-        Some(Value::Integer(walked_state)),
+        compiled_state, walked_state,
         "RNG state mismatch for `{source}`"
     );
 }

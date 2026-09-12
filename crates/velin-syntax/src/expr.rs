@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
+use std::ops::Deref;
+use std::sync::Arc;
 
 pub use crate::data::Builtin;
 
 /// A source location: file, 1-based line, 1-based column.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Span {
-    pub source: String,
+    pub source: SharedString,
     pub line: usize,
     pub column: usize,
 }
@@ -17,7 +19,7 @@ impl Span {
     }
 
     #[must_use]
-    pub fn in_source(source: impl Into<String>, line: usize, column: usize) -> Self {
+    pub fn in_source(source: impl Into<SharedString>, line: usize, column: usize) -> Self {
         Self {
             source: source.into(),
             line,
@@ -106,6 +108,71 @@ pub enum StrPart {
     Hole(Box<Expr>),
 }
 
+/// Cheaply cloned string storage used by [`Value::String`] and [`Span`].
+///
+/// The wrapper keeps the serialized representation as a string while allowing the VM
+/// to mutate a uniquely owned string in place for `text = text + suffix`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SharedString(Arc<String>);
+
+impl SharedString {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// Returns mutable access, cloning the backing string only when another
+    /// value or machine snapshot still shares it.
+    pub fn make_mut(&mut self) -> &mut String {
+        Arc::make_mut(&mut self.0)
+    }
+
+    /// Unwraps unique storage or copies the text when it is still shared.
+    #[must_use]
+    pub fn into_string(self) -> String {
+        Arc::try_unwrap(self.0).unwrap_or_else(|shared| (*shared).clone())
+    }
+}
+
+impl Deref for SharedString {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl AsRef<str> for SharedString {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl PartialEq<&str> for SharedString {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl PartialEq<str> for SharedString {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl From<String> for SharedString {
+    fn from(value: String) -> Self {
+        Self(Arc::new(value))
+    }
+}
+
+impl From<&str> for SharedString {
+    fn from(value: &str) -> Self {
+        Self(Arc::new(value.to_owned()))
+    }
+}
+
 /// The closed set of deterministic values the language can hold.
 ///
 /// There is deliberately no floating-point variant: the language is meant to
@@ -115,7 +182,7 @@ pub enum StrPart {
 pub enum Value {
     Integer(i64),
     Boolean(bool),
-    String(String),
+    String(SharedString),
     List(std::sync::Arc<Vec<Value>>),
     Record(std::sync::Arc<std::collections::BTreeMap<String, Value>>),
 }
@@ -260,7 +327,7 @@ mod tests {
     fn value_type_names_are_stable() {
         assert_eq!(Value::Integer(1).type_name(), "integer");
         assert_eq!(Value::Boolean(true).type_name(), "boolean");
-        assert_eq!(Value::String(String::new()).type_name(), "string");
+        assert_eq!(Value::String(String::new().into()).type_name(), "string");
         assert_eq!(
             Value::List(std::sync::Arc::new(Vec::new())).type_name(),
             "list"
@@ -292,7 +359,7 @@ mod tests {
     #[test]
     fn bounded_display_counts_collection_punctuation() {
         let value = Value::List(std::sync::Arc::new(vec![Value::String(
-            "x".repeat(crate::data::MAX_DATA_TEXT_BYTES),
+            "x".repeat(crate::data::MAX_DATA_TEXT_BYTES).into(),
         )]));
         assert!(value.validate_data().is_ok());
         assert_eq!(value.try_to_display(), Err("rendered text exceeds 1 MiB"));

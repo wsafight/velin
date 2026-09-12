@@ -17,13 +17,22 @@
 
 mod bytecode;
 mod expr;
+mod frame;
 mod program;
 mod slots;
 mod validate;
 
-pub use bytecode::{ExprChunk, ExprOp};
+fn compact_source_position(position: usize) -> u32 {
+    u32::try_from(position).unwrap_or(u32::MAX)
+}
+
+pub use bytecode::{ExprChunk, ExprChunkRef, ExprOp};
 pub use expr::compile_expression;
-pub use program::{ChunkId, Op, Pc, Program, ProgramBuilder};
+pub use frame::{InitialFrame, InitialFrameError, InitialValue};
+pub use program::{
+    ChunkExecutionMetadata, ChunkId, ExecutionMetadata, HostOp, Op, OpExecutionMetadata, Pc,
+    Program, ProgramBuilder, ProgramChunk, QuickenedCallRef, QuickenedOperand, UpdateOp,
+};
 pub use slots::{RNG_STATE_SLOT, SlotTable};
 pub use validate::{
     MAX_EXPR_OPS, MAX_EXPR_STACK, MAX_HOST_ARGUMENTS, MAX_PROGRAM_CHUNKS,

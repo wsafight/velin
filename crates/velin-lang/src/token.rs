@@ -6,18 +6,23 @@
 //! identifier, and recognising the `:`-terminated headers of compound
 //! statements. Keeping them here keeps `parser.rs` focused on grammar.
 
-use crate::FILE;
 use crate::error::ParseError;
 use crate::lines::Line;
-use velin_parse::parse_expression;
-use velin_syntax::Expr;
+use velin_parse::parse_expression_with_source;
+use velin_syntax::{Expr, SharedString};
 
 /// Parses an embedded expression, translating any diagnostic into a
 /// `ParseError` at the right location.
-pub(crate) fn parse_embedded(text: &str, line: usize, column: usize) -> Result<Expr, ParseError> {
+pub(crate) fn parse_embedded(
+    text: &str,
+    source: &SharedString,
+    line: usize,
+    column: usize,
+) -> Result<Expr, ParseError> {
     let trimmed = text.trim_start();
     let leading = text[..text.len() - trimmed.len()].chars().count();
-    parse_expression(trimmed, FILE, line, column + leading).map_err(ParseError::from_diagnostic)
+    parse_expression_with_source(trimmed, source, line, column + leading)
+        .map_err(ParseError::from_diagnostic)
 }
 
 /// Splits a leading identifier-like keyword from the rest of a line.
@@ -36,7 +41,9 @@ pub(crate) fn split_keyword(content: &str) -> (&str, &str) {
 
 /// Splits `name = value` at the first top-level `=` that is not `==`/`!=` etc.,
 /// returning the trimmed name, the value text, and the value's source column.
-pub(crate) fn split_eq(line: &Line) -> Result<(String, &str, usize), ParseError> {
+pub(crate) fn split_eq<'source>(
+    line: &Line<'source>,
+) -> Result<(String, &'source str, usize), ParseError> {
     let content = &line.content;
     let bytes = content.as_bytes();
     let mut index = 0;
@@ -65,7 +72,7 @@ pub(crate) fn split_eq(line: &Line) -> Result<(String, &str, usize), ParseError>
 
 /// Validates an identifier: non-empty, ASCII-alphanumeric/underscore, not
 /// starting with a digit.
-pub(crate) fn expect_identifier(line: &Line, text: &str) -> Result<String, ParseError> {
+pub(crate) fn expect_identifier(line: &Line<'_>, text: &str) -> Result<String, ParseError> {
     let valid = !text.is_empty()
         && text
             .chars()
@@ -83,7 +90,7 @@ pub(crate) fn expect_identifier(line: &Line, text: &str) -> Result<String, Parse
 }
 
 /// Parses a `name:` header (used by `label`), rejecting a missing colon.
-pub(crate) fn expect_header_name(line: &Line, rest: &str) -> Result<String, ParseError> {
+pub(crate) fn expect_header_name(line: &Line<'_>, rest: &str) -> Result<String, ParseError> {
     let text = rest.trim();
     let name = text.strip_suffix(':').ok_or_else(|| {
         ParseError::new(line.number, line.column, "expected `:` after label name")
@@ -93,7 +100,7 @@ pub(crate) fn expect_header_name(line: &Line, rest: &str) -> Result<String, Pars
 
 /// Parses a `<expr>:` header, returning the expression text and its column.
 pub(crate) fn expect_colon_header<'a>(
-    line: &Line,
+    line: &Line<'_>,
     rest: &'a str,
 ) -> Result<(&'a str, usize), ParseError> {
     let trimmed = rest.trim_end();
@@ -108,7 +115,11 @@ pub(crate) fn expect_colon_header<'a>(
 }
 
 /// Validates a bare `keyword:` header such as `else:`.
-pub(crate) fn expect_bare_header(line: &Line, rest: &str, keyword: &str) -> Result<(), ParseError> {
+pub(crate) fn expect_bare_header(
+    line: &Line<'_>,
+    rest: &str,
+    keyword: &str,
+) -> Result<(), ParseError> {
     if rest.trim() == ":" {
         Ok(())
     } else {
@@ -125,11 +136,11 @@ mod tests {
     use super::*;
     use crate::lines::Line;
 
-    fn line(content: &str) -> Line {
+    fn line(content: &str) -> Line<'_> {
         Line {
             number: 1,
             indent: 0,
-            content: content.to_owned(),
+            content,
             column: 1,
         }
     }

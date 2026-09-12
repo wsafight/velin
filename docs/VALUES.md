@@ -30,6 +30,8 @@ Keep physical units in the host, or convert them to integers (cents, millimeters
 
 `+` concatenates two strings. `<` `<=` `>` `>=` order two strings. `len(s)` is the character count. `contains(s, part)` tests for a substring.
 
+Runtime strings are shared through `SharedString` (`Arc<String>` internally). Cloning a value or machine checkpoint therefore does not copy the text. A self-assignment such as `set text = text + "x"` reuses the allocation only when it is uniquely owned; observable value semantics stay persistent when an alias exists.
+
 ## Lists
 
 ```velin
@@ -48,6 +50,8 @@ maybe = get(items, 3, "nothing")
 - A `list(...)` call accepts at most 128 arguments.
 
 Forgetting to assign the result of `push` leaves the original list unchanged.
+
+Assignments whose result is written back to the same source slot use an ownership-aware VM update. A uniquely owned list or record can mutate its allocation after all failure checks pass. Real aliases and machine checkpoints retain copy-on-write behavior, so this is an execution optimization rather than a language-semantic change.
 
 ## Records
 

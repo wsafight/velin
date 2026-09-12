@@ -8,6 +8,8 @@ pub mod data;
 pub mod diagnostic;
 pub mod expr;
 
-pub use data::{Builtin, DataFootprint, MAX_DATA_DEPTH, MAX_DATA_TEXT_BYTES, MAX_DATA_VALUES};
+pub use data::{
+    Builtin, DataFootprint, DataMetrics, MAX_DATA_DEPTH, MAX_DATA_TEXT_BYTES, MAX_DATA_VALUES,
+};
 pub use diagnostic::{Diagnostic, Severity};
-pub use expr::{BinaryOp, Expr, Span, StrPart, UnaryOp, Value};
+pub use expr::{BinaryOp, Expr, SharedString, Span, StrPart, UnaryOp, Value};

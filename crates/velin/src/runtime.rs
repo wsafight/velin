@@ -124,18 +124,30 @@ impl<'a> ScriptRunner<'a> {
         limits: ExecutionLimits,
         schema: Option<&'a HostSchema>,
     ) -> Result<Self, ScriptRunError> {
-        let mut machine = if script.validated_program().refers_to(&script.program) {
+        let validated = script.validated_program().refers_to(&script.program);
+        let prepared = validated
+            .then(|| script.initial_frame())
+            .flatten()
+            .and_then(|frame| {
+                Machine::from_validated_with_seed_and_frame(script.validated_program(), seed, frame)
+            });
+        let used_prepared_frame = prepared.is_some();
+        let mut machine = if let Some(machine) = prepared {
+            machine
+        } else if validated {
             Machine::from_validated_with_seed(script.validated_program(), seed)
         } else {
             Machine::with_seed(script.program.clone(), seed).map_err(ScriptRunError::Program)?
         };
-        for (name, value) in &script.defaults {
-            machine
-                .try_set_variable(name, value.clone())
-                .map_err(|source| ScriptRunError::InitialValue {
-                    name: name.clone(),
-                    source,
-                })?;
+        if !used_prepared_frame {
+            for (name, value) in &script.defaults {
+                machine
+                    .try_set_variable(name, value.clone())
+                    .map_err(|source| ScriptRunError::InitialValue {
+                        name: name.clone(),
+                        source,
+                    })?;
+            }
         }
         Ok(Self {
             script,
@@ -362,11 +374,30 @@ mod tests {
         script.program = Arc::new(Program {
             ops: vec![Op::Jump(2)],
             chunks: Vec::new(),
+            expr_ops: Vec::new(),
+            constants: Vec::new(),
             slots: SlotTable::new(),
         });
         assert!(matches!(
             ScriptRunner::new(&script),
             Err(ScriptRunError::Program(_))
+        ));
+    }
+
+    #[test]
+    fn changing_public_defaults_invalidates_the_prepared_frame() {
+        let mut script = compile("runner.velin", "default hp = 3\n").unwrap();
+        assert!(script.initial_frame().is_some());
+
+        script.defaults.insert("hp".into(), Value::Integer(9));
+        assert!(script.initial_frame().is_none());
+        let runner = ScriptRunner::new(&script).unwrap();
+        assert_eq!(runner.machine().variable("hp"), Some(&Value::Integer(9)));
+
+        script.defaults.insert("unknown".into(), Value::Integer(1));
+        assert!(matches!(
+            ScriptRunner::new(&script),
+            Err(ScriptRunError::InitialValue { ref name, .. }) if name == "unknown"
         ));
     }
 }

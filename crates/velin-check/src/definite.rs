@@ -11,9 +11,9 @@
 //! only reports a read it can prove is always unassigned, so it never rejects a
 //! program the runtime would have accepted.
 
-use crate::cfg::ControlFlow;
+use crate::cfg::{ControlFlow, is_straight_line};
 use std::collections::{BTreeSet, VecDeque};
-use velin_compile::{ExprChunk, ExprOp, Op, Program};
+use velin_compile::{ExprChunkRef, ExprOp, Op, Program, UpdateOp};
 use velin_syntax::{BinaryOp, Builtin, UnaryOp, Value};
 
 /// A use of a slot the analysis proved is unassigned on some path.
@@ -31,9 +31,19 @@ pub struct UnassignedUse {
 /// Returns every read that is not definitely assigned, in program order.
 #[must_use]
 pub fn definite_assignment(program: &Program, preset: &BTreeSet<String>) -> Vec<UnassignedUse> {
+    let slots: Vec<_> = preset
+        .iter()
+        .filter_map(|name| program.slots.get(name))
+        .collect();
+    definite_assignment_slots(program, &slots)
+}
+
+/// Runs definite-assignment analysis with entry state already resolved to
+/// frame slots.
+#[must_use]
+pub fn definite_assignment_slots(program: &Program, preset: &[u32]) -> Vec<UnassignedUse> {
     let slot_count = program.slots.len();
-    let flow = ControlFlow::new(&program.ops);
-    if flow.blocks.is_empty() {
+    if program.ops.is_empty() {
         return Vec::new();
     }
 
@@ -42,11 +52,16 @@ pub fn definite_assignment(program: &Program, preset: &BTreeSet<String>) -> Vec<
     // iterate the intersection to a fixpoint. The entry starts from `preset`.
     let entry: BitSet = preset
         .iter()
-        .filter_map(|name| program.slots.get(name))
         .fold(BitSet::empty(slot_count), |mut set, slot| {
-            set.insert(slot);
+            set.insert(*slot);
             set
         });
+
+    if is_straight_line(&program.ops) {
+        return find_unassigned_linear(program, entry);
+    }
+
+    let flow = ControlFlow::new(&program.ops);
 
     let mut assigned_out = vec![BitSet::full(slot_count); flow.blocks.len()];
     let mut pending = VecDeque::from([0]);
@@ -72,45 +87,145 @@ pub fn definite_assignment(program: &Program, preset: &BTreeSet<String>) -> Vec<
         }
     }
 
-    // Report reads not covered by the incoming (pre-assignment) set.
+    find_unassigned_reads(program, &flow, &assigned_out, &entry)
+}
+
+fn find_unassigned_reads(
+    program: &Program,
+    flow: &ControlFlow,
+    assigned_out: &[BitSet],
+    entry: &BitSet,
+) -> Vec<UnassignedUse> {
     let mut findings = Vec::new();
-    let mut load_cache = vec![None; program.chunks.len()];
+    let mut load_cache: Vec<LoadSet> = std::iter::repeat_with(|| LoadSet::Uncomputed)
+        .take(program.chunks.len())
+        .collect();
+    let mut expression_workspace = ExpressionWorkspace::default();
     for (block_id, block) in flow.blocks.iter().enumerate() {
         if !flow.reachable[block_id] {
             continue;
         }
-        let mut assigned = incoming_set(block_id, &flow, &assigned_out, &entry);
+        let mut assigned = incoming_set(block_id, flow, assigned_out, entry);
         for op in &program.ops[block.start..block.end] {
-            match op {
-                Op::Set { value, .. } => {
-                    record_unassigned(*value, program, &assigned, &mut load_cache, &mut findings);
-                }
-                Op::JumpIfFalse { condition, .. } => record_unassigned(
-                    *condition,
-                    program,
-                    &assigned,
-                    &mut load_cache,
-                    &mut findings,
-                ),
-                Op::Host { args, .. } => {
-                    for chunk in args {
-                        record_unassigned(
-                            *chunk,
-                            program,
-                            &assigned,
-                            &mut load_cache,
-                            &mut findings,
-                        );
-                    }
-                }
-                Op::Jump(_) | Op::Halt => {}
-            }
+            record_reads(
+                op,
+                program,
+                &assigned,
+                &mut load_cache,
+                &mut expression_workspace,
+                &mut findings,
+            );
             if let Some(slot) = assigned_slot(op) {
                 assigned.insert(slot);
             }
         }
     }
     findings
+}
+
+fn find_unassigned_linear(program: &Program, mut assigned: BitSet) -> Vec<UnassignedUse> {
+    let mut findings = Vec::new();
+    let mut load_cache: Vec<LoadSet> = std::iter::repeat_with(|| LoadSet::Uncomputed)
+        .take(program.chunks.len())
+        .collect();
+    let mut expression_workspace = ExpressionWorkspace::default();
+    for op in &program.ops {
+        record_reads(
+            op,
+            program,
+            &assigned,
+            &mut load_cache,
+            &mut expression_workspace,
+            &mut findings,
+        );
+        if let Some(slot) = assigned_slot(op) {
+            assigned.insert(slot);
+        }
+    }
+    findings
+}
+
+fn record_reads(
+    op: &Op,
+    program: &Program,
+    assigned: &BitSet,
+    load_cache: &mut [LoadSet],
+    expression_workspace: &mut ExpressionWorkspace,
+    findings: &mut Vec<UnassignedUse>,
+) {
+    match op {
+        Op::Set { value, .. } => {
+            record_unassigned(
+                *value,
+                program,
+                assigned,
+                load_cache,
+                expression_workspace,
+                findings,
+            );
+        }
+        Op::CopySlot {
+            source,
+            line,
+            column,
+            ..
+        } => {
+            if !assigned.contains(*source) {
+                findings.push(UnassignedUse {
+                    name: program.slots.name(*source).unwrap_or("?").to_owned(),
+                    line: *line as usize,
+                    column: *column as usize,
+                });
+            }
+        }
+        Op::Update {
+            slot,
+            operation,
+            line,
+            column,
+        } => {
+            if !assigned.contains(*slot) {
+                findings.push(UnassignedUse {
+                    name: program.slots.name(*slot).unwrap_or("?").to_owned(),
+                    line: *line as usize,
+                    column: *column as usize,
+                });
+            }
+            for chunk in update_chunks(*operation).into_iter().flatten() {
+                record_unassigned(
+                    chunk,
+                    program,
+                    assigned,
+                    load_cache,
+                    expression_workspace,
+                    findings,
+                );
+            }
+        }
+        Op::JumpIfFalse { condition, .. } | Op::JumpIfIntegerCompare { condition, .. } => {
+            record_unassigned(
+                *condition,
+                program,
+                assigned,
+                load_cache,
+                expression_workspace,
+                findings,
+            );
+        }
+        Op::Host(host) => {
+            for chunk in &host.args {
+                record_unassigned(
+                    *chunk,
+                    program,
+                    assigned,
+                    load_cache,
+                    expression_workspace,
+                    findings,
+                );
+            }
+        }
+        Op::SetConst { .. } | Op::Jump(_) | Op::Halt => {}
+    }
 }
 
 /// The set of slots definitely assigned on entry to `pc`: the intersection of
@@ -139,10 +254,21 @@ fn incoming_set(
 fn assigned_slot(op: &Op) -> Option<u32> {
     match op {
         Op::Set { slot, .. }
-        | Op::Host {
-            bind: Some(slot), ..
-        } => Some(*slot),
+        | Op::SetConst { slot, .. }
+        | Op::CopySlot { slot, .. }
+        | Op::Update { slot, .. } => Some(*slot),
+        Op::Host(host) => host.bind,
         _ => None,
+    }
+}
+
+fn update_chunks(operation: UpdateOp) -> [Option<u32>; 2] {
+    match operation {
+        UpdateOp::Add { rhs } => [Some(rhs), None],
+        UpdateOp::AddInteger { .. } => [None, None],
+        UpdateOp::Push { value } => [Some(value), None],
+        UpdateOp::Put { key, value } => [Some(key), Some(value)],
+        UpdateOp::Remove { key } => [Some(key), None],
     }
 }
 
@@ -150,21 +276,24 @@ fn record_unassigned(
     chunk_id: u32,
     program: &Program,
     assigned: &BitSet,
-    load_cache: &mut [Option<BTreeSet<(u32, usize)>>],
+    load_cache: &mut [LoadSet],
+    expression_workspace: &mut ExpressionWorkspace,
     findings: &mut Vec<UnassignedUse>,
 ) {
-    let Some(chunk) = program.chunks.get(chunk_id as usize) else {
+    let Some(chunk) = program.chunk(chunk_id) else {
         return;
     };
     let Some(cache) = load_cache.get_mut(chunk_id as usize) else {
         return;
     };
-    let loads = cache.get_or_insert_with(|| reachable_loads(chunk));
-    for (slot, column) in &*loads {
+    if matches!(cache, LoadSet::Uncomputed) {
+        *cache = reachable_loads(chunk, expression_workspace);
+    }
+    for (slot, column) in cache.as_slice() {
         if !assigned.contains(*slot) {
             findings.push(UnassignedUse {
                 name: program.slots.name(*slot).unwrap_or("?").to_owned(),
-                line: chunk.line,
+                line: chunk.line as usize,
                 column: *column,
             });
         }
@@ -178,34 +307,262 @@ enum AbstractValue {
     Unknown,
 }
 
+const INLINE_ABSTRACT_VALUES: usize = 8;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AbstractStack {
+    Inline {
+        values: [AbstractValue; INLINE_ABSTRACT_VALUES],
+        len: u8,
+    },
+    Overflow(Vec<AbstractValue>),
+}
+
+impl Default for AbstractStack {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AbstractStack {
+    const fn new() -> Self {
+        Self::Inline {
+            values: [AbstractValue::Unknown; INLINE_ABSTRACT_VALUES],
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, value: AbstractValue) {
+        match self {
+            Self::Inline { values, len } if usize::from(*len) < values.len() => {
+                values[usize::from(*len)] = value;
+                *len += 1;
+            }
+            Self::Inline { values, len } => {
+                let len = usize::from(*len);
+                let mut overflow = Vec::with_capacity(INLINE_ABSTRACT_VALUES * 2);
+                overflow.extend_from_slice(&values[..len]);
+                overflow.push(value);
+                *self = Self::Overflow(overflow);
+            }
+            Self::Overflow(values) => values.push(value),
+        }
+    }
+
+    fn pop(&mut self) -> Option<AbstractValue> {
+        match self {
+            Self::Inline { values, len } if *len > 0 => {
+                *len -= 1;
+                Some(values[usize::from(*len)])
+            }
+            Self::Inline { .. } => None,
+            Self::Overflow(values) => values.pop(),
+        }
+    }
+
+    fn last(&self) -> Option<AbstractValue> {
+        self.as_slice().last().copied()
+    }
+
+    fn len(&self) -> usize {
+        self.as_slice().len()
+    }
+
+    fn truncate(&mut self, len: usize) {
+        match self {
+            Self::Inline {
+                len: current_len, ..
+            } => {
+                *current_len = (*current_len).min(u8::try_from(len).unwrap_or(u8::MAX));
+            }
+            Self::Overflow(values) => values.truncate(len),
+        }
+    }
+
+    fn as_slice(&self) -> &[AbstractValue] {
+        match self {
+            Self::Inline { values, len } => &values[..usize::from(*len)],
+            Self::Overflow(values) => values,
+        }
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [AbstractValue] {
+        match self {
+            Self::Inline { values, len } => &mut values[..usize::from(*len)],
+            Self::Overflow(values) => values,
+        }
+    }
+}
+
+#[derive(Default)]
+struct ExpressionWorkspace {
+    states: Vec<Option<AbstractStack>>,
+    pending: VecDeque<usize>,
+}
+
+impl ExpressionWorkspace {
+    fn reset_states(&mut self, len: usize) {
+        self.states.clear();
+        self.states.resize_with(len, || None);
+    }
+}
+
 /// Returns the slots whose `Load` instructions can execute. Expression chunks
 /// contain forward jumps for `and`/`or`; a flat scan would report reads hidden
 /// behind a constant short-circuit guard.
-fn reachable_loads(chunk: &ExprChunk) -> BTreeSet<(u32, usize)> {
-    let mut loads = BTreeSet::new();
-    let mut states: Vec<Option<Vec<AbstractValue>>> = vec![None; chunk.ops.len() + 1];
-    let mut pending = VecDeque::from([0]);
-    states[0] = Some(Vec::new());
+fn reachable_loads(chunk: ExprChunkRef<'_>, workspace: &mut ExpressionWorkspace) -> LoadSet {
+    let mut loads = LoadSet::new();
+    let mut has_branches = false;
+    let mut branches_are_forward = true;
+    for (pc, op) in chunk.ops.iter().enumerate() {
+        if let ExprOp::JumpIfFalse(target) | ExprOp::JumpIfTrue(target) = op {
+            has_branches = true;
+            let target = *target as usize;
+            branches_are_forward &= target > pc && target <= chunk.ops.len();
+        }
+    }
+    if !has_branches {
+        let mut stack = AbstractStack::new();
+        for pc in 0..chunk.ops.len() {
+            match abstract_step(chunk, pc, stack, &mut loads) {
+                AbstractStep::Stop => break,
+                AbstractStep::Next {
+                    pc: next_pc,
+                    stack: next_stack,
+                } => {
+                    debug_assert_eq!(next_pc, pc + 1);
+                    stack = next_stack;
+                }
+                AbstractStep::Fork { .. } => {
+                    unreachable!("a linear expression cannot fork")
+                }
+            }
+        }
+        loads.sort_and_deduplicate();
+        return loads;
+    }
+
+    if branches_are_forward {
+        workspace.reset_states(chunk.ops.len() + 1);
+        let states = &mut workspace.states;
+        states[0] = Some(AbstractStack::new());
+        for pc in 0..chunk.ops.len() {
+            let Some(stack) = states[pc].take() else {
+                continue;
+            };
+            match abstract_step(chunk, pc, stack, &mut loads) {
+                AbstractStep::Stop => {}
+                AbstractStep::Next { pc, stack } => merge_state(&mut states[pc], stack),
+                AbstractStep::Fork {
+                    first_pc,
+                    first_stack,
+                    second_pc,
+                    second_stack,
+                } => {
+                    merge_state(&mut states[first_pc], first_stack);
+                    merge_state(&mut states[second_pc], second_stack);
+                }
+            }
+        }
+        loads.sort_and_deduplicate();
+        return loads;
+    }
+
+    workspace.reset_states(chunk.ops.len() + 1);
+    workspace.pending.clear();
+    workspace.pending.push_back(0);
+    let states = &mut workspace.states;
+    let pending = &mut workspace.pending;
+    states[0] = Some(AbstractStack::new());
 
     while let Some(pc) = pending.pop_front() {
         if pc >= chunk.ops.len() {
             continue;
         }
         let stack = states[pc].clone().unwrap_or_default();
-        for (next_pc, next_stack) in abstract_step(chunk, pc, stack, &mut loads) {
-            enqueue_state(&mut states, &mut pending, next_pc, next_stack);
+        match abstract_step(chunk, pc, stack, &mut loads) {
+            AbstractStep::Stop => {}
+            AbstractStep::Next { pc, stack } => {
+                enqueue_state(states, pending, pc, stack);
+            }
+            AbstractStep::Fork {
+                first_pc,
+                first_stack,
+                second_pc,
+                second_stack,
+            } => {
+                enqueue_state(states, pending, first_pc, first_stack);
+                enqueue_state(states, pending, second_pc, second_stack);
+            }
         }
     }
+    loads.sort_and_deduplicate();
     loads
 }
 
+enum LoadSet {
+    Uncomputed,
+    Empty,
+    One((u32, usize)),
+    Many(Vec<(u32, usize)>),
+}
+
+impl LoadSet {
+    const fn new() -> Self {
+        Self::Empty
+    }
+
+    fn insert(&mut self, load: (u32, usize)) {
+        match self {
+            Self::Uncomputed => unreachable!("loads are computed before insertion"),
+            Self::Empty => *self = Self::One(load),
+            Self::One(existing) if *existing == load => {}
+            Self::One(existing) => {
+                let first = *existing;
+                *self = Self::Many(vec![first, load]);
+            }
+            Self::Many(loads) if loads.contains(&load) => {}
+            Self::Many(loads) => loads.push(load),
+        }
+    }
+
+    fn sort_and_deduplicate(&mut self) {
+        if let Self::Many(loads) = self {
+            loads.sort_unstable();
+            loads.dedup();
+        }
+    }
+
+    fn as_slice(&self) -> &[(u32, usize)] {
+        match self {
+            Self::Uncomputed | Self::Empty => &[],
+            Self::One(load) => std::slice::from_ref(load),
+            Self::Many(loads) => loads,
+        }
+    }
+}
+
+enum AbstractStep {
+    Stop,
+    Next {
+        pc: usize,
+        stack: AbstractStack,
+    },
+    Fork {
+        first_pc: usize,
+        first_stack: AbstractStack,
+        second_pc: usize,
+        second_stack: AbstractStack,
+    },
+}
+
 fn abstract_step(
-    chunk: &ExprChunk,
+    chunk: ExprChunkRef<'_>,
     pc: usize,
-    mut stack: Vec<AbstractValue>,
-    loads: &mut BTreeSet<(u32, usize)>,
-) -> Vec<(usize, Vec<AbstractValue>)> {
-    let mut next = Vec::new();
+    mut stack: AbstractStack,
+    loads: &mut LoadSet,
+) -> AbstractStep {
+    let mut next_pc = pc + 1;
     match &chunk.ops[pc] {
         ExprOp::Const(index) => {
             stack.push(match chunk.constants.get(*index as usize) {
@@ -213,12 +570,10 @@ fn abstract_step(
                 Some(_) => AbstractValue::NonBoolean,
                 None => AbstractValue::Unknown,
             });
-            next.push((pc + 1, stack));
         }
         ExprOp::Load { slot, column } => {
-            loads.insert((*slot, *column));
+            loads.insert((*slot, *column as usize));
             stack.push(AbstractValue::Unknown);
-            next.push((pc + 1, stack));
         }
         ExprOp::Unary(op) => {
             let value = stack.pop().unwrap_or(AbstractValue::Unknown);
@@ -233,7 +588,8 @@ fn abstract_step(
             };
             if let Some(result) = result {
                 stack.push(result);
-                next.push((pc + 1, stack));
+            } else {
+                return AbstractStep::Stop;
             }
         }
         ExprOp::Binary(op) => {
@@ -251,7 +607,6 @@ fn abstract_step(
                     AbstractValue::NonBoolean
                 }
             });
-            next.push((pc + 1, stack));
         }
         ExprOp::Call { function, argc } => {
             pop_values(&mut stack, *argc as usize);
@@ -260,72 +615,73 @@ fn abstract_step(
                 Builtin::Get => AbstractValue::Unknown,
                 _ => AbstractValue::NonBoolean,
             });
-            next.push((pc + 1, stack));
         }
         ExprOp::Random { .. } => {
             pop_values(&mut stack, 2);
             stack.push(AbstractValue::NonBoolean);
-            next.push((pc + 1, stack));
         }
         ExprOp::Chance { .. } => {
             pop_values(&mut stack, 1);
             stack.push(AbstractValue::Boolean(None));
-            next.push((pc + 1, stack));
         }
         ExprOp::Concat(count) => {
             pop_values(&mut stack, *count as usize);
             stack.push(AbstractValue::NonBoolean);
-            next.push((pc + 1, stack));
         }
         ExprOp::JumpIfFalse(target) | ExprOp::JumpIfTrue(target) => {
             let jump_on = matches!(&chunk.ops[pc], ExprOp::JumpIfTrue(_));
-            match stack.last().copied().unwrap_or(AbstractValue::Unknown) {
+            match stack.last().unwrap_or(AbstractValue::Unknown) {
                 AbstractValue::Boolean(Some(value)) if value == jump_on => {
-                    next.push((*target as usize, stack));
+                    next_pc = *target as usize;
                 }
-                AbstractValue::Boolean(Some(_)) | AbstractValue::NonBoolean => {
-                    next.push((pc + 1, stack));
-                }
+                AbstractValue::Boolean(Some(_)) | AbstractValue::NonBoolean => {}
                 AbstractValue::Boolean(None) | AbstractValue::Unknown => {
-                    next.push((*target as usize, stack.clone()));
-                    next.push((pc + 1, stack));
+                    return AbstractStep::Fork {
+                        first_pc: *target as usize,
+                        first_stack: stack.clone(),
+                        second_pc: pc + 1,
+                        second_stack: stack,
+                    };
                 }
             }
         }
         ExprOp::AssertBoolean(_) => match stack.last() {
-            Some(AbstractValue::NonBoolean) | None => {}
-            Some(AbstractValue::Boolean(_) | AbstractValue::Unknown) => {
-                next.push((pc + 1, stack));
-            }
+            Some(AbstractValue::NonBoolean) | None => return AbstractStep::Stop,
+            Some(AbstractValue::Boolean(_) | AbstractValue::Unknown) => {}
         },
     }
-    next
+    AbstractStep::Next { pc: next_pc, stack }
 }
 
-fn pop_values(stack: &mut Vec<AbstractValue>, count: usize) {
+fn pop_values(stack: &mut AbstractStack, count: usize) {
     stack.truncate(stack.len().saturating_sub(count));
 }
 
 fn enqueue_state(
-    states: &mut [Option<Vec<AbstractValue>>],
+    states: &mut [Option<AbstractStack>],
     pending: &mut VecDeque<usize>,
     pc: usize,
-    incoming: Vec<AbstractValue>,
+    incoming: AbstractStack,
 ) {
     let Some(state) = states.get_mut(pc) else {
         return;
     };
-    let merged = match state.as_ref() {
-        None => incoming,
-        Some(current) => current
-            .iter()
-            .zip(&incoming)
-            .map(|(left, right)| merge_value(*left, *right))
-            .collect(),
-    };
-    if state.as_ref() != Some(&merged) {
-        *state = Some(merged);
+    let mut merged = state.clone();
+    merge_state(&mut merged, incoming);
+    if *state != merged {
+        *state = merged;
         pending.push_back(pc);
+    }
+}
+
+fn merge_state(state: &mut Option<AbstractStack>, incoming: AbstractStack) {
+    let Some(current) = state else {
+        *state = Some(incoming);
+        return;
+    };
+    current.truncate(incoming.len());
+    for (left, right) in current.as_mut_slice().iter_mut().zip(incoming.as_slice()) {
+        *left = merge_value(*left, *right);
     }
 }
 
@@ -401,6 +757,23 @@ mod tests {
     use super::*;
     use velin_compile::{Program, ProgramBuilder, SlotTable};
     use velin_syntax::{BinaryOp, Expr, UnaryOp, Value};
+
+    #[test]
+    fn abstract_stack_preserves_values_after_spilling() {
+        let mut stack = AbstractStack::new();
+        for index in 0..=INLINE_ABSTRACT_VALUES {
+            stack.push(AbstractValue::Boolean(Some(index % 2 == 0)));
+        }
+
+        assert!(matches!(stack, AbstractStack::Overflow(_)));
+        for index in (0..=INLINE_ABSTRACT_VALUES).rev() {
+            assert_eq!(
+                stack.pop(),
+                Some(AbstractValue::Boolean(Some(index % 2 == 0)))
+            );
+        }
+        assert_eq!(stack.pop(), None);
+    }
 
     #[test]
     fn read_after_assignment_is_clean() {
@@ -565,6 +938,16 @@ mod tests {
         assert!(definite_assignment(&b.build(), &BTreeSet::new()).is_empty());
     }
 
+    #[test]
+    fn inline_load_set_spills_sorts_and_deduplicates() {
+        let mut loads = LoadSet::new();
+        for load in [(4, 1), (2, 3), (5, 1), (1, 8), (3, 2), (2, 3)] {
+            loads.insert(load);
+        }
+        loads.sort_and_deduplicate();
+        assert_eq!(loads.as_slice(), &[(1, 8), (2, 3), (3, 2), (4, 1), (5, 1)]);
+    }
+
     fn analyze(source: &str) -> Vec<UnassignedUse> {
         let expr = velin_parse::parse_expression(source, "t", 1, 1).unwrap();
         let mut b = ProgramBuilder::new();
@@ -625,12 +1008,7 @@ mod tests {
     fn host_bind_counts_as_assignment_and_empty_programs_are_clean() {
         let mut b = ProgramBuilder::new();
         let answer = b.slot("answer");
-        b.push(Op::Host {
-            host_id: 0,
-            args: Vec::new(),
-            bind: Some(answer),
-            line: 1,
-        });
+        b.push(Op::host(0, Vec::new(), Some(answer), 1));
         let sink = b.slot("sink");
         let read = b.expr(&Expr::Variable("answer".into()), 2);
         b.push(Op::Set {
@@ -642,6 +1020,8 @@ mod tests {
         let empty = Program {
             ops: Vec::new(),
             chunks: Vec::new(),
+            expr_ops: Vec::new(),
+            constants: Vec::new(),
             slots: SlotTable::default(),
         };
         assert!(definite_assignment(&empty, &BTreeSet::new()).is_empty());
@@ -653,9 +1033,9 @@ mod tests {
 
         let mut slots = SlotTable::new();
         slots.intern("x");
-        let program = Program {
-            ops: vec![Op::Set { slot: 0, value: 0 }],
-            chunks: vec![ExprChunk {
+        let program = Program::from_chunks(
+            vec![Op::Set { slot: 0, value: 0 }],
+            vec![ExprChunk {
                 ops: vec![
                     ExprOp::Const(99),
                     ExprOp::Unary(UnaryOp::Not),
@@ -667,7 +1047,7 @@ mod tests {
                 line: 1,
             }],
             slots,
-        };
+        );
         let _ = definite_assignment(&program, &BTreeSet::new());
     }
 
@@ -676,6 +1056,8 @@ mod tests {
         let program = Program {
             ops: vec![Op::Set { slot: 0, value: 99 }],
             chunks: Vec::new(),
+            expr_ops: Vec::new(),
+            constants: Vec::new(),
             slots: SlotTable::new(),
         };
         assert!(definite_assignment(&program, &BTreeSet::new()).is_empty());

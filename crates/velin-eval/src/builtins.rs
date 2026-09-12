@@ -7,43 +7,132 @@
 use crate::eval::{EvalError, execution};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use velin_syntax::{Builtin, Value};
+use velin_syntax::{Builtin, DataMetrics, Value};
 
 /// Invokes `function` with already-evaluated `arguments`.
 ///
 /// # Errors
 /// Returns [`EvalError`] for an invalid argument count, a type mismatch, an
 /// out-of-range index or key, or a result that exceeds the data budget.
+pub fn invoke(function: Builtin, arguments: Vec<Value>, line: usize) -> Result<Value, EvalError> {
+    invoke_measured(function, arguments, line).map(|(value, _)| value)
+}
+
+/// Invokes a built-in and returns the resource metrics produced while
+/// validating its result.
 ///
-/// # Panics
-/// Panics if a well-formed built-in call is internally inconsistent (e.g. a
-/// missing argument the arity check should have rejected); unreachable for
-/// calls that passed [`Builtin::accepts`].
-pub fn invoke(
+/// The bytecode VM retains these metrics through the end of an expression so
+/// collection results are not traversed a second time before assignment.
+///
+/// # Errors
+/// Returns the same failures as [`invoke`].
+pub fn invoke_measured(
     function: Builtin,
     mut arguments: Vec<Value>,
     line: usize,
-) -> Result<Value, EvalError> {
-    if !function.accepts(arguments.len()) {
+) -> Result<(Value, DataMetrics), EvalError> {
+    let argc = arguments.len();
+    let metrics = invoke_stack_measured(function, &mut arguments, argc, line)?;
+    let result = arguments
+        .pop()
+        .ok_or_else(|| execution(line, "built-in produced no result"))?;
+    debug_assert!(arguments.is_empty());
+    Ok((result, metrics))
+}
+
+/// Consumes `argc` values from the end of `stack`, pushes one result, and
+/// returns its validated metrics.
+///
+/// Fixed-arity built-ins pop their operands directly, avoiding a temporary
+/// argument vector in the bytecode VM. `list` reuses or creates exactly the
+/// vector needed for the resulting collection.
+///
+/// # Errors
+/// Returns the same failures as [`invoke`], plus an invalid argument-count
+/// error if `stack` does not contain all declared operands.
+pub fn invoke_stack_measured(
+    function: Builtin,
+    stack: &mut Vec<Value>,
+    argc: usize,
+    line: usize,
+) -> Result<DataMetrics, EvalError> {
+    if !function.accepts(argc) || stack.len() < argc {
         return Err(execution(line, "invalid built-in argument count"));
     }
     let result = match function {
-        Builtin::List => Value::List(Arc::new(arguments)),
-        Builtin::Record => {
-            let mut record = BTreeMap::new();
-            let mut arguments = arguments.into_iter();
-            while let Some(key) = arguments.next() {
-                let Value::String(key) = key else {
-                    return Err(execution(line, "record keys must be strings"));
-                };
-                if record.insert(key, arguments.next().unwrap()).is_some() {
-                    return Err(execution(line, "duplicate record key"));
-                }
-            }
-            Value::Record(Arc::new(record))
+        Builtin::List => construct_list(stack, argc),
+        Builtin::Record => construct_record(stack, argc, line)?,
+        Builtin::Len | Builtin::Get | Builtin::Contains => {
+            let at = stack.len() - argc;
+            let result = invoke_readonly(function, argc, |index| &stack[at + index], line);
+            stack.truncate(at);
+            result?
         }
+        Builtin::Push => {
+            let value = pop_argument(stack, line)?;
+            let source = pop_argument(stack, line)?;
+            let Value::List(mut values) = source else {
+                return Err(execution(line, "push expects a list"));
+            };
+            Arc::make_mut(&mut values).push(value);
+            Value::List(values)
+        }
+        Builtin::Put => {
+            let replacement = pop_argument(stack, line)?;
+            let key = pop_argument(stack, line)?;
+            let source = pop_argument(stack, line)?;
+            edit(source, key, Some(replacement), line)?
+        }
+        Builtin::Remove => {
+            let key = pop_argument(stack, line)?;
+            let source = pop_argument(stack, line)?;
+            edit(source, key, None, line)?
+        }
+        Builtin::Random | Builtin::Chance => {
+            return Err(execution(
+                line,
+                "random functions require a threaded RNG state",
+            ));
+        }
+    };
+    let metrics = result
+        .data_metrics()
+        .map_err(|error| execution(line, error))?;
+    stack.push(result);
+    Ok(metrics)
+}
+
+/// Invokes a built-in that only reads its arguments without cloning them.
+///
+/// This accepts `len`, `get`, and `contains`; collection constructors and
+/// mutations require owned operands and remain on [`invoke_stack_measured`].
+///
+/// # Errors
+/// Returns the same failures as [`invoke`] and rejects non-read-only built-ins.
+pub fn invoke_readonly_measured(
+    function: Builtin,
+    arguments: &[&Value],
+    line: usize,
+) -> Result<(Value, DataMetrics), EvalError> {
+    if !function.accepts(arguments.len()) {
+        return Err(execution(line, "invalid built-in argument count"));
+    }
+    let result = invoke_readonly(function, arguments.len(), |index| arguments[index], line)?;
+    let metrics = result
+        .data_metrics()
+        .map_err(|error| execution(line, error))?;
+    Ok((result, metrics))
+}
+
+fn invoke_readonly<'a>(
+    function: Builtin,
+    argc: usize,
+    argument: impl Fn(usize) -> &'a Value,
+    line: usize,
+) -> Result<Value, EvalError> {
+    let result = match function {
         Builtin::Len => Value::Integer(
-            i64::try_from(match &arguments[0] {
+            i64::try_from(match argument(0) {
                 Value::List(values) => values.len(),
                 Value::Record(values) => values.len(),
                 Value::String(value) => value.chars().count(),
@@ -52,11 +141,13 @@ pub fn invoke(
             .map_err(|_| execution(line, "length overflow"))?,
         ),
         Builtin::Get => {
-            let value = match (&arguments[0], &arguments[1]) {
+            let source = argument(0);
+            let key = argument(1);
+            let value = match (source, key) {
                 (Value::List(values), Value::Integer(index)) => usize::try_from(*index)
                     .ok()
                     .and_then(|index| values.get(index)),
-                (Value::Record(values), Value::String(key)) => values.get(key),
+                (Value::Record(values), Value::String(key)) => values.get(key.as_str()),
                 _ => {
                     return Err(execution(
                         line,
@@ -65,36 +156,54 @@ pub fn invoke(
                 }
             };
             value
-                .or(arguments.get(2))
+                .or_else(|| (argc == 3).then(|| argument(2)))
                 .cloned()
                 .ok_or_else(|| execution(line, "missing key or list index"))?
         }
-        Builtin::Contains => Value::Boolean(match (&arguments[0], &arguments[1]) {
-            (Value::List(values), value) => values.contains(value),
-            (Value::Record(values), Value::String(key)) => values.contains_key(key),
-            (Value::String(text), Value::String(part)) => text.contains(part),
-            _ => return Err(execution(line, "contains expects a list, record or string")),
-        }),
-        Builtin::Push => {
-            let value = arguments.pop().unwrap();
-            let Value::List(mut values) = arguments.pop().unwrap() else {
-                return Err(execution(line, "push expects a list"));
-            };
-            Arc::make_mut(&mut values).push(value);
-            Value::List(values)
+        Builtin::Contains => {
+            let source = argument(0);
+            let value = argument(1);
+            Value::Boolean(match (source, value) {
+                (Value::List(values), value) => values.contains(value),
+                (Value::Record(values), Value::String(key)) => values.contains_key(key.as_str()),
+                (Value::String(text), Value::String(part)) => text.contains(part.as_str()),
+                _ => return Err(execution(line, "contains expects a list, record or string")),
+            })
         }
-        Builtin::Put | Builtin::Remove => edit(function, arguments, line)?,
-        Builtin::Random | Builtin::Chance => {
-            return Err(execution(
-                line,
-                "random functions require a threaded RNG state",
-            ));
-        }
+        _ => return Err(execution(line, "built-in requires owned arguments")),
     };
-    result
-        .validate_data()
-        .map_err(|error| execution(line, error))?;
     Ok(result)
+}
+
+fn construct_list(stack: &mut Vec<Value>, argc: usize) -> Value {
+    let at = stack.len() - argc;
+    let values = if at == 0 {
+        std::mem::take(stack)
+    } else {
+        stack.drain(at..).collect()
+    };
+    Value::List(Arc::new(values))
+}
+
+fn construct_record(stack: &mut Vec<Value>, argc: usize, line: usize) -> Result<Value, EvalError> {
+    let mut record = BTreeMap::new();
+    for _ in 0..argc / 2 {
+        let value = pop_argument(stack, line)?;
+        let key = pop_argument(stack, line)?;
+        let Value::String(key) = key else {
+            return Err(execution(line, "record keys must be strings"));
+        };
+        if record.insert(key.into_string(), value).is_some() {
+            return Err(execution(line, "duplicate record key"));
+        }
+    }
+    Ok(Value::Record(Arc::new(record)))
+}
+
+fn pop_argument(stack: &mut Vec<Value>, line: usize) -> Result<Value, EvalError> {
+    stack
+        .pop()
+        .ok_or_else(|| execution(line, "invalid built-in argument count"))
 }
 
 /// Invokes one of the stateful random built-ins and advances `state`.
@@ -193,10 +302,13 @@ fn next_u64(state: &mut i64) -> u64 {
     value ^ (value >> 31)
 }
 
-fn edit(function: Builtin, mut arguments: Vec<Value>, line: usize) -> Result<Value, EvalError> {
-    let replacement = (function == Builtin::Put).then(|| arguments.pop().unwrap());
-    let key = arguments.pop().unwrap();
-    match (arguments.pop().unwrap(), key) {
+fn edit(
+    source: Value,
+    key: Value,
+    replacement: Option<Value>,
+    line: usize,
+) -> Result<Value, EvalError> {
+    match (source, key) {
         (Value::List(mut values), Value::Integer(index)) => {
             let index = usize::try_from(index)
                 .ok()
@@ -211,8 +323,8 @@ fn edit(function: Builtin, mut arguments: Vec<Value>, line: usize) -> Result<Val
         }
         (Value::Record(mut values), Value::String(key)) => {
             if let Some(value) = replacement {
-                Arc::make_mut(&mut values).insert(key, value);
-            } else if Arc::make_mut(&mut values).remove(&key).is_none() {
+                Arc::make_mut(&mut values).insert(key.into_string(), value);
+            } else if Arc::make_mut(&mut values).remove(key.as_str()).is_none() {
                 return Err(execution(line, "missing record key"));
             }
             Ok(Value::Record(values))
@@ -449,6 +561,42 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn readonly_invocation_matches_owned_builtin_results() {
+        let list = Value::List(Arc::new(vec![Value::String("map".into())]));
+        let zero = Value::Integer(0);
+        let missing = Value::Integer(1);
+        let default = Value::String("fallback".into());
+        let map = Value::String("map".into());
+
+        assert_eq!(
+            invoke_readonly_measured(Builtin::Len, &[&list], 1)
+                .unwrap()
+                .0,
+            Value::Integer(1)
+        );
+        assert_eq!(
+            invoke_readonly_measured(Builtin::Get, &[&list, &zero], 1)
+                .unwrap()
+                .0,
+            map
+        );
+        assert_eq!(
+            invoke_readonly_measured(Builtin::Get, &[&list, &missing, &default], 1)
+                .unwrap()
+                .0,
+            default
+        );
+        assert_eq!(
+            invoke_readonly_measured(Builtin::Contains, &[&list, &map], 1)
+                .unwrap()
+                .0,
+            Value::Boolean(true)
+        );
+        assert!(invoke_readonly_measured(Builtin::Len, &[], 1).is_err());
+        assert!(invoke_readonly_measured(Builtin::Push, &[&list, &map], 1).is_err());
     }
 
     #[test]

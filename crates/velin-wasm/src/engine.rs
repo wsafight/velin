@@ -256,7 +256,7 @@ fn json_to_value(value: &serde_json::Value) -> Option<Value> {
     match value {
         serde_json::Value::Bool(boolean) => Some(Value::Boolean(*boolean)),
         serde_json::Value::Number(number) => number.as_i64().map(Value::Integer),
-        serde_json::Value::String(text) => Some(Value::String(text.clone())),
+        serde_json::Value::String(text) => Some(Value::String(text.clone().into())),
         _ => None,
     }
 }

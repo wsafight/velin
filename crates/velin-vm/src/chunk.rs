@@ -6,14 +6,37 @@
 //! bytecode path and the tree-walker are guaranteed to agree operation for
 //! operation.
 
-use velin_compile::{ExprChunk, ExprOp};
-use velin_eval::{EvalError, apply_binary, apply_unary, invoke, invoke_random, unassigned};
-use velin_syntax::{BinaryOp, Builtin, DataFootprint, MAX_DATA_TEXT_BYTES, Value};
+use velin_compile::{ExprChunk, ExprChunkRef, ExprOp};
+use velin_eval::{
+    EvalError, apply_binary, apply_unary, invoke_random, invoke_stack_measured, unassigned,
+};
+use velin_syntax::{BinaryOp, Builtin, DataFootprint, DataMetrics, MAX_DATA_TEXT_BYTES, Value};
 
 /// A variable frame: slot `i` holds `Some(value)` once assigned, `None`
 /// otherwise. Reading a `None` slot reproduces the tree-walker's
 /// "unassigned on this path" error.
 pub type Frame = [Option<Value>];
+
+pub(crate) enum FrameAccess<'a> {
+    ReadOnly(&'a Frame),
+    Mutable(&'a mut Frame),
+}
+
+impl FrameAccess<'_> {
+    fn values(&self) -> &Frame {
+        match self {
+            Self::ReadOnly(frame) => frame,
+            Self::Mutable(frame) => frame,
+        }
+    }
+
+    fn rng_state(&mut self, slot: u32, line: usize) -> Result<&mut i64, EvalError> {
+        let Self::Mutable(frame) = self else {
+            unreachable!("validated read-only chunks do not contain random ops")
+        };
+        rng_state(frame, slot, line)
+    }
+}
 
 /// Evaluates `chunk` against `frame`, returning the resulting [`Value`].
 ///
@@ -30,80 +53,113 @@ pub fn eval_chunk(
     frame: &mut Frame,
     slot_name: impl Fn(u32) -> String,
 ) -> Result<Value, EvalError> {
-    chunk
-        .validate(frame.len())
-        .map_err(|error| EvalError::new(chunk.line, format!("invalid bytecode: {error}")))?;
+    chunk.validate(frame.len()).map_err(|error| {
+        EvalError::new(chunk.line as usize, format!("invalid bytecode: {error}"))
+    })?;
     let mut stack = Vec::new();
-    eval_validated_chunk(chunk, frame, &mut stack, slot_name).map(|(value, _)| value)
+    eval_validated_chunk(
+        chunk.as_chunk_ref(),
+        FrameAccess::Mutable(frame),
+        None,
+        &mut stack,
+        chunk.ops.len(),
+        None,
+        slot_name,
+    )
+    .map(|(value, _)| value)
 }
 
 /// Executes a chunk belonging to a `Program` already validated by `Machine`.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn eval_validated_chunk(
-    chunk: &ExprChunk,
-    frame: &mut Frame,
+    chunk: ExprChunkRef<'_>,
+    mut frame: FrameAccess<'_>,
+    frame_metrics: Option<(&[DataFootprint], &[u8])>,
     stack: &mut Vec<Value>,
+    max_stack: usize,
+    result_metrics: Option<DataMetrics>,
     slot_name: impl Fn(u32) -> String,
-) -> Result<(Value, DataFootprint), EvalError> {
-    let line = chunk.line;
+) -> Result<(Value, DataMetrics), EvalError> {
+    let line = chunk.line as usize;
     stack.clear();
-    if stack.capacity() < chunk.ops.len() {
-        stack.reserve(chunk.ops.len() - stack.capacity());
+    if stack.capacity() < max_stack {
+        stack.reserve(max_stack - stack.capacity());
     }
     let mut pc = 0;
+    let mut top_metrics = None;
     while pc < chunk.ops.len() {
         match &chunk.ops[pc] {
-            ExprOp::Const(index) => stack.push(chunk.constants[*index as usize].clone()),
+            ExprOp::Const(index) => {
+                stack.push(chunk.constants[*index as usize].clone());
+                top_metrics = None;
+            }
             ExprOp::Load { slot, .. } => {
                 let value = frame
+                    .values()
                     .get(*slot as usize)
                     .and_then(Option::as_ref)
                     .cloned()
                     .ok_or_else(|| unassigned(line, &slot_name(*slot)))?;
                 stack.push(value);
+                top_metrics = frame_metrics.and_then(|(footprints, depths)| {
+                    Some(DataMetrics {
+                        footprint: *footprints.get(*slot as usize)?,
+                        max_depth: usize::from(*depths.get(*slot as usize)?),
+                    })
+                });
             }
             ExprOp::Unary(op) => {
                 let value = stack.pop().expect("unary operand present");
-                stack.push(apply_unary(*op, value, line)?);
+                let result = apply_unary(*op, value, line)?;
+                top_metrics = Some(scalar_metrics(&result));
+                stack.push(result);
             }
             ExprOp::Binary(op) => {
                 let right = stack.pop().expect("binary right operand present");
                 let left = stack.pop().expect("binary left operand present");
-                stack.push(apply_binary(left, *op, right, line)?);
+                let result = apply_binary(left, *op, right, line)?;
+                top_metrics = Some(shallow_metrics(&result));
+                stack.push(result);
             }
             ExprOp::Call { function, argc } => {
-                let at = stack.len() - *argc as usize;
-                let arguments = stack.split_off(at);
-                stack.push(invoke(*function, arguments, line)?);
+                let metrics = invoke_stack_measured(*function, stack, *argc as usize, line)?;
+                top_metrics = Some(metrics);
             }
             ExprOp::Random { state_slot } => {
-                let at = stack.len() - 2;
-                let arguments = stack.split_off(at);
-                stack.push(invoke_random(
+                let high = stack.pop().expect("random upper bound present");
+                let low = stack.pop().expect("random lower bound present");
+                let result = invoke_random(
                     Builtin::Random,
-                    &arguments,
-                    rng_state(frame, *state_slot, line)?,
+                    &[low, high],
+                    frame.rng_state(*state_slot, line)?,
                     line,
-                )?);
+                )?;
+                top_metrics = Some(scalar_metrics(&result));
+                stack.push(result);
             }
             ExprOp::Chance { state_slot } => {
                 let argument = stack.pop().expect("chance percentage present");
-                stack.push(invoke_random(
+                let result = invoke_random(
                     Builtin::Chance,
                     &[argument],
-                    rng_state(frame, *state_slot, line)?,
+                    frame.rng_state(*state_slot, line)?,
                     line,
-                )?);
+                )?;
+                top_metrics = Some(scalar_metrics(&result));
+                stack.push(result);
             }
             ExprOp::Concat(count) => {
                 let at = stack.len() - *count as usize;
-                let pieces = stack.split_off(at);
                 let mut text = String::new();
-                for piece in &pieces {
+                for piece in &stack[at..] {
                     piece
                         .append_to_display(&mut text, MAX_DATA_TEXT_BYTES)
                         .map_err(|error| EvalError::new(line, error))?;
                 }
-                stack.push(Value::String(text));
+                stack.truncate(at);
+                let metrics = string_metrics(&text);
+                stack.push(Value::String(text.into()));
+                top_metrics = Some(metrics);
             }
             ExprOp::JumpIfFalse(target) => {
                 if stack.last() == Some(&Value::Boolean(false)) {
@@ -128,11 +184,52 @@ pub(crate) fn eval_validated_chunk(
         }
         pc += 1;
     }
-    let result = stack.pop().expect("chunk leaves exactly one value");
-    let footprint = result
-        .data_footprint()
-        .map_err(|error| EvalError::new(line, error))?;
-    Ok((result, footprint))
+    finish_chunk(stack, top_metrics.or(result_metrics), line)
+}
+
+fn finish_chunk(
+    stack: &mut Vec<Value>,
+    top_metrics: Option<DataMetrics>,
+    line: usize,
+) -> Result<(Value, DataMetrics), EvalError> {
+    let result = stack
+        .pop()
+        .ok_or_else(|| EvalError::new(line, "validated bytecode produced no value"))?;
+    let metrics = match top_metrics {
+        Some(metrics) => metrics,
+        None => result
+            .data_metrics()
+            .map_err(|error| EvalError::new(line, error))?,
+    };
+    Ok((result, metrics))
+}
+
+fn scalar_metrics(value: &Value) -> DataMetrics {
+    debug_assert!(matches!(value, Value::Integer(_) | Value::Boolean(_)));
+    DataMetrics {
+        footprint: DataFootprint {
+            values: 1,
+            text_bytes: 0,
+        },
+        max_depth: 0,
+    }
+}
+
+fn string_metrics(text: &str) -> DataMetrics {
+    DataMetrics {
+        footprint: DataFootprint {
+            values: 1,
+            text_bytes: text.len(),
+        },
+        max_depth: 0,
+    }
+}
+
+fn shallow_metrics(value: &Value) -> DataMetrics {
+    match value {
+        Value::String(text) => string_metrics(text),
+        _ => scalar_metrics(value),
+    }
 }
 
 /// Resolves the serializable integer slot that owns RNG state.

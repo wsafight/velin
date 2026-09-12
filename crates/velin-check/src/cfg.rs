@@ -1,5 +1,17 @@
 use velin_compile::Op;
 
+pub(crate) fn is_straight_line(ops: &[Op]) -> bool {
+    ops.iter().enumerate().all(|(pc, op)| match op {
+        Op::Jump(_) | Op::JumpIfFalse { .. } | Op::JumpIfIntegerCompare { .. } => false,
+        Op::Halt => pc + 1 == ops.len(),
+        Op::Set { .. }
+        | Op::SetConst { .. }
+        | Op::CopySlot { .. }
+        | Op::Update { .. }
+        | Op::Host(_) => true,
+    })
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BasicBlock {
     pub(crate) start: usize,
@@ -28,12 +40,18 @@ impl ControlFlow {
         leaders[0] = true;
         for (pc, op) in ops.iter().enumerate() {
             match op {
-                Op::Jump(target) | Op::JumpIfFalse { target, .. } => {
+                Op::Jump(target)
+                | Op::JumpIfFalse { target, .. }
+                | Op::JumpIfIntegerCompare { target, .. } => {
                     mark_target(&mut leaders, *target);
                     mark_fallthrough(&mut leaders, pc);
                 }
                 Op::Halt => mark_fallthrough(&mut leaders, pc),
-                Op::Set { .. } | Op::Host { .. } => {}
+                Op::Set { .. }
+                | Op::SetConst { .. }
+                | Op::CopySlot { .. }
+                | Op::Update { .. }
+                | Op::Host(_) => {}
             }
         }
 
@@ -61,12 +79,16 @@ impl ControlFlow {
             let pc = block.end - 1;
             match &ops[pc] {
                 Op::Jump(target) => push_target(&mut successors[block_id], *target, &pc_to_block),
-                Op::JumpIfFalse { target, .. } => {
+                Op::JumpIfFalse { target, .. } | Op::JumpIfIntegerCompare { target, .. } => {
                     push_pc(&mut successors[block_id], pc + 1, &pc_to_block);
                     push_target(&mut successors[block_id], *target, &pc_to_block);
                 }
                 Op::Halt => {}
-                Op::Set { .. } | Op::Host { .. } => {
+                Op::Set { .. }
+                | Op::SetConst { .. }
+                | Op::CopySlot { .. }
+                | Op::Update { .. }
+                | Op::Host(_) => {
                     push_pc(&mut successors[block_id], pc + 1, &pc_to_block);
                 }
             }
@@ -155,16 +177,21 @@ mod tests {
     fn keeps_a_linear_program_in_one_block() {
         let ops = vec![
             Op::Set { slot: 0, value: 0 },
-            Op::Host {
-                host_id: 0,
-                args: Vec::new(),
-                bind: None,
-                line: 1,
-            },
+            Op::host(0, Vec::new(), None, 1),
             Op::Halt,
         ];
         let flow = ControlFlow::new(&ops);
         assert_eq!(flow.blocks.len(), 1);
         assert_eq!((flow.blocks[0].start, flow.blocks[0].end), (0, 3));
+        assert!(is_straight_line(&ops));
+    }
+
+    #[test]
+    fn straight_line_rejects_branches_and_early_halts() {
+        assert!(!is_straight_line(&[
+            Op::Halt,
+            Op::host(0, Vec::new(), None, 1),
+        ]));
+        assert!(!is_straight_line(&[Op::Jump(0)]));
     }
 }

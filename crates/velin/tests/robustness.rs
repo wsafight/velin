@@ -11,7 +11,7 @@ fn value() -> impl Strategy<Value = Value> {
     prop_oneof![
         (-1000_i64..=1000).prop_map(Value::Integer),
         any::<bool>().prop_map(Value::Boolean),
-        "[a-z]{0,16}".prop_map(Value::String),
+        "[a-z]{0,16}".prop_map(|value| Value::String(value.into())),
     ]
 }
 

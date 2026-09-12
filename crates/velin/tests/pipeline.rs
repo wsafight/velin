@@ -58,20 +58,10 @@ fn parse_check_compile_run_round_trip() {
     let choice = b.slot("choice");
 
     let say_hp = b.expr(&Expr::Value(Value::String("HP is 30".into())), 1);
-    b.push(Op::Host {
-        host_id: 1,
-        args: vec![say_hp],
-        bind: None,
-        line: 1,
-    });
+    b.push(Op::host(1, vec![say_hp], None, 1));
 
     let ask = b.expr(&Expr::Value(Value::String("rest?".into())), 3);
-    b.push(Op::Host {
-        host_id: 2,
-        args: vec![ask],
-        bind: Some(choice),
-        line: 3,
-    });
+    b.push(Op::host(2, vec![ask], Some(choice), 3));
 
     let guard = b.expr(&guard_expr, 4);
     let skip = b.push(Op::JumpIfFalse {
@@ -100,12 +90,7 @@ fn parse_check_compile_run_round_trip() {
     );
 
     let done = b.expr(&Expr::Value(Value::String("done".into())), 6);
-    b.push(Op::Host {
-        host_id: 1,
-        args: vec![done],
-        bind: None,
-        line: 6,
-    });
+    b.push(Op::host(1, vec![done], None, 6));
 
     let program = b.build();
 

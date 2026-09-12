@@ -8,5 +8,5 @@ mod expression;
 pub use expression::{
     MAX_EXPRESSION_BYTES, MAX_EXPRESSION_NESTING, MAX_EXPRESSION_TOKENS,
     MAX_EXPRESSION_TOTAL_TOKENS, MAX_EXPRESSION_WORK_BYTES, MAX_INTERPOLATION_DEPTH,
-    parse_expression,
+    parse_expression, parse_expression_list_with_source, parse_expression_with_source,
 };

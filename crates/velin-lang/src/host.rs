@@ -13,9 +13,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use velin_check::{
     Environment, HostSignature, HostSignatures, Type, TypeCheckSite, check_program_types,
-    check_program_types_with_hosts, definite_assignment,
+    check_program_types_with_hosts, check_program_types_with_hosts_and_slot_types,
+    check_program_types_with_slot_types, definite_assignment, definite_assignment_slots,
 };
-use velin_compile::{Pc, Program, ValidatedProgram};
+use velin_compile::{InitialFrame, Pc, Program, ValidatedProgram};
 use velin_syntax::{Diagnostic, Value};
 
 /// A parsed, lowered, runnable script.
@@ -31,6 +32,9 @@ pub struct CompiledScript {
     /// `default` variables and their compile-time-evaluated values, to seed
     /// before running (`Machine::set_variable`).
     pub defaults: BTreeMap<String, Value>,
+    /// Dense initialization state prepared from the original defaults.
+    pub(crate) initial_frame: InitialFrame,
+    pub(crate) initial_types: Box<[Type]>,
     /// Source expressions retained at their program counters for CFG-aware
     /// type propagation and precise diagnostics.
     pub(crate) type_sites: Vec<TypeCheckSite>,
@@ -102,6 +106,20 @@ impl CompiledScript {
         &self.validated_program
     }
 
+    /// Returns the prepared initial frame while the public defaults still
+    /// match the values from compilation.
+    #[must_use]
+    pub fn initial_frame(&self) -> Option<&InitialFrame> {
+        self.initial_frame
+            .matches_named_values(
+                &self.validated_program.program().slots,
+                self.defaults
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value)),
+            )
+            .then_some(&self.initial_frame)
+    }
+
     /// Returns the command name a `host_id` was interned from.
     #[must_use]
     pub fn host_name(&self, host_id: u32) -> Option<&str> {
@@ -127,8 +145,18 @@ impl CompiledScript {
     fn check_inner(&self, file: &str, schema: Option<&HostSchema>) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
-        let preset: BTreeSet<String> = self.defaults.keys().cloned().collect();
-        for finding in definite_assignment(&self.program, &preset) {
+        let prepared = self
+            .validated_program
+            .refers_to(&self.program)
+            .then(|| self.initial_frame())
+            .flatten();
+        let unassigned = if let Some(frame) = prepared {
+            definite_assignment_slots(&self.program, frame.assigned_slots())
+        } else {
+            let preset: BTreeSet<String> = self.defaults.keys().cloned().collect();
+            definite_assignment(&self.program, &preset)
+        };
+        for finding in unassigned {
             diagnostics.push(Diagnostic::new(
                 file,
                 finding.line,
@@ -140,11 +168,6 @@ impl CompiledScript {
             ));
         }
 
-        let env: Environment = self
-            .defaults
-            .iter()
-            .map(|(name, value)| (name.clone(), Type::from(value)))
-            .collect();
         if let Some(schema) = schema {
             let mut signatures = HostSignatures::new();
             for (host_id, name) in self.hosts.iter().enumerate() {
@@ -152,13 +175,24 @@ impl CompiledScript {
                     signatures.insert(host_id, signature.clone());
                 }
             }
-            diagnostics.extend(check_program_types_with_hosts(
-                &self.program,
-                &env,
-                &self.type_sites,
-                &signatures,
-                file,
-            ));
+            diagnostics.extend(if prepared.is_some() {
+                check_program_types_with_hosts_and_slot_types(
+                    &self.program,
+                    &self.initial_types,
+                    &self.type_sites,
+                    &signatures,
+                    file,
+                )
+            } else {
+                let env = self.default_environment();
+                check_program_types_with_hosts(
+                    &self.program,
+                    &env,
+                    &self.type_sites,
+                    &signatures,
+                    file,
+                )
+            });
             for site in &self.host_sites {
                 let name = self.host_name(site.host_id).unwrap_or("<unknown>");
                 match schema.get(name) {
@@ -196,15 +230,27 @@ impl CompiledScript {
                 }
             }
         } else {
-            diagnostics.extend(check_program_types(
-                &self.program,
-                &env,
-                &self.type_sites,
-                file,
-            ));
+            diagnostics.extend(if prepared.is_some() {
+                check_program_types_with_slot_types(
+                    &self.program,
+                    &self.initial_types,
+                    &self.type_sites,
+                    file,
+                )
+            } else {
+                let env = self.default_environment();
+                check_program_types(&self.program, &env, &self.type_sites, file)
+            });
         }
 
         diagnostics
+    }
+
+    fn default_environment(&self) -> Environment {
+        self.defaults
+            .iter()
+            .map(|(name, value)| (name.clone(), Type::from(value)))
+            .collect()
     }
 }
 

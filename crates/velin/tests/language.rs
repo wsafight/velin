@@ -3,6 +3,7 @@
 //! toy host — the full parse → lower → check → run path an embedder uses.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use velin::{
     HostSchema, HostSignature, Machine, Type, Value, Yield, check_script,
     check_script_with_host_schema, compile,
@@ -117,6 +118,76 @@ fn other_branch_runs_when_the_host_declines() {
     assert!(host.log.iter().any(|l| l.contains("steel yourself")));
     // hp (30) is not > 35, so the "limp onward" line runs before good_end.
     assert!(host.log.iter().any(|l| l.contains("limp onward")));
+}
+
+#[test]
+fn ownership_updates_preserve_values_aliases_and_failures() {
+    let script = compile(
+        "updates.velin",
+        "default items = list(1, 2)\n\
+         set alias = items\n\
+         set items = push(items, 3)\n\
+         set items = put(items, 0, 9)\n\
+         set items = remove(items, 1)\n\
+         default fields = record(\"a\", 1)\n\
+         set fields = put(fields, \"b\", 2)\n\
+         set fields = remove(fields, \"a\")\n\
+         default text = \"a\"\n\
+         set text = text + \"b\"\n",
+    )
+    .unwrap();
+    assert!(check_script("updates.velin", &script).is_empty());
+    let machine = ToyHost::default().run(&script);
+    assert_eq!(
+        machine.variable("items"),
+        Some(&Value::List(Arc::new(vec![
+            Value::Integer(9),
+            Value::Integer(3)
+        ])))
+    );
+    assert_eq!(
+        machine.variable("alias"),
+        Some(&Value::List(Arc::new(vec![
+            Value::Integer(1),
+            Value::Integer(2)
+        ])))
+    );
+    assert_eq!(
+        machine.variable("fields"),
+        Some(&Value::Record(Arc::new(BTreeMap::from([(
+            "b".into(),
+            Value::Integer(2)
+        )]))))
+    );
+    assert_eq!(machine.variable("text"), Some(&Value::String("ab".into())));
+
+    let mut machine = Machine::new(script.program.clone()).unwrap();
+    for (name, value) in &script.defaults {
+        machine.set_variable(name, value.clone());
+    }
+    let checkpoint = machine.clone();
+    assert_eq!(machine.run().unwrap(), Yield::Finished);
+    assert_eq!(machine.variable("text"), Some(&Value::String("ab".into())));
+    assert_eq!(
+        checkpoint.variable("text"),
+        Some(&Value::String("a".into()))
+    );
+
+    let failing = compile(
+        "updates.velin",
+        "default items = list(1)\nset items = put(items, 9, 2)\n",
+    )
+    .unwrap();
+    let mut machine = Machine::new(failing.program.clone()).unwrap();
+    machine.set_variable("items", failing.defaults["items"].clone());
+    assert_eq!(
+        machine.run().unwrap_err().message,
+        "list index out of bounds"
+    );
+    assert_eq!(
+        machine.variable("items"),
+        Some(&Value::List(Arc::new(vec![Value::Integer(1)])))
+    );
 }
 
 #[test]

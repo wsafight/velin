@@ -26,7 +26,7 @@ pub enum ExprOp {
     Const(u32),
     /// Push the current value of a frame slot, retaining its source column for
     /// definite-assignment diagnostics.
-    Load { slot: u32, column: usize },
+    Load { slot: u32, column: u32 },
     /// Apply a unary operator to the top of the stack.
     Unary(UnaryOp),
     /// Apply a binary operator to the top two stack values.
@@ -69,7 +69,16 @@ pub enum ExprOp {
 pub struct ExprChunk {
     pub ops: Vec<ExprOp>,
     pub constants: Vec<Value>,
-    pub line: usize,
+    pub line: u32,
+}
+
+/// Borrowed expression bytecode, either from a standalone [`ExprChunk`] or a
+/// packed program arena.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExprChunkRef<'a> {
+    pub ops: &'a [ExprOp],
+    pub constants: &'a [Value],
+    pub line: u32,
 }
 
 impl ExprChunk {
@@ -78,7 +87,7 @@ impl ExprChunk {
         Self {
             ops: Vec::new(),
             constants: Vec::new(),
-            line,
+            line: crate::compact_source_position(line),
         }
     }
 
@@ -105,5 +114,20 @@ impl ExprChunk {
     pub fn push(&mut self, op: ExprOp) -> usize {
         self.ops.push(op);
         self.ops.len() - 1
+    }
+
+    /// Borrows this standalone chunk in the same form used by packed programs.
+    #[must_use]
+    pub fn as_chunk_ref(&self) -> ExprChunkRef<'_> {
+        ExprChunkRef {
+            ops: &self.ops,
+            constants: &self.constants,
+            line: self.line,
+        }
+    }
+
+    pub(crate) fn compact(&mut self) {
+        self.ops.shrink_to_fit();
+        self.constants.shrink_to_fit();
     }
 }

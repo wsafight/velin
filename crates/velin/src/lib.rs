@@ -78,12 +78,7 @@
 //! let choice = b.slot("choice");
 //! let hp = b.slot("hp");
 //! let prompt = b.expr(&Expr::Value(Value::String("left or right?".into())), 1);
-//! b.push(Op::Host {
-//!     host_id: 7,
-//!     args: vec![prompt],
-//!     bind: Some(choice),
-//!     line: 1,
-//! });
+//! b.push(Op::host(7, vec![prompt], Some(choice), 1));
 //! let echo = b.expr(&Expr::Variable("choice".into()), 2);
 //! b.push(Op::Set { slot: hp, value: echo });
 //! let program = b.build();
@@ -100,15 +95,18 @@
 //! assert_eq!(machine.variable("hp"), Some(&Value::Integer(1)));
 //! ```
 
-pub use velin_syntax::{BinaryOp, Builtin, Diagnostic, Expr, Severity, Span, UnaryOp, Value};
+pub use velin_syntax::{
+    BinaryOp, Builtin, Diagnostic, Expr, Severity, SharedString, Span, UnaryOp, Value,
+};
 
 pub use velin_parse::parse_expression;
 
 pub use velin_eval::{EvalError, Variables, evaluate, evaluate_with_rng};
 
 pub use velin_compile::{
-    ChunkId, ExprChunk, ExprOp, Op, Pc, Program, ProgramBuilder, ProgramValidationError, SlotTable,
-    ValidatedProgram, compile_expression,
+    ChunkId, ExprChunk, ExprChunkRef, ExprOp, HostOp, Op, Pc, Program, ProgramBuilder,
+    ProgramChunk, ProgramValidationError, SlotTable, UpdateOp, ValidatedProgram,
+    compile_expression,
 };
 
 pub use velin_vm::{

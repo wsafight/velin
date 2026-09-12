@@ -1,9 +1,9 @@
 use velin_syntax::Builtin;
 use velin_syntax::diagnostic::Diagnostic;
-use velin_syntax::expr::{BinaryOp, Expr, Span, StrPart, UnaryOp, Value};
+use velin_syntax::expr::{BinaryOp, Expr, SharedString, Span, StrPart, UnaryOp, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum TokenKind {
+enum TokenKind<'input> {
     Integer(i64),
     Boolean(bool),
     String(String),
@@ -11,7 +11,7 @@ enum TokenKind {
     /// are captured verbatim; each hole keeps its raw source text and starting
     /// column so it can be parsed as a sub-expression with correct diagnostics.
     Interpolated(Vec<RawPart>),
-    Identifier(String),
+    Identifier(&'input str),
     LeftParen,
     RightParen,
     Comma,
@@ -39,9 +39,75 @@ enum RawPart {
 }
 
 #[derive(Debug, Clone)]
-struct Token {
-    kind: TokenKind,
+struct Token<'input> {
+    kind: TokenKind<'input>,
     column: usize,
+}
+
+const INLINE_TOKENS: usize = 4;
+
+/// Keeps the common short expression entirely on the stack. Once full, all
+/// tokens move to a `Vec` and parsing continues through the same interface.
+struct TokenBuffer<'input> {
+    inline: [Token<'input>; INLINE_TOKENS],
+    len: usize,
+    spill: Option<Vec<Token<'input>>>,
+    spill_capacity: usize,
+}
+
+impl<'input> TokenBuffer<'input> {
+    fn new(input_bytes: usize) -> Self {
+        Self {
+            inline: std::array::from_fn(|_| Token {
+                kind: TokenKind::End,
+                column: 1,
+            }),
+            len: 0,
+            spill: None,
+            spill_capacity: input_bytes.div_ceil(2).saturating_add(1),
+        }
+    }
+
+    fn push(&mut self, token: Token<'input>) {
+        if let Some(tokens) = &mut self.spill {
+            tokens.push(token);
+        } else if self.len < INLINE_TOKENS {
+            self.inline[self.len] = token;
+        } else {
+            let mut tokens = Vec::with_capacity(self.spill_capacity.max(INLINE_TOKENS + 1));
+            for inline in &mut self.inline {
+                tokens.push(Token {
+                    kind: std::mem::replace(&mut inline.kind, TokenKind::End),
+                    column: inline.column,
+                });
+            }
+            tokens.push(token);
+            self.spill = Some(tokens);
+        }
+        self.len += 1;
+    }
+
+    const fn len(&self) -> usize {
+        self.len
+    }
+
+    fn get(&self, index: usize) -> &Token<'input> {
+        match &self.spill {
+            Some(tokens) => &tokens[index],
+            None => &self.inline[index],
+        }
+    }
+
+    fn take(&mut self, index: usize) -> Token<'input> {
+        let token = match &mut self.spill {
+            Some(tokens) => &mut tokens[index],
+            None => &mut self.inline[index],
+        };
+        Token {
+            kind: std::mem::replace(&mut token.kind, TokenKind::End),
+            column: token.column,
+        }
+    }
 }
 
 /// Maximum UTF-8 size of one expression, including interpolation source.
@@ -71,9 +137,25 @@ pub fn parse_expression(
     line: usize,
     base_column: usize,
 ) -> Result<Expr, Diagnostic> {
+    let source = SharedString::from(file);
+    parse_expression_with_source(input, &source, line, base_column)
+}
+
+/// Parses an expression while reusing a source name shared by a larger
+/// statement parser.
+///
+/// # Errors
+/// Returns the same diagnostics as [`parse_expression`].
+pub fn parse_expression_with_source(
+    input: &str,
+    source: &SharedString,
+    line: usize,
+    base_column: usize,
+) -> Result<Expr, Diagnostic> {
     parse_expression_inner(
         input,
-        file,
+        source.as_str(),
+        source,
         line,
         base_column,
         0,
@@ -84,14 +166,86 @@ pub fn parse_expression(
     )
 }
 
+/// Parses a comma-separated expression list while sharing a source name.
+///
+/// This is the argument grammar used by host calls. It accepts the same
+/// maximum of 128 expressions as `list(...)` without constructing a synthetic
+/// wrapper expression.
+///
+/// # Errors
+/// Returns a diagnostic for invalid syntax or an exceeded expression budget.
+pub fn parse_expression_list_with_source(
+    input: &str,
+    source: &SharedString,
+    line: usize,
+    base_column: usize,
+) -> Result<Vec<Expr>, Diagnostic> {
+    let mut budget = ParseBudget {
+        work_bytes: 0,
+        tokens: 0,
+    };
+    let mut parser = prepare_parser(
+        input,
+        source.as_str(),
+        source,
+        line,
+        base_column,
+        0,
+        &mut budget,
+    )?;
+    let mut expressions = Vec::new();
+    if parser.peek().kind != TokenKind::End {
+        loop {
+            expressions.push(parser.parse_or()?);
+            if parser.peek().kind == TokenKind::End {
+                break;
+            }
+            if !parser.consume(&TokenKind::Comma) {
+                return Err(parser.error("expected `,` or `)`"));
+            }
+        }
+    }
+    if !Builtin::List.accepts(expressions.len()) {
+        return Err(parser.error("invalid argument count for `list`"));
+    }
+    Ok(expressions)
+}
+
 fn parse_expression_inner(
     input: &str,
     file: &str,
+    source: &SharedString,
     line: usize,
     base_column: usize,
     interpolation_depth: usize,
     budget: &mut ParseBudget,
 ) -> Result<Expr, Diagnostic> {
+    let mut parser = prepare_parser(
+        input,
+        file,
+        source,
+        line,
+        base_column,
+        interpolation_depth,
+        budget,
+    )?;
+    let expression = parser.parse_or()?;
+    if parser.peek().kind != TokenKind::End {
+        return Err(parser.error("unexpected token after expression"));
+    }
+    Ok(expression)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_parser<'input, 'file, 'budget>(
+    input: &'input str,
+    file: &'file str,
+    source: &SharedString,
+    line: usize,
+    base_column: usize,
+    interpolation_depth: usize,
+    budget: &'budget mut ParseBudget,
+) -> Result<ExpressionParser<'input, 'file, 'budget>, Diagnostic> {
     if input.len() > MAX_EXPRESSION_BYTES {
         return Err(Diagnostic::new(
             file,
@@ -141,59 +295,40 @@ fn parse_expression_inner(
                 "nested interpolation exceeds total token budget",
             )
         })?;
-    let mut depth: usize = 0;
-    for token in &tokens {
-        if token.kind == TokenKind::LeftParen {
-            depth += 1;
-        }
-        if depth > MAX_EXPRESSION_NESTING {
-            return Err(Diagnostic::new(
-                file,
-                line,
-                token.column,
-                "expression nesting exceeds 32",
-            ));
-        }
-        if token.kind == TokenKind::RightParen {
-            depth = depth.saturating_sub(1);
-        }
-    }
-    let mut parser = ExpressionParser {
+    Ok(ExpressionParser {
         tokens,
         current: 0,
         file,
+        source: source.clone(),
         line,
         interpolation_depth,
         budget,
-    };
-    let expression = parser.parse_or()?;
-    if parser.peek().kind != TokenKind::End {
-        return Err(parser.error("unexpected token after expression"));
-    }
-    Ok(expression)
+    })
 }
 
-struct Lexer<'a> {
-    input: &'a str,
-    file: &'a str,
+struct Lexer<'input, 'file> {
+    input: &'input str,
+    file: &'file str,
     line: usize,
-    base_column: usize,
     offset: usize,
+    current_column: usize,
 }
 
-impl<'a> Lexer<'a> {
-    const fn new(input: &'a str, file: &'a str, line: usize, base_column: usize) -> Self {
+impl<'input, 'file> Lexer<'input, 'file> {
+    const fn new(input: &'input str, file: &'file str, line: usize, base_column: usize) -> Self {
         Self {
             input,
             file,
             line,
-            base_column,
             offset: 0,
+            current_column: base_column,
         }
     }
 
-    fn lex(mut self) -> Result<Vec<Token>, Diagnostic> {
-        let mut tokens = Vec::new();
+    #[allow(clippy::too_many_lines)]
+    fn lex(mut self) -> Result<TokenBuffer<'input>, Diagnostic> {
+        let mut tokens = TokenBuffer::new(self.input.len());
+        let mut depth = 0usize;
         while let Some(ch) = self.peek_char() {
             if ch.is_whitespace() {
                 self.bump();
@@ -270,7 +405,7 @@ impl<'a> Lexer<'a> {
                 c if c.is_ascii_digit() => TokenKind::Integer(self.integer()?),
                 c if is_identifier_start(c) => {
                     let word = self.identifier();
-                    match word.as_str() {
+                    match word {
                         "true" => TokenKind::Boolean(true),
                         "false" => TokenKind::Boolean(false),
                         "and" => TokenKind::And,
@@ -283,6 +418,16 @@ impl<'a> Lexer<'a> {
                     return Err(self.error_at(column, format!("unexpected character `{ch}`")));
                 }
             };
+            match &kind {
+                TokenKind::LeftParen => {
+                    depth += 1;
+                    if depth > MAX_EXPRESSION_NESTING {
+                        return Err(self.error_at(column, "expression nesting exceeds 32"));
+                    }
+                }
+                TokenKind::RightParen => depth = depth.saturating_sub(1),
+                _ => {}
+            }
             tokens.push(Token { kind, column });
         }
         tokens.push(Token {
@@ -300,7 +445,7 @@ impl<'a> Lexer<'a> {
     /// segments and the raw source text + column of each hole. String escapes
     /// (`\n`, `\"`, ...) are honoured inside literal segments; hole text is kept
     /// verbatim so the sub-expression parser sees exactly what the author wrote.
-    fn string(&mut self) -> Result<TokenKind, Diagnostic> {
+    fn string(&mut self) -> Result<TokenKind<'input>, Diagnostic> {
         let start = self.column();
         self.bump();
         let mut literal = String::new();
@@ -416,20 +561,21 @@ impl<'a> Lexer<'a> {
 
     fn integer(&mut self) -> Result<i64, Diagnostic> {
         let start = self.offset;
+        let column = self.column();
         while self.peek_char().is_some_and(|ch| ch.is_ascii_digit()) {
             self.bump();
         }
         self.input[start..self.offset]
             .parse()
-            .map_err(|_| self.error_at(self.column_at(start), "integer is out of range"))
+            .map_err(|_| self.error_at(column, "integer is out of range"))
     }
 
-    fn identifier(&mut self) -> String {
+    fn identifier(&mut self) -> &'input str {
         let start = self.offset;
         while self.peek_char().is_some_and(is_identifier_continue) {
             self.bump();
         }
-        self.input[start..self.offset].to_owned()
+        &self.input[start..self.offset]
     }
 
     fn peek_char(&self) -> Option<char> {
@@ -439,15 +585,12 @@ impl<'a> Lexer<'a> {
     fn bump(&mut self) -> Option<char> {
         let ch = self.peek_char()?;
         self.offset += ch.len_utf8();
+        self.current_column += 1;
         Some(ch)
     }
 
-    fn column(&self) -> usize {
-        self.column_at(self.offset)
-    }
-
-    fn column_at(&self, byte_offset: usize) -> usize {
-        self.base_column + self.input[..byte_offset].chars().count()
+    const fn column(&self) -> usize {
+        self.current_column
     }
 
     fn error_at(&self, column: usize, message: impl Into<String>) -> Diagnostic {
@@ -455,16 +598,17 @@ impl<'a> Lexer<'a> {
     }
 }
 
-struct ExpressionParser<'a, 'budget> {
-    tokens: Vec<Token>,
+struct ExpressionParser<'input, 'file, 'budget> {
+    tokens: TokenBuffer<'input>,
     current: usize,
-    file: &'a str,
+    file: &'file str,
+    source: SharedString,
     line: usize,
     interpolation_depth: usize,
     budget: &'budget mut ParseBudget,
 }
 
-impl ExpressionParser<'_, '_> {
+impl<'input> ExpressionParser<'input, '_, '_> {
     fn parse_or(&mut self) -> Result<Expr, Diagnostic> {
         let mut expression = self.parse_and()?;
         while let Some(column) = self.consume_column(&TokenKind::Or) {
@@ -570,15 +714,15 @@ impl ExpressionParser<'_, '_> {
     }
 
     fn parse_primary(&mut self) -> Result<Expr, Diagnostic> {
-        let token = self.advance().clone();
+        let token = self.advance();
         let span = self.span(token.column);
         match token.kind {
             TokenKind::Integer(value) => Ok(Expr::Value(Value::Integer(value)).spanned(span)),
             TokenKind::Boolean(value) => Ok(Expr::Value(Value::Boolean(value)).spanned(span)),
-            TokenKind::String(value) => Ok(Expr::Value(Value::String(value)).spanned(span)),
+            TokenKind::String(value) => Ok(Expr::Value(Value::String(value.into())).spanned(span)),
             TokenKind::Interpolated(raw) => Ok(self.interpolate(raw)?.spanned(span)),
             TokenKind::Identifier(value) if self.consume(&TokenKind::LeftParen) => {
-                let function = Builtin::named(&value)
+                let function = Builtin::named(value)
                     .ok_or_else(|| self.error(format!("unknown built-in function `{value}`")))?;
                 let mut arguments = Vec::new();
                 if !self.consume(&TokenKind::RightParen) {
@@ -601,7 +745,7 @@ impl ExpressionParser<'_, '_> {
                 }
                 .spanned(span))
             }
-            TokenKind::Identifier(value) => Ok(Expr::Variable(value).spanned(span)),
+            TokenKind::Identifier(value) => Ok(Expr::Variable(value.to_owned()).spanned(span)),
             TokenKind::LeftParen => {
                 let expression = self.parse_or()?;
                 if !self.consume(&TokenKind::RightParen) {
@@ -629,6 +773,7 @@ impl ExpressionParser<'_, '_> {
                     let expr = parse_expression_inner(
                         &text,
                         self.file,
+                        &self.source,
                         self.line,
                         column,
                         self.interpolation_depth + 1,
@@ -641,7 +786,7 @@ impl ExpressionParser<'_, '_> {
         Ok(Expr::Interpolate { parts })
     }
 
-    fn consume(&mut self, kind: &TokenKind) -> bool {
+    fn consume(&mut self, kind: &TokenKind<'_>) -> bool {
         if &self.peek().kind == kind {
             self.current += 1;
             true
@@ -650,7 +795,7 @@ impl ExpressionParser<'_, '_> {
         }
     }
 
-    fn consume_column(&mut self, kind: &TokenKind) -> Option<usize> {
+    fn consume_column(&mut self, kind: &TokenKind<'_>) -> Option<usize> {
         if &self.peek().kind != kind {
             return None;
         }
@@ -659,16 +804,16 @@ impl ExpressionParser<'_, '_> {
         Some(column)
     }
 
-    fn advance(&mut self) -> &Token {
+    fn advance(&mut self) -> Token<'input> {
         let index = self.current;
-        if self.tokens[index].kind != TokenKind::End {
+        if self.tokens.get(index).kind != TokenKind::End {
             self.current += 1;
         }
-        &self.tokens[index]
+        self.tokens.take(index)
     }
 
-    fn peek(&self) -> &Token {
-        &self.tokens[self.current]
+    fn peek(&self) -> &Token<'input> {
+        self.tokens.get(self.current)
     }
 
     fn error(&self, message: impl Into<String>) -> Diagnostic {
@@ -676,7 +821,7 @@ impl ExpressionParser<'_, '_> {
     }
 
     fn span(&self, column: usize) -> Span {
-        Span::in_source(self.file, self.line, column)
+        Span::in_source(self.source.clone(), self.line, column)
     }
 
     fn binary(&self, left: Expr, op: BinaryOp, right: Expr, column: usize) -> Expr {
@@ -703,6 +848,27 @@ mod tests {
 
     fn parse(input: &str) -> Result<Expr, Diagnostic> {
         parse_expression(input, "test.rl", 1, 1)
+    }
+
+    #[test]
+    fn parses_expression_lists_with_source_spans() {
+        let source = SharedString::from("test.rl");
+        let expressions = parse_expression_list_with_source("1, value + 2", &source, 3, 5).unwrap();
+
+        assert_eq!(expressions.len(), 2);
+        assert_eq!(expressions[0].span().unwrap().column, 5);
+        assert_eq!(expressions[1].span().unwrap().column, 14);
+        assert_eq!(expressions[1].span().unwrap().line, 3);
+        assert_eq!(expressions[1].span().unwrap().source, "test.rl");
+    }
+
+    #[test]
+    fn expression_lists_enforce_the_host_argument_limit() {
+        let source = SharedString::from("test.rl");
+        let arguments = std::iter::repeat_n("1", 129).collect::<Vec<_>>().join(",");
+        let error = parse_expression_list_with_source(&arguments, &source, 1, 1).unwrap_err();
+
+        assert!(error.message.contains("invalid argument count"));
     }
 
     #[test]

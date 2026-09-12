@@ -116,7 +116,7 @@ Record
 
 There is no floating-point value, so numeric calculations do not depend on platform floating-point implementations or rounding modes. Records use an order-stable data structure, making display and serialization order reproducible.
 
-Lists and records use `Arc` structural sharing and copy-on-write updates. Every value entering runtime state is checked against the data budget, preventing a host from bypassing source limits by injecting unbounded data.
+Strings, lists, and records use `Arc` sharing. Collection and string updates are copy-on-write: a uniquely owned slot can reuse its allocation, while aliases and `Machine::clone` checkpoints continue to observe the old value. Every value entering runtime state is checked against the data budget, preventing a host from bypassing source limits by injecting unbounded data.
 
 ### 5.1 Random numbers
 
@@ -147,19 +147,22 @@ Concat
 
 Variables resolve to `u32` slots during compilation, so runtime performs no string lookup. `and` and `or` compile to conditional jumps to preserve short-circuit semantics; string interpolation evaluates each part and finishes with one `Concat`.
 
+Pure constant subtrees are evaluated by the reference evaluator during compilation. Failed candidates, including overflow, division by zero, and type errors, remain as bytecode so runtime error behavior is unchanged. Bytecode source coordinates use compact `u32` values, and completed op and constant vectors are trimmed to their actual length.
+
 ### 6.2 Control-flow bytecode
 
 `Program` keeps its control-flow operations small:
 
 ```text
 Set { slot, value }
+Update { slot, operation, line, column }
 Jump(pc)
 JumpIfFalse { condition, target }
-Host { host_id, args, bind, line }
+Host(HostOp { host_id, args, bind, line })
 Halt
 ```
 
-Control-flow operations reference only expression chunks, slots, and program counters. `Program` also owns the `SlotTable`, used for initialization, debugging, and name-based state access through the public API.
+Control-flow operations reference only expression chunks, slots, and program counters. `Update` is emitted for ownership-aware forms such as `items = push(items, value)` and `count = count + 1`; it preflights type, index, per-value, and machine budgets before taking the destination value, so failure leaves the slot unchanged. The cold, variable-sized `HostOp` payload is boxed so it does not widen every hot instruction. On 64-bit targets this keeps `Op` at 32 bytes instead of 48 and `ExprOp` at 12 bytes instead of 16 without changing the JSON representation. `Program` also owns the `SlotTable`, used for initialization, debugging, and name-based state access through the public API.
 
 ### 6.3 Validation boundary
 
@@ -204,7 +207,7 @@ Static checking never changes bytecode or runtime behavior. The CLI and other ho
 
 ## 9. Execution and resource limits
 
-`Machine` holds an immutable `Program` through `Arc` and owns an independent variable frame, program counter, suspended effect, and completion flag. Construction is fallible; only a validated program can enter runtime state.
+`Machine` holds an immutable `Program` through `Arc` and owns an independent variable frame, program counter, suspended effect, completion flag, and reusable expression stack. Construction is fallible; only a validated program can enter runtime state. Frame slots retain their measured data footprints, and expression/built-in evaluation returns metrics with its value, avoiding a second recursive resource scan during assignment or host-payload accounting.
 
 Each `run` or `resume` call executes at most `MAX_IMMEDIATE_STEPS` consecutive control-flow operations. Reaching that budget returns a possible-infinite-loop error so a script with no host yield point cannot occupy its caller forever.
 

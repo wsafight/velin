@@ -182,7 +182,7 @@ fn parse_reply(text: &str) -> Value {
     } else if text == "false" {
         Value::Boolean(false)
     } else {
-        Value::String(text.to_owned())
+        Value::String(text.into())
     }
 }
 

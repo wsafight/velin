@@ -12,6 +12,7 @@ description = "Bytecode compiler: lowers Velin expressions and programs to a fla
 
 [dependencies]
 velin-syntax.workspace = true
+velin-eval.workspace = true
 serde = { workspace = true, features = ["derive", "rc"] }
 
 [dev-dependencies]

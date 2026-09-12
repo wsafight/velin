@@ -142,7 +142,7 @@ fn evaluate_inner(
                     }
                 }
             }
-            Ok(Value::String(text))
+            Ok(Value::String(text.into()))
         }
     }
 }
@@ -203,7 +203,7 @@ pub fn apply_binary(
                 if length > MAX_DATA_TEXT_BYTES {
                     return Err(execution(line, "data text exceeds 1 MiB"));
                 }
-                left.push_str(&right);
+                left.make_mut().push_str(&right);
                 Ok(Value::String(left))
             }
             (left, right) => Err(binary_type_error(line, "`+`", &left, &right)),
@@ -419,9 +419,9 @@ mod tests {
     fn string_growth_is_rejected_before_concatenation() {
         let half = "x".repeat(MAX_DATA_TEXT_BYTES / 2 + 1);
         let error = apply_binary(
-            Value::String(half.clone()),
+            Value::String(half.clone().into()),
             BinaryOp::Add,
-            Value::String(half),
+            Value::String(half.into()),
             1,
         )
         .unwrap_err();

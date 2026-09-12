@@ -18,6 +18,17 @@ pub struct DataFootprint {
     pub text_bytes: usize,
 }
 
+/// Validated resource metrics for a value tree.
+///
+/// `max_depth` is relative to the value root, whose depth is zero. Retaining
+/// it alongside the footprint lets ownership-aware collection updates prove
+/// that a new child still fits without rescanning the existing collection.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DataMetrics {
+    pub footprint: DataFootprint,
+    pub max_depth: usize,
+}
+
 /// The closed set of built-in functions available to expressions.
 ///
 /// These are deterministic helpers with no host, I/O, network, or foreign-code
@@ -84,20 +95,34 @@ impl Value {
     /// # Errors
     /// Rejects more than 4096 values, 16 collection levels or 1 MiB of text.
     pub fn data_footprint(&self) -> Result<DataFootprint, &'static str> {
+        self.data_metrics().map(|metrics| metrics.footprint)
+    }
+
+    /// Measures count, text, and nesting depth while enforcing the data budget.
+    ///
+    /// # Errors
+    /// Rejects more than 4096 values, 16 collection levels or 1 MiB of text.
+    pub fn data_metrics(&self) -> Result<DataMetrics, &'static str> {
         match self {
             Self::Integer(_) | Self::Boolean(_) => {
-                return Ok(DataFootprint {
-                    values: 1,
-                    text_bytes: 0,
+                return Ok(DataMetrics {
+                    footprint: DataFootprint {
+                        values: 1,
+                        text_bytes: 0,
+                    },
+                    max_depth: 0,
                 });
             }
             Self::String(text) => {
                 if text.len() > MAX_DATA_TEXT_BYTES {
                     return Err("data text exceeds 1 MiB");
                 }
-                return Ok(DataFootprint {
-                    values: 1,
-                    text_bytes: text.len(),
+                return Ok(DataMetrics {
+                    footprint: DataFootprint {
+                        values: 1,
+                        text_bytes: text.len(),
+                    },
+                    max_depth: 0,
                 });
             }
             Self::List(_) | Self::Record(_) => {}
@@ -106,11 +131,13 @@ impl Value {
         let mut pending = vec![(self, 0)];
         let mut items: usize = 0;
         let mut bytes: usize = 0;
+        let mut max_depth = 0;
         while let Some((value, depth)) = pending.pop() {
             items = items.checked_add(1).ok_or("data value count overflow")?;
             if items > MAX_DATA_VALUES || depth > MAX_DATA_DEPTH {
                 return Err("data exceeds 4096 values or 16 nesting levels");
             }
+            max_depth = max_depth.max(depth);
             match value {
                 Self::String(text) => {
                     bytes = bytes
@@ -132,9 +159,12 @@ impl Value {
                 return Err("data text exceeds 1 MiB");
             }
         }
-        Ok(DataFootprint {
-            values: items,
-            text_bytes: bytes,
+        Ok(DataMetrics {
+            footprint: DataFootprint {
+                values: items,
+                text_bytes: bytes,
+            },
+            max_depth,
         })
     }
 }

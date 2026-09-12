@@ -18,10 +18,11 @@ mod definite;
 mod flow;
 mod types;
 
-pub use definite::{UnassignedUse, definite_assignment};
+pub use definite::{UnassignedUse, definite_assignment, definite_assignment_slots};
 pub use flow::{
     HostSignature, HostSignatures, TypeCheckKind, TypeCheckSite, check_program_types,
-    check_program_types_with_hosts,
+    check_program_types_with_hosts, check_program_types_with_hosts_and_slot_types,
+    check_program_types_with_slot_types,
 };
 pub use types::{Environment, Type, TypeError, infer};
 

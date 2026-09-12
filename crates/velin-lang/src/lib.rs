@@ -90,7 +90,7 @@ pub fn parse_program_recovering(source: &str) -> RecoveredProgram {
 /// `jump` to an undefined label). The diagnostic's `file` field is `file`.
 pub fn compile(file: &str, source: &str) -> Result<CompiledScript, Diagnostic> {
     let statements = parse_program(source).map_err(|error| error.into_diagnostic(file))?;
-    lower::lower(&statements).map_err(|error| error.into_diagnostic(file))
+    lower::lower(statements).map_err(|error| error.into_diagnostic(file))
 }
 
 /// Runs Velin's conservative static checks over a compiled script: definite
