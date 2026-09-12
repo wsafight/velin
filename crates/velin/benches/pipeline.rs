@@ -82,6 +82,24 @@ fn bench_growing_list(c: &mut Criterion) {
     });
 }
 
+fn bench_counter_loop(c: &mut Criterion) {
+    let script = compile(
+        "bench.velin",
+        concat!(
+            "default index = 0\n",
+            "while index < 2000:\n",
+            "    set index = index + 1\n",
+        ),
+    )
+    .unwrap();
+    c.bench_function("vm/counter_loop", |b| {
+        b.iter(|| {
+            let mut runner = ScriptRunner::new(&script).unwrap();
+            black_box(runner.run().unwrap())
+        });
+    });
+}
+
 fn bench_machine_creation(c: &mut Criterion) {
     let source = wide_linear_source(512);
     let script = compile("bench.velin", &source).unwrap();
@@ -177,6 +195,7 @@ criterion_group!(
     bench_check,
     bench_check_wide_script,
     bench_compile,
+    bench_counter_loop,
     bench_growing_list,
     bench_machine_creation,
     bench_eval_tree,

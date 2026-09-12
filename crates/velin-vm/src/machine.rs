@@ -74,6 +74,7 @@ pub struct Machine {
     frame: Vec<Option<Value>>,
     frame_slots: Vec<DataFootprint>,
     frame_total: DataFootprint,
+    expression_stack: Vec<Value>,
     pc: usize,
     /// The host effect execution is currently waiting to resume from.
     pending_host: Option<PendingHost>,
@@ -138,6 +139,7 @@ impl Machine {
             frame,
             frame_slots,
             frame_total,
+            expression_stack: Vec::new(),
             pc: 0,
             pending_host: None,
             finished: false,
@@ -260,34 +262,59 @@ impl Machine {
     /// Executes one op. Returns `Some(Yield::Host)` if it yielded, `None`
     /// otherwise. Advances `pc` accordingly.
     fn step(&mut self) -> Result<Option<Yield>, EvalError> {
-        match self.program.ops[self.pc].clone() {
+        match &self.program.ops[self.pc] {
             Op::Set { slot, value } => {
-                let (result, footprint) = self.eval(value)?;
+                let slot = *slot;
+                let value = *value;
+                let (result, footprint) = eval_chunk_for(
+                    &self.program,
+                    &mut self.frame,
+                    &mut self.expression_stack,
+                    value,
+                )?;
                 let line = self.program.chunks[value as usize].line;
                 self.assign_measured(slot, result, footprint, line)?;
                 self.pc += 1;
             }
-            Op::Jump(target) => self.pc = target as usize,
-            Op::JumpIfFalse { condition, target } => match self.eval(condition)?.0 {
-                Value::Boolean(false) => self.pc = target as usize,
-                Value::Boolean(true) => self.pc += 1,
-                value => {
-                    return Err(EvalError::new(
-                        self.program.chunks[condition as usize].line,
-                        format!("condition expects boolean, found {}", value.type_name()),
-                    ));
+            Op::Jump(target) => self.pc = *target as usize,
+            Op::JumpIfFalse { condition, target } => {
+                let condition_line = self.program.chunks[*condition as usize].line;
+                let condition_value = eval_chunk_for(
+                    &self.program,
+                    &mut self.frame,
+                    &mut self.expression_stack,
+                    *condition,
+                )?
+                .0;
+                match condition_value {
+                    Value::Boolean(false) => self.pc = *target as usize,
+                    Value::Boolean(true) => self.pc += 1,
+                    value => {
+                        return Err(EvalError::new(
+                            condition_line,
+                            format!("condition expects boolean, found {}", value.type_name()),
+                        ));
+                    }
                 }
-            },
+            }
             Op::Host {
                 host_id,
                 args,
                 bind,
                 line,
             } => {
+                let host_id = *host_id;
+                let bind = *bind;
+                let line = *line;
                 let mut values = Vec::with_capacity(args.len());
                 let mut payload = DataFootprint::default();
-                for chunk in args {
-                    let (value, footprint) = self.eval(chunk)?;
+                for chunk in args.iter().copied() {
+                    let (value, footprint) = eval_chunk_for(
+                        &self.program,
+                        &mut self.frame,
+                        &mut self.expression_stack,
+                        chunk,
+                    )?;
                     payload = checked_total(
                         payload,
                         footprint,
@@ -305,14 +332,6 @@ impl Machine {
             Op::Halt => self.finished = true,
         }
         Ok(None)
-    }
-
-    fn eval(&mut self, chunk_id: u32) -> Result<(Value, DataFootprint), EvalError> {
-        let chunk = &self.program.chunks[chunk_id as usize];
-        let slots = &self.program.slots;
-        eval_validated_chunk(chunk, &mut self.frame, |slot| {
-            slots.name(slot).unwrap_or("?").to_owned()
-        })
     }
 
     fn assign(&mut self, slot: u32, value: Value, line: usize) -> Result<(), EvalError> {
@@ -372,6 +391,19 @@ impl Machine {
             })
             .unwrap_or(0)
     }
+}
+
+fn eval_chunk_for(
+    program: &Program,
+    frame: &mut [Option<Value>],
+    expression_stack: &mut Vec<Value>,
+    chunk_id: u32,
+) -> Result<(Value, DataFootprint), EvalError> {
+    let chunk = &program.chunks[chunk_id as usize];
+    let slots = &program.slots;
+    eval_validated_chunk(chunk, frame, expression_stack, |slot| {
+        slots.name(slot).unwrap_or("?").to_owned()
+    })
 }
 
 fn checked_total(

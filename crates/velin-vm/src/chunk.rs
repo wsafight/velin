@@ -33,17 +33,22 @@ pub fn eval_chunk(
     chunk
         .validate(frame.len())
         .map_err(|error| EvalError::new(chunk.line, format!("invalid bytecode: {error}")))?;
-    eval_validated_chunk(chunk, frame, slot_name).map(|(value, _)| value)
+    let mut stack = Vec::new();
+    eval_validated_chunk(chunk, frame, &mut stack, slot_name).map(|(value, _)| value)
 }
 
 /// Executes a chunk belonging to a `Program` already validated by `Machine`.
 pub(crate) fn eval_validated_chunk(
     chunk: &ExprChunk,
     frame: &mut Frame,
+    stack: &mut Vec<Value>,
     slot_name: impl Fn(u32) -> String,
 ) -> Result<(Value, DataFootprint), EvalError> {
     let line = chunk.line;
-    let mut stack: Vec<Value> = Vec::new();
+    stack.clear();
+    if stack.capacity() < chunk.ops.len() {
+        stack.reserve(chunk.ops.len() - stack.capacity());
+    }
     let mut pc = 0;
     while pc < chunk.ops.len() {
         match &chunk.ops[pc] {
@@ -94,17 +99,9 @@ pub(crate) fn eval_validated_chunk(
                 let pieces = stack.split_off(at);
                 let mut text = String::new();
                 for piece in &pieces {
-                    let rendered = piece
-                        .try_to_display()
+                    piece
+                        .append_to_display(&mut text, MAX_DATA_TEXT_BYTES)
                         .map_err(|error| EvalError::new(line, error))?;
-                    let length = text
-                        .len()
-                        .checked_add(rendered.len())
-                        .ok_or_else(|| EvalError::new(line, "data text exceeds 1 MiB"))?;
-                    if length > MAX_DATA_TEXT_BYTES {
-                        return Err(EvalError::new(line, "data text exceeds 1 MiB"));
-                    }
-                    text.push_str(&rendered);
                 }
                 stack.push(Value::String(text));
             }
