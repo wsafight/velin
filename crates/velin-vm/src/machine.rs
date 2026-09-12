@@ -907,6 +907,12 @@ impl Machine {
         let index = slot as usize;
         let frame = &mut self.frame;
         let old = frame.footprints[index];
+        if old == metrics.footprint {
+            frame.values[index] = Some(value);
+            frame.depths[index] = u8::try_from(metrics.max_depth)
+                .expect("validated value depth fits in the compact frame cache");
+            return Ok(());
+        }
         let retained = DataFootprint {
             values: self.frame_total.values - old.values,
             text_bytes: self.frame_total.text_bytes - old.text_bytes,

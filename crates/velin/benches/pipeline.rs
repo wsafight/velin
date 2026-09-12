@@ -246,6 +246,46 @@ fn bench_counter_loop(c: &mut Criterion) {
     });
 }
 
+fn bench_scalar_reassignment(c: &mut Criterion) {
+    let script = compile(
+        "bench.velin",
+        concat!(
+            "default value = 0\n",
+            "default index = 0\n",
+            "while index < 2000:\n",
+            "    set value = 7\n",
+            "    set index = index + 1\n",
+        ),
+    )
+    .unwrap();
+    c.bench_function("vm/scalar_reassignment", |b| {
+        b.iter(|| {
+            let mut runner = ScriptRunner::new(&script).unwrap();
+            black_box(runner.run().unwrap())
+        });
+    });
+}
+
+fn bench_boolean_slot_loop(c: &mut Criterion) {
+    let script = compile(
+        "bench.velin",
+        concat!(
+            "default enabled = true\n",
+            "default index = 0\n",
+            "while index < 1500:\n",
+            "    if enabled:\n",
+            "        set index = index + 1\n",
+        ),
+    )
+    .unwrap();
+    c.bench_function("vm/boolean_slot_loop", |b| {
+        b.iter(|| {
+            let mut runner = ScriptRunner::new(&script).unwrap();
+            black_box(runner.run().unwrap())
+        });
+    });
+}
+
 fn bench_builtin_loop(c: &mut Criterion) {
     let script = compile(
         "bench.velin",
@@ -426,6 +466,8 @@ criterion_group!(
     bench_compile_expression_heavy_script,
     bench_constant_folding,
     bench_counter_loop,
+    bench_scalar_reassignment,
+    bench_boolean_slot_loop,
     bench_builtin_loop,
     bench_growing_list,
     bench_growing_string,
