@@ -1,8 +1,7 @@
-use super::{
-    BinaryOp, ChunkId, Expr, ExprChunk, ExprOp, Op, Pc, Program, ProgramChunk, SlotTable, Value,
-    append_reusable_chunk, compile_expression_into, range_usize,
-};
+use crate::expr::compile_expression_into;
+use velin_bytecode::{ChunkId, ExprChunk, ExprOp, Op, Pc, Program, ProgramArena, SlotTable};
 use velin_eval::{Variables, evaluate};
+use velin_syntax::{BinaryOp, Expr, Value};
 
 /// Incrementally assembles a [`Program`].
 ///
@@ -12,9 +11,7 @@ use velin_eval::{Variables, evaluate};
 #[derive(Debug)]
 pub struct ProgramBuilder {
     ops: Vec<Op>,
-    pub(super) chunks: Vec<ProgramChunk>,
-    expr_ops: Vec<ExprOp>,
-    constants: Vec<Value>,
+    pub(super) chunks: ProgramArena,
     slots: SlotTable,
     scratch: ExprChunk,
     known_constants: Vec<Option<Value>>,
@@ -24,9 +21,7 @@ impl Default for ProgramBuilder {
     fn default() -> Self {
         Self {
             ops: Vec::new(),
-            chunks: Vec::new(),
-            expr_ops: Vec::new(),
-            constants: Vec::new(),
+            chunks: ProgramArena::new(),
             slots: SlotTable::default(),
             scratch: ExprChunk::new(0),
             known_constants: Vec::new(),
@@ -117,14 +112,7 @@ impl ProgramBuilder {
     }
 
     fn append_scratch(&mut self) -> ChunkId {
-        let id = u32::try_from(self.chunks.len()).expect("chunk id fits in u32");
-        append_reusable_chunk(
-            &mut self.chunks,
-            &mut self.expr_ops,
-            &mut self.constants,
-            &mut self.scratch,
-        );
-        id
+        self.chunks.append(&mut self.scratch)
     }
 
     /// Appends an op, returning its [`Pc`] (useful for patching jumps).
@@ -182,16 +170,7 @@ impl ProgramBuilder {
         }
         self.optimize_control_flow();
         self.ops.shrink_to_fit();
-        self.chunks.shrink_to_fit();
-        self.expr_ops.shrink_to_fit();
-        self.constants.shrink_to_fit();
-        Program {
-            ops: self.ops,
-            chunks: self.chunks,
-            expr_ops: self.expr_ops,
-            constants: self.constants,
-            slots: self.slots,
-        }
+        self.chunks.finish(self.ops, self.slots)
     }
 
     fn optimize_control_flow(&mut self) {
@@ -249,12 +228,11 @@ impl ProgramBuilder {
     }
 
     fn constant_boolean(&self, id: ChunkId) -> Option<bool> {
-        let chunk = self.chunks.get(id as usize)?;
-        let [ExprOp::Const(index)] = self.expr_ops.get(range_usize(&chunk.ops))? else {
+        let chunk = self.chunks.chunk(id)?;
+        let [ExprOp::Const(index)] = chunk.ops else {
             return None;
         };
-        let index = chunk.constants.start.checked_add(*index)?;
-        match self.constants.get(index as usize)? {
+        match chunk.constants.get(*index as usize)? {
             Value::Boolean(value) => Some(*value),
             _ => None,
         }

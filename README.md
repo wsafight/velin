@@ -40,7 +40,8 @@ The name comes from the French *velin* (vellum): scripts write down the rules; t
 | `velin-syntax` | Values, expressions, built-ins, source locations, and diagnostics |
 | `velin-parse` | Expression tokenization and Pratt parsing |
 | `velin-eval` | Reference expression evaluator and deterministic built-ins |
-| `velin-compile` | Compilation of expressions and control flow to slot-addressed bytecode |
+| `velin-bytecode` | Shared bytecode model, validation, wire format, and execution plans |
+| `velin-compile` | Compilation of expressions and control flow to bytecode |
 | `velin-vm` | Bytecode execution, state frames, and host-effect yielding |
 | `velin-check` | Conservative type inference and definite-assignment analysis |
 | `velin-lang` | Indentation-sensitive statement language frontend |

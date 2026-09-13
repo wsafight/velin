@@ -1,5 +1,5 @@
 [package]
-name = "velin-compile"
+name = "velin-bytecode"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,16 +8,11 @@ readme.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
-description = "Bytecode compiler: lowers Velin expressions and programs to a flat, slot-addressed IR"
+description = "Validated bytecode model and execution plans for Velin"
 
 [dependencies]
 velin-syntax.workspace = true
-velin-eval.workspace = true
-velin-bytecode.workspace = true
-
-[dev-dependencies]
-velin-parse.workspace = true
-serde_json.workspace = true
+serde = { workspace = true, features = ["derive", "rc"] }
 
 [lints]
 workspace = true

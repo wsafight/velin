@@ -12,7 +12,6 @@ description = "Core language types (values, expressions, diagnostics) for the Ve
 
 [dependencies]
 serde = { workspace = true, features = ["derive", "rc"] }
-serde_json.workspace = true
 
 [lints]
 workspace = true

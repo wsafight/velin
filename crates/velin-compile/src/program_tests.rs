@@ -1,5 +1,5 @@
 use super::*;
-use velin_syntax::{BinaryOp, Builtin, Value};
+use velin_syntax::{BinaryOp, Builtin, Expr, Value};
 
 #[test]
 fn builder_shares_slots_across_expressions() {

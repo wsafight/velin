@@ -551,6 +551,7 @@ dependencies = [
  "criterion",
  "proptest",
  "serde_json",
+ "velin-bytecode",
  "velin-check",
  "velin-compile",
  "velin-eval",
@@ -561,9 +562,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "velin-bytecode"
+version = "0.1.1"
+dependencies = [
+ "serde",
+ "velin-syntax",
+]
+
+[[package]]
 name = "velin-check"
 version = "0.1.1"
 dependencies = [
+ "velin-bytecode",
  "velin-compile",
  "velin-parse",
  "velin-syntax",
@@ -581,8 +591,8 @@ dependencies = [
 name = "velin-compile"
 version = "0.1.1"
 dependencies = [
- "serde",
  "serde_json",
+ "velin-bytecode",
  "velin-eval",
  "velin-parse",
  "velin-syntax",
@@ -602,6 +612,7 @@ version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
+ "velin-bytecode",
  "velin-check",
  "velin-compile",
  "velin-eval",
@@ -630,13 +641,13 @@ name = "velin-syntax"
 version = "0.1.1"
 dependencies = [
  "serde",
- "serde_json",
 ]
 
 [[package]]
 name = "velin-vm"
 version = "0.1.1"
 dependencies = [
+ "velin-bytecode",
  "velin-compile",
  "velin-eval",
  "velin-parse",

@@ -5,7 +5,7 @@ use super::{
     MAX_HOST_PAYLOAD_VALUES, Program, QuickenedCallRef, QuickenedOperand, Value,
     eval_validated_chunk, invoke_readonly_measured,
 };
-use velin_compile::PreparedExpr;
+use velin_bytecode::PreparedExpr;
 use velin_eval::{apply_binary, invoke_stack_measured_with_metrics};
 
 #[inline]

@@ -33,7 +33,10 @@ velin-lang          statements + embedded expressions
   +----> velin-check          diagnostics
   |
   v
-velin-compile       expression chunks + control-flow ops + slot table
+velin-compile       source lowering and ProgramBuilder
+  |
+  v
+velin-bytecode      Program + validation + execution plans
   |
   v
 velin-vm            Machine state
@@ -57,7 +60,8 @@ Expressions also have a reference path: `velin-parse -> velin-eval`. It shares v
 | `velin-syntax` | Shared data model: `Value`, `Expr`, operators, `Span`, and `Diagnostic` |
 | `velin-parse` | Expression source to AST; does not handle statement control flow |
 | `velin-eval` | Tree-walking reference evaluator and built-in semantics |
-| `velin-compile` | Slot table, expression bytecode, and program control-flow bytecode |
+| `velin-bytecode` | Stable expression/program bytecode model, slot table, validation, wire format, and derived execution plans |
+| `velin-compile` | Source expression lowering, constant propagation, and `ProgramBuilder` |
 | `velin-vm` | Runtime state, expression stack machine, control-flow loop, and host suspension protocol |
 | `velin-check` | Type inference, condition checking, and definite-assignment analysis |
 | `velin-lang` | Indentation-sensitive statement AST, parsing, lowering, and host-name interning |

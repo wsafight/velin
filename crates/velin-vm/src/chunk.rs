@@ -6,7 +6,7 @@
 //! bytecode path and the tree-walker are guaranteed to agree operation for
 //! operation.
 
-use velin_compile::{ExprChunk, ExprChunkRef, ExprOp};
+use velin_bytecode::{ExprChunk, ExprChunkRef, ExprOp};
 use velin_eval::{
     EvalError, apply_binary, apply_unary, invoke_random, invoke_stack_measured_with_metrics,
     unassigned,
@@ -297,7 +297,7 @@ fn rng_state(frame: &mut Frame, slot: u32, line: usize) -> Result<&mut i64, Eval
 #[cfg(test)]
 mod tests {
     use super::*;
-    use velin_compile::SlotTable;
+    use velin_bytecode::SlotTable;
     use velin_compile::compile_expression;
     use velin_syntax::Expr;
 

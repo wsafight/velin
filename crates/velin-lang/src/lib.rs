@@ -1,8 +1,9 @@
 //! Velin language front-end.
 //!
-//! The core crates (`velin-syntax`, `velin-parse`, `velin-compile`,
-//! `velin-vm`, `velin-check`) give a full *expression* pipeline: a host builds
-//! a [`velin_compile::Program`] by hand with `ProgramBuilder`. That makes velin
+//! The core crates (`velin-syntax`, `velin-parse`, `velin-bytecode`,
+//! `velin-compile`, `velin-vm`, `velin-check`) give a full *expression*
+//! pipeline: a host builds
+//! a [`velin_bytecode::Program`] by hand with `ProgramBuilder`. That makes velin
 //! an embeddable evaluation *library*, but there is no surface syntax — nobody
 //! can write a `.velin` file.
 //!
@@ -11,7 +12,7 @@
 //! reuses [`velin_parse::parse_expression`] for every expression and condition,
 //! so it introduces no new value semantics or host-domain concepts. A call
 //! like `emit("hi")` is not a keyword but a **host command**, interned to an
-//! opaque `host_id` and lowered to [`velin_compile::Op::Host`].
+//! opaque `host_id` and lowered to [`velin_bytecode::Op::Host`].
 //!
 //! ```text
 //! source ──parse──▶ Ast ──lower──▶ CompiledScript { program, hosts, labels, defaults }

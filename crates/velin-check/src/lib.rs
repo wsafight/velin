@@ -6,7 +6,7 @@
 //! * [`infer`] — expression type inference over a coarse [`Type`] lattice,
 //!   reporting only provable mismatches (`"a" + 1`, `not 3`, `get(list, "k")`).
 //! * [`definite_assignment`] — a must-dataflow analysis over a compiled
-//!   [`velin_compile::Program`] that proves every variable read is assigned on
+//!   [`velin_bytecode::Program`] that proves every variable read is assigned on
 //!   all paths, turning "unassigned on this path" runtime errors into
 //!   compile-time diagnostics.
 //!

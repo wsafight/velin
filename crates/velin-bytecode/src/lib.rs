@@ -1,0 +1,30 @@
+//! Portable Velin bytecode and its validation contract.
+//!
+//! This crate owns the data model shared by the compiler, checker, artifact
+//! loader, and virtual machine. It does not parse source text or execute an
+//! instruction. [`velin-vm`] consumes the validated [`Program`] values defined
+//! here.
+
+mod bytecode;
+mod frame;
+mod program;
+mod slots;
+mod validate;
+
+fn compact_source_position(position: usize) -> u32 {
+    u32::try_from(position).unwrap_or(u32::MAX)
+}
+
+pub use bytecode::{ExprChunk, ExprChunkRef, ExprOp};
+pub use frame::{InitialFrame, InitialFrameError, InitialValue};
+pub use program::{
+    ChunkExecutionMetadata, ChunkId, ExecutionMetadata, HostOp, Op, OpExecutionMetadata, Pc,
+    PreparedExpr, Program, ProgramArena, ProgramChunk, QuickenedCallRef, QuickenedOperand,
+    RegisterExpr, RegisterOp, RegisterType, UpdateOp,
+};
+pub use slots::{RNG_STATE_SLOT, SlotTable};
+pub use validate::{
+    MAX_EXPR_OPS, MAX_EXPR_STACK, MAX_HOST_ARGUMENTS, MAX_PROGRAM_CHUNKS,
+    MAX_PROGRAM_CONSTANT_VALUES, MAX_PROGRAM_OPS, MAX_PROGRAM_SLOTS, MAX_PROGRAM_TEXT_BYTES,
+    ProgramValidationError, ValidatedProgram,
+};

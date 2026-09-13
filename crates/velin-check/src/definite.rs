@@ -13,7 +13,7 @@
 
 use crate::cfg::{ControlFlow, is_straight_line};
 use std::collections::{BTreeSet, VecDeque};
-use velin_compile::{ExprChunkRef, ExprOp, Op, Program, UpdateOp};
+use velin_bytecode::{ExprChunkRef, ExprOp, Op, Program, UpdateOp};
 use velin_syntax::{BinaryOp, Builtin, UnaryOp, Value};
 
 mod expression;

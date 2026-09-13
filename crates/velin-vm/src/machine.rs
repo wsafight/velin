@@ -10,7 +10,7 @@
 use self::support::{cache_metrics, checked_total};
 use crate::chunk::{FrameAccess, eval_validated_chunk};
 use std::sync::Arc;
-use velin_compile::{
+use velin_bytecode::{
     ExecutionMetadata, HostOp, InitialFrame, Op, Program, ProgramValidationError, QuickenedCallRef,
     QuickenedOperand, RegisterExpr, RegisterOp, RegisterType, UpdateOp, ValidatedProgram,
 };

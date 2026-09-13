@@ -1,6 +1,6 @@
 //! Deterministic bytecode virtual machine for Velin.
 //!
-//! [`Machine`] executes a [`velin_compile::Program`], running control flow over
+//! [`Machine`] executes a [`velin_bytecode::Program`], running control flow over
 //! a slot-addressed variable frame and evaluating expressions via the flat
 //! stack machine in [`eval_chunk`]. All value semantics are delegated to
 //! `velin-eval`, so the bytecode path and the tree-walker agree exactly (see

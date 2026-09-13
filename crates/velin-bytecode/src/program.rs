@@ -8,18 +8,13 @@
 //! is [`Op::Host`], an opaque effect the VM yields to the embedder.
 
 use crate::bytecode::{ExprChunk, ExprChunkRef, ExprOp};
-use crate::expr::compile_expression_into;
 use crate::slots::SlotTable;
-use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
-use velin_syntax::{BinaryOp, Builtin, DataMetrics, Expr, UnaryOp, Value};
+use velin_syntax::{BinaryOp, Builtin, DataMetrics, UnaryOp, Value};
 
-mod builder;
 mod metadata;
 mod wire;
-
-pub use builder::ProgramBuilder;
 
 /// An index into [`Program::chunks`].
 pub type ChunkId = u32;
@@ -161,6 +156,80 @@ pub struct Program {
     pub slots: SlotTable,
 }
 
+/// Storage for the packed expression arenas assembled by the compiler.
+///
+/// The arena keeps expression instructions and constants contiguous while the
+/// compiler is building a program. It contains no source-language or evaluator
+/// logic, so it belongs with the bytecode representation rather than the
+/// compiler's lowering code.
+#[derive(Debug, Default)]
+pub struct ProgramArena {
+    chunks: Vec<ProgramChunk>,
+    expr_ops: Vec<ExprOp>,
+    constants: Vec<Value>,
+}
+
+impl ProgramArena {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Appends a reusable chunk and returns its stable arena id.
+    ///
+    /// # Panics
+    /// Panics only if more than `u32::MAX` chunks are appended, which the
+    /// validated program limits make unreachable in practice.
+    pub fn append(&mut self, chunk: &mut ExprChunk) -> ChunkId {
+        let id = u32::try_from(self.chunks.len()).expect("chunk id fits in u32");
+        append_reusable_chunk(
+            &mut self.chunks,
+            &mut self.expr_ops,
+            &mut self.constants,
+            chunk,
+        );
+        id
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.chunks.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.chunks.is_empty()
+    }
+
+    /// Borrows one expression from the packed arenas.
+    #[must_use]
+    pub fn chunk(&self, id: ChunkId) -> Option<ExprChunkRef<'_>> {
+        let chunk = self.chunks.get(id as usize)?;
+        let ops = self.expr_ops.get(range_usize(&chunk.ops))?;
+        let constants = self.constants.get(range_usize(&chunk.constants))?;
+        Some(ExprChunkRef {
+            ops,
+            constants,
+            line: chunk.line,
+        })
+    }
+
+    /// Finishes the arena without copying its packed storage into a program.
+    #[must_use]
+    pub fn finish(mut self, ops: Vec<Op>, slots: SlotTable) -> Program {
+        self.chunks.shrink_to_fit();
+        self.expr_ops.shrink_to_fit();
+        self.constants.shrink_to_fit();
+        Program {
+            ops,
+            chunks: self.chunks,
+            expr_ops: self.expr_ops,
+            constants: self.constants,
+            slots,
+        }
+    }
+}
+
 /// Precomputed properties used by the VM after a program is validated.
 #[derive(Debug)]
 pub struct ExecutionMetadata {
@@ -295,21 +364,17 @@ impl Program {
     /// Packs independently allocated expression chunks into contiguous arenas.
     #[must_use]
     pub fn from_chunks(ops: Vec<Op>, chunks: Vec<ExprChunk>, slots: SlotTable) -> Self {
-        let mut packed = Vec::with_capacity(chunks.len());
-        let op_count = chunks.iter().map(|chunk| chunk.ops.len()).sum();
-        let constant_count = chunks.iter().map(|chunk| chunk.constants.len()).sum();
-        let mut expr_ops = Vec::with_capacity(op_count);
-        let mut constants = Vec::with_capacity(constant_count);
+        let mut arena = ProgramArena {
+            chunks: Vec::with_capacity(chunks.len()),
+            expr_ops: Vec::with_capacity(chunks.iter().map(|chunk| chunk.ops.len()).sum()),
+            constants: Vec::with_capacity(chunks.iter().map(|chunk| chunk.constants.len()).sum()),
+        };
+
         for chunk in chunks {
-            append_chunk(&mut packed, &mut expr_ops, &mut constants, chunk);
+            let mut chunk = chunk;
+            arena.append(&mut chunk);
         }
-        Self {
-            ops,
-            chunks: packed,
-            expr_ops,
-            constants,
-            slots,
-        }
+        arena.finish(ops, slots)
     }
 
     /// Borrows one expression from the packed arenas.
@@ -324,16 +389,6 @@ impl Program {
             line: chunk.line,
         })
     }
-}
-
-fn append_chunk(
-    chunks: &mut Vec<ProgramChunk>,
-    expr_ops: &mut Vec<ExprOp>,
-    constants: &mut Vec<Value>,
-    chunk: ExprChunk,
-) {
-    let mut chunk = chunk;
-    append_reusable_chunk(chunks, expr_ops, constants, &mut chunk);
 }
 
 fn append_reusable_chunk(
@@ -358,7 +413,3 @@ fn append_reusable_chunk(
 fn range_usize(range: &Range<u32>) -> Range<usize> {
     range.start as usize..range.end as usize
 }
-
-#[cfg(test)]
-#[path = "program_tests.rs"]
-mod tests;

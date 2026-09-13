@@ -14,6 +14,7 @@ description = "Velin: an embeddable, deterministic scripting language (parse, ch
 velin-syntax.workspace = true
 velin-parse.workspace = true
 velin-eval.workspace = true
+velin-bytecode.workspace = true
 velin-compile.workspace = true
 velin-vm.workspace = true
 velin-check.workspace = true

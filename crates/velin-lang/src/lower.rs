@@ -21,10 +21,9 @@ use crate::limits::MAX_STATEMENT_DEPTH;
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::sync::Arc;
+use velin_bytecode::{InitialFrame, InitialValue, Op, Pc, UpdateOp, ValidatedProgram};
 use velin_check::{TypeCheckKind, TypeCheckSite};
-use velin_compile::{
-    InitialFrame, InitialValue, Op, Pc, ProgramBuilder, UpdateOp, ValidatedProgram,
-};
+use velin_compile::ProgramBuilder;
 use velin_eval::{Variables, evaluate};
 use velin_syntax::{Diagnostic, Expr, Value};
 

@@ -15,28 +15,24 @@
 //! Variable names are resolved to dense frame indices at compile time via
 //! [`SlotTable`], so the VM never hashes strings at runtime.
 
-mod bytecode;
+mod builder;
 mod expr;
-mod frame;
-mod program;
-mod slots;
-mod validate;
 
 fn compact_source_position(position: usize) -> u32 {
     u32::try_from(position).unwrap_or(u32::MAX)
 }
 
-pub use bytecode::{ExprChunk, ExprChunkRef, ExprOp};
+pub use builder::ProgramBuilder;
 pub use expr::compile_expression;
-pub use frame::{InitialFrame, InitialFrameError, InitialValue};
-pub use program::{
-    ChunkExecutionMetadata, ChunkId, ExecutionMetadata, HostOp, Op, OpExecutionMetadata, Pc,
-    PreparedExpr, Program, ProgramBuilder, ProgramChunk, QuickenedCallRef, QuickenedOperand,
-    RegisterExpr, RegisterOp, RegisterType, UpdateOp,
+pub use velin_bytecode::{
+    ChunkExecutionMetadata, ChunkId, ExecutionMetadata, ExprChunk, ExprChunkRef, ExprOp, HostOp,
+    InitialFrame, InitialFrameError, InitialValue, MAX_EXPR_OPS, MAX_EXPR_STACK,
+    MAX_HOST_ARGUMENTS, MAX_PROGRAM_CHUNKS, MAX_PROGRAM_CONSTANT_VALUES, MAX_PROGRAM_OPS,
+    MAX_PROGRAM_SLOTS, MAX_PROGRAM_TEXT_BYTES, Op, OpExecutionMetadata, Pc, PreparedExpr, Program,
+    ProgramArena, ProgramChunk, ProgramValidationError, QuickenedCallRef, QuickenedOperand,
+    RNG_STATE_SLOT, RegisterExpr, RegisterOp, RegisterType, SlotTable, UpdateOp, ValidatedProgram,
 };
-pub use slots::{RNG_STATE_SLOT, SlotTable};
-pub use validate::{
-    MAX_EXPR_OPS, MAX_EXPR_STACK, MAX_HOST_ARGUMENTS, MAX_PROGRAM_CHUNKS,
-    MAX_PROGRAM_CONSTANT_VALUES, MAX_PROGRAM_OPS, MAX_PROGRAM_SLOTS, MAX_PROGRAM_TEXT_BYTES,
-    ProgramValidationError, ValidatedProgram,
-};
+
+#[cfg(test)]
+#[path = "program_tests.rs"]
+mod program_tests;

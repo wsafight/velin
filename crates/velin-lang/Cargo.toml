@@ -15,6 +15,7 @@ velin-syntax.workspace = true
 velin-parse.workspace = true
 velin-eval.workspace = true
 velin-compile.workspace = true
+velin-bytecode.workspace = true
 velin-check.workspace = true
 serde.workspace = true
 serde_json.workspace = true

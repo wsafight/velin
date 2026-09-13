@@ -1,4 +1,4 @@
-use velin_compile::Op;
+use velin_bytecode::Op;
 
 pub(crate) fn is_straight_line(ops: &[Op]) -> bool {
     ops.iter().enumerate().all(|(pc, op)| match op {

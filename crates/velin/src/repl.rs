@@ -165,7 +165,7 @@ impl ReplSession {
         }
 
         for name in script.program.slots.names() {
-            if name == velin_compile::RNG_STATE_SLOT {
+            if name == velin_bytecode::RNG_STATE_SLOT {
                 continue;
             }
             if let Some(value) = runner.machine().variable(name) {

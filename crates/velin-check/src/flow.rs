@@ -4,7 +4,7 @@ use crate::cfg::{ControlFlow, is_straight_line};
 use crate::types::infer_with;
 use crate::{Environment, Type, TypeError};
 use std::collections::{BTreeMap, VecDeque};
-use velin_compile::{Op, Program};
+use velin_bytecode::{Op, Program};
 use velin_syntax::{Diagnostic, Expr};
 
 /// How an expression participates in program type checking.

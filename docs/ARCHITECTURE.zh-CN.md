@@ -33,7 +33,10 @@ velin-lang          statements + embedded expressions
   +----> velin-check          diagnostics
   |
   v
-velin-compile       expression chunks + control-flow ops + slot table
+velin-compile       源码降级与 ProgramBuilder
+  |
+  v
+velin-bytecode      Program + 校验 + 执行计划
   |
   v
 velin-vm            Machine state
@@ -57,7 +60,8 @@ Yield::Finished
 | `velin-syntax` | 公共数据模型：`Value`、`Expr`、运算符、`Span`、`Diagnostic` |
 | `velin-parse` | 表达式源码到 AST，不处理语句控制流 |
 | `velin-eval` | 树遍历参考求值器和内置函数语义 |
-| `velin-compile` | 槽位表、表达式字节码、程序控制流字节码 |
+| `velin-bytecode` | 稳定的表达式/程序字节码模型、槽位表、校验、wire 格式与派生执行计划 |
+| `velin-compile` | 源码表达式降级、常量传播与 `ProgramBuilder` |
 | `velin-vm` | 运行状态、表达式栈机、控制流循环、宿主挂起协议 |
 | `velin-check` | 类型推断、条件检查与确定赋值分析 |
 | `velin-lang` | 缩进敏感语句 AST、解析、降级、宿主名驻留 |

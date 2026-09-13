@@ -4,7 +4,7 @@ use crate::{
     CompiledScript, DEFAULT_RNG_SEED, EvalError, HostSchema, Machine, ProgramValidationError,
     SetVariableError, Type, Value, Yield,
 };
-use velin_compile::InitialFrame;
+use velin_bytecode::InitialFrame;
 
 /// Default total host effects accepted during one script run.
 pub const DEFAULT_MAX_HOST_EFFECTS: usize = 1_000;

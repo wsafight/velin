@@ -40,7 +40,8 @@ Velin 是一门**可嵌入、可复现的字节码脚本语言**。它负责表�
 | `velin-syntax` | 值、表达式、内置函数、源码位置和诊断 |
 | `velin-parse` | 表达式词法分析与 Pratt 解析 |
 | `velin-eval` | 参考表达式求值器与确定性内置函数 |
-| `velin-compile` | 表达式及控制流到槽位寻址字节码的编译 |
+| `velin-bytecode` | 共享字节码模型、校验、线格式与执行计划 |
+| `velin-compile` | 表达式及控制流到字节码的编译 |
 | `velin-vm` | 字节码执行、状态帧和宿主效果让出 |
 | `velin-check` | 保守类型推断与确定赋值分析 |
 | `velin-lang` | 缩进敏感的语句语言前端 |

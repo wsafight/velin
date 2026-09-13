@@ -12,10 +12,11 @@ description = "Conservative static checks for Velin: expression type inference a
 
 [dependencies]
 velin-syntax.workspace = true
-velin-compile.workspace = true
+velin-bytecode.workspace = true
 
 [dev-dependencies]
 velin-parse.workspace = true
+velin-compile.workspace = true
 
 [lints]
 workspace = true

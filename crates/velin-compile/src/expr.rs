@@ -7,8 +7,7 @@
 //! is skipped (and never fails on an unassigned variable) when the result is
 //! already determined by the left operand.
 
-use crate::bytecode::{ExprChunk, ExprOp};
-use crate::slots::SlotTable;
+use velin_bytecode::{ExprChunk, ExprOp, SlotTable};
 use velin_eval::{apply_binary, apply_unary, invoke};
 use velin_syntax::{BinaryOp, Builtin, Expr, MAX_DATA_TEXT_BYTES, StrPart, Value};
 
@@ -20,7 +19,8 @@ use velin_syntax::{BinaryOp, Builtin, Expr, MAX_DATA_TEXT_BYTES, StrPart, Value}
 pub fn compile_expression(expression: &Expr, slots: &mut SlotTable, line: usize) -> ExprChunk {
     let mut chunk = ExprChunk::new(line);
     compile_expression_into(expression, slots, line, &mut chunk);
-    chunk.compact();
+    chunk.ops.shrink_to_fit();
+    chunk.constants.shrink_to_fit();
     chunk
 }
 

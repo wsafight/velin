@@ -2,7 +2,7 @@
 //!
 //! A [`CompiledScript`] is everything an embedder needs to run a `.velin` file:
 //! the bytecode [`Program`] to feed a `Machine`, the `host_id → command-name`
-//! table so the embedder can dispatch [`velin_compile::Op::Host`] effects, the
+//! table so the embedder can dispatch [`velin_bytecode::Op::Host`] effects, the
 //! label table for external jumps, and the `default` values to seed before
 //! running.
 //!
@@ -11,12 +11,12 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
+use velin_bytecode::{InitialFrame, Pc, Program, ValidatedProgram};
 use velin_check::{
     Environment, HostSignature, HostSignatures, Type, TypeCheckSite, check_program_types,
     check_program_types_with_hosts, check_program_types_with_hosts_and_slot_types,
     check_program_types_with_slot_types, definite_assignment, definite_assignment_slots,
 };
-use velin_compile::{InitialFrame, Pc, Program, ValidatedProgram};
 use velin_syntax::{Diagnostic, Value};
 
 /// A parsed, lowered, runnable script.

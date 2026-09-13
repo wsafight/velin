@@ -13,10 +13,11 @@ description = "Deterministic bytecode virtual machine for Velin, with host-effec
 [dependencies]
 velin-syntax.workspace = true
 velin-eval.workspace = true
-velin-compile.workspace = true
+velin-bytecode.workspace = true
 
 [dev-dependencies]
 velin-parse.workspace = true
+velin-compile.workspace = true
 
 [lints]
 workspace = true

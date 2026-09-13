@@ -125,9 +125,4 @@ impl ExprChunk {
             line: self.line,
         }
     }
-
-    pub(crate) fn compact(&mut self) {
-        self.ops.shrink_to_fit();
-        self.constants.shrink_to_fit();
-    }
 }

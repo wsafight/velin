@@ -1,7 +1,6 @@
-use super::{
-    Deserialize, ExprChunk, ExprChunkRef, Op, Program, Serialize, SerializeSeq, SerializeStruct,
-    SlotTable,
-};
+use super::{ExprChunk, ExprChunkRef, Op, Program, SlotTable};
+use serde::ser::{SerializeSeq, SerializeStruct};
+use serde::{Deserialize, Serialize};
 
 impl Serialize for Program {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

@@ -103,11 +103,13 @@ pub use velin_parse::parse_expression;
 
 pub use velin_eval::{EvalError, Variables, evaluate, evaluate_with_rng};
 
-pub use velin_compile::{
+pub use velin_bytecode::{
     ChunkId, ExprChunk, ExprChunkRef, ExprOp, HostOp, InitialFrame, InitialFrameError,
-    InitialValue, Op, Pc, Program, ProgramBuilder, ProgramChunk, ProgramValidationError, SlotTable,
-    UpdateOp, ValidatedProgram, compile_expression,
+    InitialValue, Op, Pc, Program, ProgramChunk, ProgramValidationError, SlotTable, UpdateOp,
+    ValidatedProgram,
 };
+
+pub use velin_compile::{ProgramBuilder, compile_expression};
 
 pub use velin_vm::{
     DEFAULT_RNG_SEED, HostEffect, MAX_HOST_PAYLOAD_TEXT_BYTES, MAX_HOST_PAYLOAD_VALUES,

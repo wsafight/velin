@@ -4,7 +4,7 @@ use crate::host::CompiledScript;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use velin_compile::{InitialFrame, Pc, Program, ProgramValidationError, ValidatedProgram};
+use velin_bytecode::{InitialFrame, Op, Pc, Program, ProgramValidationError, ValidatedProgram};
 use velin_syntax::{DataFootprint, Value};
 
 /// Fixed marker at the start of every `.velinc` file.
@@ -277,7 +277,7 @@ fn validate_metadata(
         return Err(ArtifactError::new("defaults exceed machine text budget"));
     }
     for op in &program.ops {
-        if let velin_compile::Op::Host(host) = op
+        if let Op::Host(host) = op
             && usize::try_from(host.host_id).map_or(true, |id| id >= hosts.len())
         {
             return Err(ArtifactError::new("program references an unknown host id"));

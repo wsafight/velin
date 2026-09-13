@@ -3,6 +3,7 @@ members = [
     "crates/velin-syntax",
     "crates/velin-parse",
     "crates/velin-eval",
+    "crates/velin-bytecode",
     "crates/velin-compile",
     "crates/velin-vm",
     "crates/velin-check",
@@ -34,6 +35,7 @@ strip = "symbols"
 velin-syntax = { version = "0.1.1", path = "crates/velin-syntax" }
 velin-parse = { version = "0.1.1", path = "crates/velin-parse" }
 velin-eval = { version = "0.1.1", path = "crates/velin-eval" }
+velin-bytecode = { version = "0.1.1", path = "crates/velin-bytecode" }
 velin-compile = { version = "0.1.1", path = "crates/velin-compile" }
 velin-vm = { version = "0.1.1", path = "crates/velin-vm" }
 velin-check = { version = "0.1.1", path = "crates/velin-check" }
