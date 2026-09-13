@@ -35,6 +35,9 @@ velin = { workspace = true }
 name = "runtime"
 harness = false
 
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory"]
+
 # NOTE: unlike the core crates, this shim does not set `unsafe_code = "forbid"`:
 # `#[wasm_bindgen]` expands to generated `unsafe` glue, which `forbid` cannot
 # permit. All *authored* code here is safe; the crate only marshals strings and

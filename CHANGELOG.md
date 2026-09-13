@@ -6,6 +6,11 @@ change source and Rust APIs between minor releases.
 
 ## Unreleased
 
+### Fixed
+
+- Rust 1.88 Clippy accepts the bytecode metadata matcher used by the CI toolchain.
+- Release-mode wasm-pack builds explicitly enable bulk-memory validation during `wasm-opt`.
+
 ## 0.2.0 - 2026-09-14
 
 ### Added

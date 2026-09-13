@@ -133,11 +133,7 @@ fn op_line(program: &Program, op: &Op) -> u32 {
     match op {
         Op::Set { value, .. }
         | Op::Update {
-            operation: UpdateOp::Add { rhs: value },
-            ..
-        }
-        | Op::Update {
-            operation: UpdateOp::Push { value },
+            operation: UpdateOp::Add { rhs: value } | UpdateOp::Push { value },
             ..
         }
         | Op::JumpIfFalse {
