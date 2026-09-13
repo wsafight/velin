@@ -168,6 +168,16 @@ Metadata records each expression's maximum stack depth, whether it mutates RNG s
 
 ## VM execution
 
+### Interpolation avoids repeated validation
+
+The VM interpolation path carries `DataMetrics` for every value. It now
+computes the deterministic display byte length and reserves the result once;
+integers and booleans write directly into the destination buffer instead of
+creating short-lived scalar `String` values. Validated values use a dedicated
+append entry point that still enforces the final output limit without walking
+the entire value tree again. Copy-on-write for aliases and all error ordering
+remain unchanged.
+
 ### The operand stack is reused across expressions
 
 Each `Machine` owns an `expression_stack`. Evaluation clears its length and reserves against the maximum stack depth computed during execution preparation. `ExprOp` instructions and constants are borrowed from the program arenas rather than copied.

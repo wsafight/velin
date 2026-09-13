@@ -1,5 +1,6 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use std::fmt::Write as _;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -231,6 +232,21 @@ impl Value {
         Ok(output)
     }
 
+    /// Returns the byte length of the deterministic display representation.
+    ///
+    /// Validation is performed once before walking the tree, allowing callers
+    /// to reserve the exact output size without temporary scalar strings.
+    pub fn display_len(&self) -> Result<usize, &'static str> {
+        self.validate_data()?;
+        self.display_len_known()
+    }
+
+    /// Returns the display length for a value whose metrics were already
+    /// validated by the caller. This skips a second validation walk.
+    pub fn display_len_known(&self) -> Result<usize, &'static str> {
+        display_len(self)
+    }
+
     /// Appends the deterministic display representation without allowing the
     /// complete destination buffer to exceed `limit` bytes.
     ///
@@ -239,8 +255,76 @@ impl Value {
     /// exceed `limit`.
     pub fn append_to_display(&self, output: &mut String, limit: usize) -> Result<(), &'static str> {
         self.validate_data()?;
+        self.append_to_display_known(output, limit)
+    }
+
+    /// Appends a value whose data metrics were already checked by the caller.
+    /// The destination limit is still enforced.
+    pub fn append_to_display_known(
+        &self,
+        output: &mut String,
+        limit: usize,
+    ) -> Result<(), &'static str> {
+        let length = self.display_len_known()?;
+        let total = output
+            .len()
+            .checked_add(length)
+            .ok_or("rendered text exceeds 1 MiB")?;
+        if total > limit {
+            return Err("rendered text exceeds 1 MiB");
+        }
+        output
+            .try_reserve(length)
+            .map_err(|_| "rendered text allocation failed")?;
         append_display(self, output, Some(limit))
     }
+}
+
+fn display_len(value: &Value) -> Result<usize, &'static str> {
+    match value {
+        Value::Integer(number) => Ok(integer_display_len(*number)),
+        Value::Boolean(boolean) => Ok(if *boolean { 4 } else { 5 }),
+        Value::String(text) => Ok(text.len()),
+        Value::List(items) => {
+            let mut length = 2usize;
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    length = length.checked_add(2).ok_or("rendered text size overflow")?;
+                }
+                length = length
+                    .checked_add(display_len(item)?)
+                    .ok_or("rendered text size overflow")?;
+            }
+            Ok(length)
+        }
+        Value::Record(fields) => {
+            let mut length = 2usize;
+            for (index, (key, field)) in fields.iter().enumerate() {
+                if index > 0 {
+                    length = length.checked_add(2).ok_or("rendered text size overflow")?;
+                }
+                length = length
+                    .checked_add(key.len())
+                    .and_then(|length| length.checked_add(2))
+                    .and_then(|length| length.checked_add(display_len(field).ok()?))
+                    .ok_or("rendered text size overflow")?;
+            }
+            Ok(length)
+        }
+    }
+}
+
+fn integer_display_len(number: i64) -> usize {
+    let mut magnitude = number.unsigned_abs();
+    let mut length = usize::from(number < 0);
+    if magnitude == 0 {
+        return 1;
+    }
+    while magnitude != 0 {
+        length += 1;
+        magnitude /= 10;
+    }
+    length
 }
 
 fn append_display(
@@ -249,8 +333,10 @@ fn append_display(
     limit: Option<usize>,
 ) -> Result<(), &'static str> {
     match value {
-        Value::Integer(number) => push_display(output, &number.to_string(), limit)?,
-        Value::Boolean(boolean) => push_display(output, &boolean.to_string(), limit)?,
+        Value::Integer(number) => push_integer(output, *number, limit)?,
+        Value::Boolean(boolean) => {
+            push_display(output, if *boolean { "true" } else { "false" }, limit)?;
+        }
         Value::String(text) => push_display(output, text, limit)?,
         Value::List(items) => {
             push_display(output, "[", limit)?;
@@ -276,6 +362,23 @@ fn append_display(
         }
     }
     Ok(())
+}
+
+fn push_integer(
+    output: &mut String,
+    number: i64,
+    limit: Option<usize>,
+) -> Result<(), &'static str> {
+    let length = integer_display_len(number);
+    if limit.is_some_and(|limit| {
+        output
+            .len()
+            .checked_add(length)
+            .is_none_or(|total| total > limit)
+    }) {
+        return Err("rendered text exceeds 1 MiB");
+    }
+    write!(output, "{number}").map_err(|_| "rendered text allocation failed")
 }
 
 fn push_display(output: &mut String, text: &str, limit: Option<usize>) -> Result<(), &'static str> {
@@ -371,5 +474,20 @@ mod tests {
         )]));
         assert!(value.validate_data().is_ok());
         assert_eq!(value.try_to_display(), Err("rendered text exceeds 1 MiB"));
+    }
+
+    #[test]
+    fn display_length_matches_rendered_bytes_without_scalar_temporaries() {
+        let value = Value::Record(std::sync::Arc::new(std::collections::BTreeMap::from([
+            ("answer".to_owned(), Value::Integer(i64::MIN)),
+            ("ok".to_owned(), Value::Boolean(true)),
+        ])));
+        let rendered = value.to_display();
+        assert_eq!(value.display_len().unwrap(), rendered.len());
+        let mut output = String::new();
+        value
+            .append_to_display_known(&mut output, crate::data::MAX_DATA_TEXT_BYTES)
+            .unwrap();
+        assert_eq!(output, rendered);
     }
 }

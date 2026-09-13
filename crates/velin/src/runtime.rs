@@ -5,8 +5,8 @@ use crate::{
     SetVariableError, Type, Value, Yield,
 };
 use std::collections::VecDeque;
-use velin_syntax::DataFootprint;
 use velin_bytecode::InitialFrame;
+use velin_syntax::DataFootprint;
 
 /// Default total host effects accepted during one script run.
 pub const DEFAULT_MAX_HOST_EFFECTS: usize = 1_000;
@@ -707,7 +707,10 @@ mod tests {
             runner.run().unwrap(),
             ScriptYield::Host { ref name, .. } if name == "ask"
         ));
-        assert_eq!(runner.resume(Some(Value::Integer(9))).unwrap(), ScriptYield::Finished);
+        assert_eq!(
+            runner.resume(Some(Value::Integer(9))).unwrap(),
+            ScriptYield::Finished
+        );
     }
 
     #[test]
@@ -724,18 +727,24 @@ mod tests {
             })
             .unwrap();
         assert_eq!(queue.len(), 1);
-        assert_eq!(queue.push(HostEvent {
-            name: "emit".into(),
-            values: vec![Value::Integer(1)],
-        }), Err(HostEventQueueError::Full));
+        assert_eq!(
+            queue.push(HostEvent {
+                name: "emit".into(),
+                values: vec![Value::Integer(1)],
+            }),
+            Err(HostEventQueueError::Full)
+        );
         let event = queue.pop_front().unwrap();
         assert_eq!(event.name, "emit");
         assert!(queue.is_empty());
         assert_eq!(queue.values(), 0);
         assert_eq!(queue.text_bytes(), 0);
-        assert_eq!(queue.push(HostEvent {
-            name: "emit".into(),
-            values: vec![Value::String("abcde".into())],
-        }), Err(HostEventQueueError::TextBudget));
+        assert_eq!(
+            queue.push(HostEvent {
+                name: "emit".into(),
+                values: vec![Value::String("abcde".into())],
+            }),
+            Err(HostEventQueueError::TextBudget)
+        );
     }
 }

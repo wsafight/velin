@@ -186,21 +186,22 @@ pub(crate) fn eval_validated_chunk(
             }
             ExprOp::Concat(count) => {
                 let at = stack.len() - *count as usize;
-                let literal_bytes = stack[at..]
-                    .iter()
-                    .filter_map(|piece| match piece {
-                        Value::String(text) => Some(text.len()),
-                        _ => None,
-                    })
-                    .try_fold(0usize, usize::checked_add)
-                    .ok_or_else(|| EvalError::new(line, "string size overflow"))?;
-                if literal_bytes > MAX_DATA_TEXT_BYTES {
+                let rendered_bytes = stack[at..].iter().map(Value::display_len_known).try_fold(
+                    0usize,
+                    |total, length| {
+                        let length = length.map_err(|error| EvalError::new(line, error))?;
+                        total
+                            .checked_add(length)
+                            .ok_or_else(|| EvalError::new(line, "string size overflow"))
+                    },
+                )?;
+                if rendered_bytes > MAX_DATA_TEXT_BYTES {
                     return Err(EvalError::new(line, "data text exceeds 1 MiB"));
                 }
-                let mut text = String::with_capacity(literal_bytes);
+                let mut text = String::with_capacity(rendered_bytes);
                 for piece in &stack[at..] {
                     piece
-                        .append_to_display(&mut text, MAX_DATA_TEXT_BYTES)
+                        .append_to_display_known(&mut text, MAX_DATA_TEXT_BYTES)
                         .map_err(|error| EvalError::new(line, error))?;
                 }
                 stack.truncate(at);

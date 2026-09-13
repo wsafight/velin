@@ -205,11 +205,7 @@ pub unsafe fn free_batch(result: &mut VelinBatch) {
                 for value in values.iter() {
                     if !value.text_ptr.is_null() && value.text_capacity != 0 {
                         drop(unsafe {
-                            Vec::from_raw_parts(
-                                value.text_ptr,
-                                value.text_len,
-                                value.text_capacity,
-                            )
+                            Vec::from_raw_parts(value.text_ptr, value.text_len, value.text_capacity)
                         });
                     }
                 }
