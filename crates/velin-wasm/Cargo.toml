@@ -10,11 +10,19 @@ homepage.workspace = true
 documentation.workspace = true
 description = "WebAssembly bindings for Velin: compile, check, and run a .velin script in the browser"
 
+[features]
+default = ["source"]
+source = ["dep:velin"]
+runtime = ["dep:velin-bytecode", "dep:velin-syntax", "dep:velin-vm"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-velin.workspace = true
+velin = { workspace = true, optional = true }
+velin-bytecode = { workspace = true, features = ["serde"], optional = true }
+velin-syntax = { workspace = true, features = ["serde"], optional = true }
+velin-vm = { workspace = true, default-features = false, optional = true }
 wasm-bindgen = "0.2"
 serde.workspace = true
 serde_json.workspace = true

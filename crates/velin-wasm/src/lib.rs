@@ -16,13 +16,18 @@
 //! Everything is implemented on plain Rust types in [`engine`] and unit-tested
 //! natively; the `#[wasm_bindgen]` layer is a thin string wrapper on top.
 
+#[cfg(feature = "source")]
 use serde::Serialize;
 use wasm_bindgen::prelude::wasm_bindgen;
 
+#[cfg(feature = "source")]
 mod engine;
+#[cfg(feature = "runtime")]
+mod runtime;
 
 /// Checks a `.velin` `source` and returns a JSON `CheckResult`:
 /// `{ "ok": bool, "diagnostics": [ { severity, line, column, message } ] }`.
+#[cfg(feature = "source")]
 #[wasm_bindgen]
 #[must_use]
 pub fn check(source: &str) -> String {
@@ -34,6 +39,7 @@ pub fn check(source: &str) -> String {
 /// consumed in order (integers, `true`/`false`, or strings); pass `"[]"` for
 /// none. Malformed JSON or unsupported values return a failed `RunResult`
 /// without executing the script.
+#[cfg(feature = "source")]
 #[wasm_bindgen]
 #[must_use]
 pub fn run(source: &str, replies_json: &str) -> String {
@@ -49,14 +55,59 @@ pub fn run(source: &str, replies_json: &str) -> String {
     to_json(&result)
 }
 
+/// A persistent runtime-only machine for hosts that already have bytecode.
+#[cfg(feature = "runtime")]
+#[wasm_bindgen]
+pub struct RuntimeMachine {
+    machine: velin_vm::Machine,
+}
+
+#[cfg(feature = "runtime")]
+#[wasm_bindgen]
+impl RuntimeMachine {
+    /// Loads and validates a JSON-encoded [`velin_bytecode::Program`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a JavaScript error when the JSON is malformed or the program
+    /// fails bytecode validation.
+    #[wasm_bindgen(constructor)]
+    pub fn new(program_json: &str) -> Result<RuntimeMachine, wasm_bindgen::JsValue> {
+        let program: velin_bytecode::Program =
+            serde_json::from_str(program_json).map_err(|error| runtime::json_error(&error))?;
+        let machine =
+            velin_vm::Machine::new(program).map_err(|error| runtime::runtime_error(&error))?;
+        Ok(Self { machine })
+    }
+
+    /// Runs until a host event, completion, or a bounded execution error.
+    #[must_use]
+    pub fn run(&mut self) -> String {
+        runtime::yield_to_json(self.machine.run())
+    }
+
+    /// Resumes a pending host event. Use the JSON literal `null` when the host
+    /// command has no return value.
+    #[must_use]
+    pub fn resume(&mut self, value_json: &str) -> String {
+        let value = match serde_json::from_str(value_json) {
+            Ok(value) => value,
+            Err(error) => return runtime::error_to_json(format!("invalid resume value: {error}")),
+        };
+        runtime::yield_to_json(self.machine.resume(value))
+    }
+}
+
 /// Serializes a result to JSON, falling back to a minimal error object so the
 /// browser always receives valid JSON.
+#[cfg(feature = "source")]
 fn to_json<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value)
         .unwrap_or_else(|_| "{\"ok\":false,\"diagnostics\":[],\"output\":[]}".to_owned())
 }
 
 #[cfg(test)]
+#[cfg(feature = "source")]
 mod tests {
     #[test]
     fn wasm_bindings_return_json() {

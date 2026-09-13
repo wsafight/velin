@@ -661,6 +661,9 @@ dependencies = [
  "serde",
  "serde_json",
  "velin",
+ "velin-bytecode",
+ "velin-syntax",
+ "velin-vm",
  "wasm-bindgen",
 ]
 
