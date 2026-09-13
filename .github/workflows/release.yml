@@ -22,7 +22,7 @@ jobs:
             vsce_target: linux-x64
             executable_suffix: ''
           - label: macos-x64
-            runner: macos-13
+            runner: macos-15-intel
             target: x86_64-apple-darwin
             vsce_target: darwin-x64
             executable_suffix: ''
