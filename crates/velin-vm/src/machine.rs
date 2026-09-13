@@ -12,7 +12,7 @@ use crate::chunk::{FrameAccess, eval_validated_chunk};
 use std::sync::Arc;
 use velin_compile::{
     ExecutionMetadata, HostOp, InitialFrame, Op, Program, ProgramValidationError, QuickenedCallRef,
-    QuickenedOperand, RegisterExpr, RegisterOp, UpdateOp, ValidatedProgram,
+    QuickenedOperand, RegisterExpr, RegisterOp, RegisterType, UpdateOp, ValidatedProgram,
 };
 use velin_eval::{EvalError, invoke_readonly_measured};
 use velin_syntax::{
@@ -321,6 +321,7 @@ impl Machine {
 
 mod batch;
 mod execution;
+mod register;
 mod support;
 mod updates;
 

@@ -473,6 +473,7 @@ criterion_group!(
     bench_counter_loop,
     pipeline_p1::bench_register_expression_loop,
     pipeline_p2::bench_prepared_expression_loop,
+    pipeline_p2::bench_propagated_constants,
     bench_scalar_reassignment,
     bench_boolean_slot_loop,
     bench_builtin_loop,

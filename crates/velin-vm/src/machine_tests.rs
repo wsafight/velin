@@ -177,6 +177,20 @@ fn infinite_loops_are_bounded() {
 }
 
 #[test]
+fn fused_update_jump_keeps_the_original_step_budget() {
+    let mut builder = ProgramBuilder::new();
+    let index = builder.slot("index");
+    builder.push(Op::update(index, UpdateOp::AddInteger { value: 1 }, 1, 1));
+    builder.push(Op::Jump(0));
+    let mut machine = Machine::new(builder.build()).unwrap();
+    machine.set_variable("index", Value::Integer(0));
+
+    let error = machine.run().unwrap_err();
+    assert!(error.message.contains("infinite loop"));
+    assert_eq!(machine.variable("index"), Some(&Value::Integer(5_000)));
+}
+
+#[test]
 fn cloning_a_machine_rolls_back_rng_with_the_frame() {
     // Draw and yield once, clone the yielded machine as a checkpoint, then
     // draw again. Resuming the checkpoint must reproduce the second draw.

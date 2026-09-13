@@ -244,7 +244,7 @@ impl Machine {
         }
         let mut steps = 0;
         while !self.finished {
-            steps += 1;
+            steps += self.step_cost();
             if steps > MAX_IMMEDIATE_STEPS {
                 return Err(EvalError::new(
                     self.current_line(),
@@ -342,8 +342,9 @@ impl Machine {
                 let slot = *slot;
                 let operation = *operation;
                 let line = *line as usize;
+                let jump_target = self.update_jump_target();
                 self.step_update(slot, operation, line)?;
-                self.pc += 1;
+                self.pc = jump_target.unwrap_or(self.pc + 1);
             }
             Op::Jump(target) => self.pc = *target as usize,
             Op::JumpIfFalse { condition, target } => {
@@ -464,5 +465,26 @@ impl Machine {
         self.metadata
             .op(self.pc)
             .map_or(0, |metadata| metadata.line as usize)
+    }
+
+    /// Returns the number of original program ops represented by the next VM
+    /// step. Update/jump tails are executed together, but still consume two
+    /// budget units so the infinite-loop guard remains stable.
+    pub(super) fn step_cost(&self) -> usize {
+        if self.update_jump_target().is_some() {
+            2
+        } else {
+            1
+        }
+    }
+
+    fn update_jump_target(&self) -> Option<usize> {
+        if !matches!(self.program.ops.get(self.pc), Some(Op::Update { .. })) {
+            return None;
+        }
+        match self.program.ops.get(self.pc + 1) {
+            Some(Op::Jump(target)) => Some(*target as usize),
+            _ => None,
+        }
     }
 }

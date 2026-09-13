@@ -164,14 +164,30 @@ pub fn unassigned(line: usize, name: &str) -> EvalError {
 /// Returns [`EvalError`] on a type mismatch or integer overflow.
 pub fn apply_unary(op: UnaryOp, value: Value, line: usize) -> Result<Value, EvalError> {
     match (op, value) {
-        (UnaryOp::Negate, Value::Integer(value)) => value
-            .checked_neg()
-            .map(Value::Integer)
-            .ok_or_else(|| execution(line, "integer overflow")),
-        (UnaryOp::Not, Value::Boolean(value)) => Ok(Value::Boolean(!value)),
+        (UnaryOp::Negate, Value::Integer(value)) => apply_integer_unary(value, line),
+        (UnaryOp::Not, Value::Boolean(value)) => Ok(apply_boolean_not(value)),
         (UnaryOp::Negate, value) => Err(type_error(line, "unary `-`", "integer", &value)),
         (UnaryOp::Not, value) => Err(type_error(line, "`not`", "boolean", &value)),
     }
+}
+
+/// Applies integer negation after a typed execution path established the
+/// operand kind. The general unary evaluator delegates here as well.
+///
+/// # Errors
+/// Returns [`EvalError`] when negating the minimum representable integer.
+#[inline]
+pub fn apply_integer_unary(value: i64, line: usize) -> Result<Value, EvalError> {
+    value
+        .checked_neg()
+        .map(Value::Integer)
+        .ok_or_else(|| execution(line, "integer overflow"))
+}
+
+/// Applies boolean negation without constructing an intermediate [`Value`].
+#[must_use]
+pub const fn apply_boolean_not(value: bool) -> Value {
+    Value::Boolean(!value)
 }
 
 /// Applies a binary operator to two already-evaluated operands.
@@ -191,10 +207,9 @@ pub fn apply_binary(
 ) -> Result<Value, EvalError> {
     match op {
         BinaryOp::Add => match (left, right) {
-            (Value::Integer(left), Value::Integer(right)) => left
-                .checked_add(right)
-                .map(Value::Integer)
-                .ok_or_else(|| execution(line, "integer overflow")),
+            (Value::Integer(left), Value::Integer(right)) => {
+                apply_integer_binary(left, op, right, line)
+            }
             (Value::String(mut left), Value::String(right)) => {
                 let length = left
                     .len()
@@ -212,16 +227,7 @@ pub fn apply_binary(
             let (Value::Integer(left), Value::Integer(right)) = (&left, &right) else {
                 return Err(binary_type_error(line, "arithmetic", &left, &right));
             };
-            let result = match op {
-                BinaryOp::Subtract => left.checked_sub(*right),
-                BinaryOp::Multiply => left.checked_mul(*right),
-                BinaryOp::Divide if *right == 0 => return Err(execution(line, "division by zero")),
-                BinaryOp::Divide => left.checked_div(*right),
-                _ => unreachable!(),
-            };
-            result
-                .map(Value::Integer)
-                .ok_or_else(|| execution(line, "integer overflow"))
+            apply_integer_binary(*left, op, *right, line)
         }
         BinaryOp::Equal => Ok(Value::Boolean(left == right)),
         BinaryOp::NotEqual => Ok(Value::Boolean(left != right)),
@@ -251,6 +257,32 @@ pub fn apply_binary(
             (left, right) => Err(binary_type_error(line, "boolean operation", &left, &right)),
         },
     }
+}
+
+/// Applies an arithmetic operator after the caller has established integer
+/// operands. The general binary evaluator delegates here so typed execution
+/// plans and the fallback path share overflow and division rules.
+///
+/// # Errors
+/// Returns [`EvalError`] for division by zero or arithmetic overflow.
+#[inline]
+pub fn apply_integer_binary(
+    left: i64,
+    op: BinaryOp,
+    right: i64,
+    line: usize,
+) -> Result<Value, EvalError> {
+    let result = match op {
+        BinaryOp::Add => left.checked_add(right),
+        BinaryOp::Subtract => left.checked_sub(right),
+        BinaryOp::Multiply => left.checked_mul(right),
+        BinaryOp::Divide if right == 0 => return Err(execution(line, "division by zero")),
+        BinaryOp::Divide => left.checked_div(right),
+        _ => unreachable!("integer helper only accepts arithmetic operators"),
+    };
+    result
+        .map(Value::Integer)
+        .ok_or_else(|| execution(line, "integer overflow"))
 }
 
 pub(crate) fn execution(line: usize, message: impl Into<String>) -> EvalError {

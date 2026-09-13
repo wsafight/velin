@@ -2,6 +2,7 @@ use super::{
     BinaryOp, ChunkId, Expr, ExprChunk, ExprOp, Op, Pc, Program, ProgramChunk, SlotTable, Value,
     append_reusable_chunk, compile_expression_into, range_usize,
 };
+use velin_eval::{Variables, evaluate};
 
 /// Incrementally assembles a [`Program`].
 ///
@@ -16,6 +17,7 @@ pub struct ProgramBuilder {
     constants: Vec<Value>,
     slots: SlotTable,
     scratch: ExprChunk,
+    known_constants: Vec<Option<Value>>,
 }
 
 impl Default for ProgramBuilder {
@@ -27,6 +29,7 @@ impl Default for ProgramBuilder {
             constants: Vec::new(),
             slots: SlotTable::default(),
             scratch: ExprChunk::new(0),
+            known_constants: Vec::new(),
         }
     }
 }
@@ -39,7 +42,11 @@ impl ProgramBuilder {
 
     /// Interns a variable name, returning its frame slot.
     pub fn slot(&mut self, name: &str) -> u32 {
-        self.slots.intern(name)
+        let slot = self.slots.intern(name);
+        if self.known_constants.len() <= slot as usize {
+            self.known_constants.resize(slot as usize + 1, None);
+        }
+        slot
     }
 
     /// Compiles an expression and returns its pooled [`ChunkId`].
@@ -49,6 +56,7 @@ impl ProgramBuilder {
     /// budget makes unreachable.
     pub fn expr(&mut self, expression: &Expr, line: usize) -> ChunkId {
         compile_expression_into(expression, &mut self.slots, line, &mut self.scratch);
+        self.sync_known_constants();
         self.append_scratch()
     }
 
@@ -56,6 +64,14 @@ impl ProgramBuilder {
     /// when the expression does not need the expression VM.
     pub fn set_op(&mut self, slot: u32, expression: &Expr, line: usize) -> Op {
         compile_expression_into(expression, &mut self.slots, line, &mut self.scratch);
+        self.sync_known_constants();
+        if let Some(value) = self.propagated_constant(expression, line) {
+            return Op::SetConst {
+                slot,
+                value,
+                line: self.scratch.line,
+            };
+        }
         match self.scratch.ops.as_slice() {
             [ExprOp::Const(index)] => Op::SetConst {
                 slot,
@@ -84,6 +100,7 @@ impl ProgramBuilder {
     /// while retaining its expression chunk for diagnostics and analysis.
     pub fn jump_if_false_op(&mut self, expression: &Expr, line: usize, target: Pc) -> Op {
         compile_expression_into(expression, &mut self.slots, line, &mut self.scratch);
+        self.sync_known_constants();
         let comparison = integer_comparison(&self.scratch);
         let condition = self.append_scratch();
         if let Some((slot, comparison, value)) = comparison {
@@ -117,6 +134,7 @@ impl ProgramBuilder {
     /// budget makes unreachable.
     pub fn push(&mut self, op: Op) -> Pc {
         let pc = u32::try_from(self.ops.len()).expect("pc fits in u32");
+        self.track_constant_state(&op);
         self.ops.push(op);
         pc
     }
@@ -239,6 +257,59 @@ impl ProgramBuilder {
         match self.constants.get(index as usize)? {
             Value::Boolean(value) => Some(*value),
             _ => None,
+        }
+    }
+
+    fn propagated_constant(&self, expression: &Expr, line: usize) -> Option<Value> {
+        if !self.known_constants.iter().any(Option::is_some) {
+            return None;
+        }
+        let variables: Variables = self
+            .known_constants
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, value)| {
+                value.as_ref().and_then(|value| {
+                    self.slots
+                        .name(u32::try_from(slot).ok()?)
+                        .map(|name| (name.to_owned(), value.clone()))
+                })
+            })
+            .collect();
+        evaluate(expression, &variables, line).ok()
+    }
+
+    fn track_constant_state(&mut self, op: &Op) {
+        match op {
+            Op::SetConst { slot, value, .. } => self.set_known(*slot, Some(value.clone())),
+            Op::CopySlot { slot, source, .. } => {
+                let value = self
+                    .known_constants
+                    .get(*source as usize)
+                    .cloned()
+                    .flatten();
+                self.set_known(*slot, value);
+            }
+            Op::Set { slot, .. } | Op::Update { slot, .. } => self.set_known(*slot, None),
+            Op::Jump(_)
+            | Op::JumpIfFalse { .. }
+            | Op::JumpIfIntegerCompare { .. }
+            | Op::Host(_)
+            | Op::Halt => {
+                self.known_constants.fill(None);
+            }
+        }
+    }
+
+    fn set_known(&mut self, slot: u32, value: Option<Value>) {
+        if let Some(known) = self.known_constants.get_mut(slot as usize) {
+            *known = value;
+        }
+    }
+
+    fn sync_known_constants(&mut self) {
+        if self.known_constants.len() < self.slots.len() {
+            self.known_constants.resize(self.slots.len(), None);
         }
     }
 }

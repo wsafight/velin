@@ -29,7 +29,7 @@ impl Machine {
         let mut effects = Vec::new();
         let mut steps = 0;
         while !self.finished && effects.len() < limit {
-            steps += 1;
+            steps += self.step_cost();
             if steps > MAX_IMMEDIATE_STEPS {
                 return Err(EvalError::new(
                     self.current_line(),

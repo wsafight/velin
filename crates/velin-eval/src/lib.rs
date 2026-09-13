@@ -13,5 +13,6 @@ pub use builtins::{
     invoke_stack_measured_with_metrics,
 };
 pub use eval::{
-    EvalError, Variables, apply_binary, apply_unary, evaluate, evaluate_with_rng, unassigned,
+    EvalError, Variables, apply_binary, apply_boolean_not, apply_integer_binary,
+    apply_integer_unary, apply_unary, evaluate, evaluate_with_rng, unassigned,
 };

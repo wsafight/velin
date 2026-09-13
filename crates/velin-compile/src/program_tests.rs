@@ -1,5 +1,5 @@
 use super::*;
-use velin_syntax::{BinaryOp, Value};
+use velin_syntax::{BinaryOp, Builtin, Value};
 
 #[test]
 fn builder_shares_slots_across_expressions() {
@@ -68,6 +68,62 @@ fn builder_specializes_constant_copies_and_integer_guards() {
         } if slot == source
     ));
     assert_eq!(builder.chunks.len(), 1);
+}
+
+#[test]
+fn builder_propagates_constants_only_within_a_linear_region() {
+    let mut builder = ProgramBuilder::new();
+    let source = builder.slot("source");
+    let target = builder.slot("target");
+    let source_set = builder.set_op(source, &Expr::Value(Value::Integer(4)), 1);
+    builder.push(source_set);
+
+    let propagated = builder.set_op(
+        target,
+        &Expr::Binary {
+            left: Box::new(Expr::Variable("source".into())),
+            op: BinaryOp::Add,
+            right: Box::new(Expr::Value(Value::Integer(3))),
+        },
+        2,
+    );
+    assert!(matches!(
+        propagated,
+        Op::SetConst {
+            value: Value::Integer(7),
+            ..
+        }
+    ));
+    builder.push(propagated);
+
+    builder.push(Op::Jump(0));
+    let after_jump = builder.set_op(
+        target,
+        &Expr::Binary {
+            left: Box::new(Expr::Variable("source".into())),
+            op: BinaryOp::Add,
+            right: Box::new(Expr::Value(Value::Integer(3))),
+        },
+        3,
+    );
+    assert!(matches!(after_jump, Op::Set { .. }));
+}
+
+#[test]
+fn builder_does_not_propagate_random_expressions() {
+    let mut builder = ProgramBuilder::new();
+    let target = builder.slot("target");
+    let initial = builder.set_op(target, &Expr::Value(Value::Integer(1)), 1);
+    builder.push(initial);
+    let random = Expr::Invoke {
+        function: Builtin::Random,
+        arguments: vec![
+            Expr::Value(Value::Integer(1)),
+            Expr::Value(Value::Integer(2)),
+        ],
+    };
+    let operation = builder.set_op(target, &random, 2);
+    assert!(matches!(operation, Op::Set { .. }));
 }
 
 #[test]
@@ -157,6 +213,40 @@ fn validation_prepares_long_scalar_register_plan() {
             .iter()
             .any(|op| matches!(op, RegisterOp::Binary { .. }))
     );
+}
+
+#[test]
+fn scalar_register_plan_carries_operator_type_hints() {
+    let mut builder = ProgramBuilder::new();
+    let _source = builder.slot("source");
+    let target = builder.slot("target");
+    let mut expression = Expr::Variable("source".into());
+    for _ in 0..6 {
+        expression = Expr::Binary {
+            left: Box::new(expression),
+            op: BinaryOp::Subtract,
+            right: Box::new(Expr::Value(Value::Integer(1))),
+        };
+    }
+    let chunk = builder.expr(&expression, 3);
+    builder.push(Op::Set {
+        slot: target,
+        value: chunk,
+    });
+    let validated = crate::ValidatedProgram::new(builder.build()).unwrap();
+    let metadata = validated.shared_execution_metadata();
+    let plan = metadata
+        .register_expr(chunk)
+        .expect("long scalar expression should use registers");
+    assert!(plan.ops.iter().any(|operation| {
+        matches!(
+            operation,
+            RegisterOp::Binary {
+                result_type: RegisterType::Integer,
+                ..
+            }
+        )
+    }));
 }
 
 #[test]

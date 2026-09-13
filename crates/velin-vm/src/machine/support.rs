@@ -1,12 +1,12 @@
+use super::register::eval_register_expr;
 use super::{
     Builtin, DataFootprint, DataMetrics, EvalError, ExecutionMetadata, FrameAccess, FrameState,
     HostOp, MAX_DATA_DEPTH, MAX_DATA_TEXT_BYTES, MAX_DATA_VALUES, MAX_HOST_PAYLOAD_TEXT_BYTES,
-    MAX_HOST_PAYLOAD_VALUES, Program, QuickenedCallRef, QuickenedOperand, RegisterExpr, RegisterOp,
-    Value, eval_validated_chunk, invoke_readonly_measured,
+    MAX_HOST_PAYLOAD_VALUES, Program, QuickenedCallRef, QuickenedOperand, Value,
+    eval_validated_chunk, invoke_readonly_measured,
 };
-use crate::chunk::shallow_metrics;
 use velin_compile::PreparedExpr;
-use velin_eval::{apply_binary, apply_unary, invoke_stack_measured_with_metrics};
+use velin_eval::{apply_binary, invoke_stack_measured_with_metrics};
 
 #[inline]
 pub(super) fn cache_metrics(frame: &mut FrameState, slot: usize, metrics: DataMetrics) {
@@ -81,57 +81,6 @@ pub(super) fn eval_chunk_for(
         result_metrics,
         |slot| slots.name(slot).unwrap_or("?").to_owned(),
     )
-}
-
-fn eval_register_expr(
-    program: &Program,
-    frame: &FrameState,
-    expression: &RegisterExpr,
-    values: &mut Vec<Option<Value>>,
-    line: usize,
-) -> Result<(Value, DataMetrics), EvalError> {
-    let register_count = expression.registers as usize;
-    if values.len() < register_count {
-        values.resize_with(register_count, || None);
-    }
-    for operation in &expression.ops {
-        match *operation {
-            RegisterOp::LoadConstant { dst, constant } => {
-                values[dst as usize] = Some(program.constants[constant as usize].clone());
-            }
-            RegisterOp::LoadSlot { dst, slot } => {
-                let value = frame.values[slot as usize].clone().ok_or_else(|| {
-                    velin_eval::unassigned(line, program.slots.name(slot).unwrap_or("?"))
-                })?;
-                values[dst as usize] = Some(value);
-            }
-            RegisterOp::Unary { dst, op, source } => {
-                let value = values[source as usize]
-                    .take()
-                    .expect("validated register unary operand");
-                values[dst as usize] = Some(apply_unary(op, value, line)?);
-            }
-            RegisterOp::Binary {
-                dst,
-                left,
-                op,
-                right,
-            } => {
-                let right = values[right as usize]
-                    .take()
-                    .expect("validated register binary right operand");
-                let left = values[left as usize]
-                    .take()
-                    .expect("validated register binary left operand");
-                values[dst as usize] = Some(apply_binary(left, op, right, line)?);
-            }
-        }
-    }
-    let result = values[expression.result as usize]
-        .take()
-        .expect("validated register result");
-    let result_metrics = shallow_metrics(&result);
-    Ok((result, result_metrics))
 }
 
 pub(super) fn eval_host_args(

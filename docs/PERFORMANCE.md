@@ -116,6 +116,10 @@ The compiler folds only pure constant subtrees that `velin-eval` can evaluate su
 
 Short-circuit logic follows the same rule. If a constant left operand determines the result, an unreachable branch does not allocate an RNG state slot. Otherwise, the complete short-circuit structure remains in bytecode.
 
+### Straight-line constant propagation
+
+`ProgramBuilder` also tracks values installed by `SetConst` and `CopySlot` while assembling a straight-line region. A later assignment is evaluated against that small known-value environment; when the pure expression succeeds, it becomes another `SetConst` and does not need expression evaluation at runtime. The environment is cleared at jumps, host effects, unknown writes, and termination, so no value is propagated across a path merge or an external effect. Failed evaluation, random calls, and runtime-error candidates retain their original bytecode and error timing.
+
 ### Direct instructions cover exact shapes
 
 Lowering represents these common forms with direct instructions:
@@ -133,6 +137,10 @@ Recognition is restricted to forms with equivalent semantics. Every other assign
 ### Control-flow rewriting preserves program counters
 
 A constant boolean condition can become a direct jump, and an unconditional jump chain resolves to its final target. The process does not delete or renumber instructions, so PCs retained by static checks, source locations, and host-site mappings remain stable.
+
+### Loop tails execute as one VM step
+
+The VM recognizes an `Update` immediately followed by an unconditional `Jump`, the common tail emitted for a counter loop. It performs the update and chooses the jump target in one dispatch. The step budget charges both original instructions, so loop bounds and infinite-loop diagnostics remain unchanged. This is a runtime dispatch optimization only; the public bytecode shape and validation rules stay the same.
 
 ## Bytecode validation and execution preparation
 
@@ -169,6 +177,8 @@ After machine construction, straight-line scalar expressions normally require on
 During execution preparation, a long expression with only constants, slot loads, unary operators, and ordinary binary operators is lowered to a non-serialized register plan. Each value is assigned a stable temporary register, so evaluation reads operands by index instead of maintaining a value stack for every intermediate. The plan is stored in execution metadata and rebuilt from the validated expression chunk; it is not part of the serialized bytecode format.
 
 The register path uses the same `apply_unary` and `apply_binary` functions as the stack evaluator and reports errors with the expression's source line. Short expressions, short-circuit operators, built-ins, concatenation, random operations, and any shape that cannot be proven straight-line continue through the canonical `ExprOp` stack path. A reusable `Option<Value>` workspace keeps temporary allocations out of repeated evaluations, and the final value is measured before it enters the frame's normal resource accounting.
+
+The plan carries a small inferred type tag for each operation. Integer arithmetic and boolean negation can use typed helpers when the runtime values agree; a mismatch immediately falls back to the shared dynamic operator so externally supplied values keep the same diagnostics. Logical values are represented in SSA order and mapped to reusable physical registers using a compact linear-lifetime strategy, without adding a second semantic representation.
 
 ### Simple built-in calls are specialized during preparation
 

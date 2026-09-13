@@ -1,7 +1,8 @@
 use super::{
     BinaryOp, ChunkExecutionMetadata, ChunkId, DataMetrics, ExecutionMetadata, ExprChunkRef,
     ExprOp, NO_METRICS, Op, OpExecutionMetadata, PreparedExpr, Program, QUICKENED_CALL_TAG,
-    QuickenedCall, QuickenedCallRef, QuickenedOperand, RegisterExpr, RegisterOp, UpdateOp, Value,
+    QuickenedCall, QuickenedCallRef, QuickenedOperand, RegisterExpr, RegisterOp, RegisterType,
+    UpdateOp, Value,
 };
 
 impl ExecutionMetadata {
@@ -221,13 +222,23 @@ fn prepare_register_expression(chunk: ExprChunkRef<'_>) -> Option<RegisterExpr> 
                 operations.push(RegisterOp::LoadConstant {
                     dst,
                     constant: *constant,
+                    result_type: register_type(
+                        chunk
+                            .constants
+                            .get(*constant as usize)
+                            .expect("validated register constant"),
+                    ),
                 });
             }
             ExprOp::Load { slot, .. } => {
                 let dst = next_register;
                 next_register = next_register.checked_add(1)?;
                 stack.push(dst);
-                operations.push(RegisterOp::LoadSlot { dst, slot: *slot });
+                operations.push(RegisterOp::LoadSlot {
+                    dst,
+                    slot: *slot,
+                    result_type: RegisterType::Unknown,
+                });
             }
             ExprOp::Unary(op) => {
                 let source = stack.pop()?;
@@ -236,6 +247,7 @@ fn prepare_register_expression(chunk: ExprChunkRef<'_>) -> Option<RegisterExpr> 
                     dst: source,
                     op: *op,
                     source,
+                    result_type: unary_result_type(*op),
                 });
             }
             ExprOp::Binary(op) if !matches!(op, BinaryOp::And | BinaryOp::Or) => {
@@ -247,6 +259,7 @@ fn prepare_register_expression(chunk: ExprChunkRef<'_>) -> Option<RegisterExpr> 
                     left,
                     op: *op,
                     right,
+                    result_type: binary_result_type(*op),
                 });
             }
             _ => return None,
@@ -260,6 +273,37 @@ fn prepare_register_expression(chunk: ExprChunkRef<'_>) -> Option<RegisterExpr> 
         result: *result,
         registers: next_register,
     })
+}
+
+fn register_type(value: &Value) -> RegisterType {
+    match value {
+        Value::Integer(_) => RegisterType::Integer,
+        Value::Boolean(_) => RegisterType::Boolean,
+        Value::String(_) => RegisterType::String,
+        Value::List(_) | Value::Record(_) => RegisterType::Compound,
+    }
+}
+
+fn unary_result_type(op: velin_syntax::UnaryOp) -> RegisterType {
+    match op {
+        velin_syntax::UnaryOp::Negate => RegisterType::Integer,
+        velin_syntax::UnaryOp::Not => RegisterType::Boolean,
+    }
+}
+
+fn binary_result_type(op: BinaryOp) -> RegisterType {
+    match op {
+        BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => RegisterType::Integer,
+        BinaryOp::Equal
+        | BinaryOp::NotEqual
+        | BinaryOp::Less
+        | BinaryOp::LessEqual
+        | BinaryOp::Greater
+        | BinaryOp::GreaterEqual
+        | BinaryOp::And
+        | BinaryOp::Or => RegisterType::Boolean,
+        BinaryOp::Add => RegisterType::Unknown,
+    }
 }
 
 fn push_metrics(metrics: &mut Vec<DataMetrics>, value: DataMetrics) -> u32 {

@@ -216,7 +216,8 @@ pub enum PreparedExpr {
     },
 }
 
-/// A non-serialized register plan for a long, straight-line expression.
+/// A non-serialized SSA-style value plan with compact physical registers for a
+/// long, straight-line expression.
 ///
 /// The canonical [`ExprOp`] sequence remains the source of truth and is kept
 /// as the fallback for short or control-flow-heavy expressions.
@@ -227,27 +228,47 @@ pub struct RegisterExpr {
     pub registers: u16,
 }
 
-/// One operation in a [`RegisterExpr`] execution plan.
+/// Type information inferred for a temporary in the scalar execution plan.
+///
+/// This is an execution hint, not a replacement for runtime checks. Unknown
+/// values and externally assembled programs always retain the general
+/// operator path when the hint cannot prove a narrower type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegisterType {
+    Unknown,
+    Integer,
+    Boolean,
+    String,
+    Compound,
+}
+
+/// One typed operation in a [`RegisterExpr`] execution plan. The logical value
+/// flow is SSA-style; consumed source registers may be reused as destinations
+/// by the compact linear-scan allocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegisterOp {
     LoadConstant {
         dst: u16,
         constant: u32,
+        result_type: RegisterType,
     },
     LoadSlot {
         dst: u16,
         slot: u32,
+        result_type: RegisterType,
     },
     Unary {
         dst: u16,
         op: UnaryOp,
         source: u16,
+        result_type: RegisterType,
     },
     Binary {
         dst: u16,
         left: u16,
         op: BinaryOp,
         right: u16,
+        result_type: RegisterType,
     },
 }
 
