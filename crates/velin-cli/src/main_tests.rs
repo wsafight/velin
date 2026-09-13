@@ -26,9 +26,7 @@ fn parse_args_accepts_check_and_run_and_rejects_the_rest() {
     }
     match parse_args(["run".into(), "b.velin".into()].into_iter()) {
         Ok(Command::Run(path)) => assert_eq!(path, "b.velin"),
-        Ok(
-            Command::Check { .. } | Command::Compile { .. } | Command::Help | Command::Version,
-        ) => {
+        Ok(Command::Check { .. } | Command::Compile { .. } | Command::Help | Command::Version) => {
             panic!("expected run")
         }
         Err(message) => panic!("expected run, got error {message}"),

@@ -254,10 +254,7 @@ fn binary_compile_writes_an_artifact_that_check_and_run_accept() {
     assert!(checked.status.success());
     assert!(String::from_utf8_lossy(&checked.stdout).contains("ok"));
 
-    let json = velin()
-        .args(["check", "--json", &output])
-        .output()
-        .unwrap();
+    let json = velin().args(["check", "--json", &output]).output().unwrap();
     assert!(json.status.success());
     let payload: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
     assert_eq!(payload["ok"], true);

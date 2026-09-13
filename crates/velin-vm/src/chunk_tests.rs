@@ -3,11 +3,7 @@ use velin_bytecode::SlotTable;
 use velin_compile::compile_expression;
 use velin_syntax::Expr;
 
-fn run(
-    expr: &Expr,
-    frame: &mut [Option<Value>],
-    slots: &SlotTable,
-) -> Result<Value, EvalError> {
+fn run(expr: &Expr, frame: &mut [Option<Value>], slots: &SlotTable) -> Result<Value, EvalError> {
     let mut table = slots.clone();
     let chunk = compile_expression(expr, &mut table, 1);
     eval_chunk(&chunk, frame, |slot| {

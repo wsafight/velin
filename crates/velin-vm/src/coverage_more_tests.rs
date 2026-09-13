@@ -21,11 +21,7 @@ fn integer_update_recomputes_footprint_when_the_cached_size_is_stale() {
         builder.push(Op::update(counter, UpdateOp::AddInteger { value: 1 }, 2, 1));
     });
     assert!(machine.step().unwrap().is_none());
-    let index = machine
-        .program
-        .slots
-        .get("counter")
-        .expect("counter slot") as usize;
+    let index = machine.program.slots.get("counter").expect("counter slot") as usize;
     machine.frame.footprints[index] = DataFootprint {
         values: 0,
         text_bytes: 0,

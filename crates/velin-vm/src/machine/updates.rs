@@ -1,10 +1,10 @@
 use super::support::{
-    adjusted_footprint, cache_metrics, checked_total, ensure_child_depth, updated_collection_depth,
-    value_metrics,
+    adjusted_footprint, cache_metrics, checked_total, ensure_child_depth, eval_chunk_for,
+    updated_collection_depth, value_metrics,
 };
 use super::{
     Arc, DataFootprint, DataMetrics, EvalError, MAX_DATA_TEXT_BYTES, MAX_MACHINE_DATA_VALUES,
-    MAX_MACHINE_TEXT_BYTES, Machine, Value,
+    MAX_MACHINE_TEXT_BYTES, Machine, UpdateOp, Value,
 };
 
 impl Machine {
@@ -289,5 +289,130 @@ impl Machine {
         frame.values[index] = Some(value);
         cache_metrics(frame, index, metrics);
         self.frame_total = total;
+    }
+
+    pub(super) fn step_update(
+        &mut self,
+        slot: u32,
+        operation: UpdateOp,
+        line: usize,
+    ) -> Result<(), EvalError> {
+        if let UpdateOp::AddInteger { value } = operation {
+            return self.update_add_integer(slot, value, line);
+        }
+        self.require_assigned(slot, line)?;
+        match operation {
+            UpdateOp::Add { rhs } => {
+                let (rhs, _) = eval_chunk_for(
+                    &self.program,
+                    &self.metadata,
+                    &mut self.frame,
+                    &mut self.register_values,
+                    &mut self.register_metrics,
+                    rhs,
+                )?;
+                self.update_add(slot, rhs, line)
+            }
+            UpdateOp::AddInteger { .. } => unreachable!("handled before expression updates"),
+            UpdateOp::Push { value } => {
+                let (value, metrics) = eval_chunk_for(
+                    &self.program,
+                    &self.metadata,
+                    &mut self.frame,
+                    &mut self.register_values,
+                    &mut self.register_metrics,
+                    value,
+                )?;
+                self.update_push(slot, value, metrics, line)
+            }
+            UpdateOp::Put { key, value } => {
+                let (key, _) = eval_chunk_for(
+                    &self.program,
+                    &self.metadata,
+                    &mut self.frame,
+                    &mut self.register_values,
+                    &mut self.register_metrics,
+                    key,
+                )?;
+                let (value, metrics) = eval_chunk_for(
+                    &self.program,
+                    &self.metadata,
+                    &mut self.frame,
+                    &mut self.register_values,
+                    &mut self.register_metrics,
+                    value,
+                )?;
+                self.update_put(slot, key, value, metrics, line)
+            }
+            UpdateOp::Remove { key } => {
+                let (key, _) = eval_chunk_for(
+                    &self.program,
+                    &self.metadata,
+                    &mut self.frame,
+                    &mut self.register_values,
+                    &mut self.register_metrics,
+                    key,
+                )?;
+                self.update_remove(slot, key, line)
+            }
+        }
+    }
+
+    fn update_add_integer(&mut self, slot: u32, value: i64, line: usize) -> Result<(), EvalError> {
+        let index = slot as usize;
+        let slot_name = self.program.slots.name(slot).unwrap_or("?");
+        let frame = &mut self.frame;
+        let Some(source) = frame.values[index].as_ref() else {
+            return Err(velin_eval::unassigned(line, slot_name));
+        };
+        let Value::Integer(source) = source else {
+            return Err(EvalError::new(
+                line,
+                format!("`+` cannot combine {} and integer", source.type_name()),
+            ));
+        };
+        let result = source
+            .checked_add(value)
+            .ok_or_else(|| EvalError::new(line, "integer overflow"))?;
+        let footprint = DataFootprint {
+            values: 1,
+            text_bytes: 0,
+        };
+        let old = frame.footprints[index];
+        if old == footprint {
+            frame.values[index] = Some(Value::Integer(result));
+            cache_metrics(
+                frame,
+                index,
+                DataMetrics {
+                    footprint,
+                    max_depth: 0,
+                },
+            );
+            return Ok(());
+        }
+        let retained = DataFootprint {
+            values: self.frame_total.values - old.values,
+            text_bytes: self.frame_total.text_bytes - old.text_bytes,
+        };
+        let total = checked_total(
+            retained,
+            footprint,
+            MAX_MACHINE_DATA_VALUES,
+            MAX_MACHINE_TEXT_BYTES,
+            "machine state",
+        )
+        .map_err(|error| EvalError::new(line, error))?;
+        frame.values[index] = Some(Value::Integer(result));
+        cache_metrics(
+            frame,
+            index,
+            DataMetrics {
+                footprint,
+                max_depth: 0,
+            },
+        );
+        self.frame_total = total;
+        Ok(())
     }
 }

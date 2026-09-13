@@ -405,6 +405,10 @@ mod updates;
 mod tests;
 
 #[cfg(test)]
+#[path = "machine_error_tests.rs"]
+mod error_tests;
+
+#[cfg(test)]
 #[path = "restart_tests.rs"]
 mod restart_tests;
 

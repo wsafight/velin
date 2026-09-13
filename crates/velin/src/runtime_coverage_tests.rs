@@ -8,7 +8,10 @@ fn queue_defaults_and_error_display_cover_every_variant() {
     let queue = HostEventQueue::new(limits);
     assert_eq!(queue.limits(), limits);
     assert!(queue.is_empty());
-    assert_eq!(HostEventQueueError::Full.to_string(), "host event queue is full");
+    assert_eq!(
+        HostEventQueueError::Full.to_string(),
+        "host event queue is full"
+    );
     assert_eq!(
         HostEventQueueError::ValuesBudget.to_string(),
         "host event queue value budget exceeded"
@@ -17,10 +20,7 @@ fn queue_defaults_and_error_display_cover_every_variant() {
         HostEventQueueError::TextBudget.to_string(),
         "host event queue text budget exceeded"
     );
-    assert_eq!(
-        HostEventQueueError::InvalidValue("bad").to_string(),
-        "bad"
-    );
+    assert_eq!(HostEventQueueError::InvalidValue("bad").to_string(), "bad");
     assert!(Error::source(&HostEventQueueError::Full).is_none());
 
     let mut tiny = HostEventQueue::new(HostEventQueueLimits {
@@ -80,7 +80,9 @@ fn script_run_errors_display_and_expose_sources() {
     let mut runner = ScriptRunner::configured(
         &script,
         0,
-        ExecutionLimits { max_host_effects: 0 },
+        ExecutionLimits {
+            max_host_effects: 0,
+        },
         None,
     )
     .unwrap();
@@ -119,15 +121,19 @@ fn runner_covers_restart_batch_and_schema_contract_paths() {
     assert_eq!(runner.machine().variable("hp"), Some(&Value::Integer(9)));
     runner.restart(1).unwrap();
     assert_eq!(runner.host_effects(), 0);
-    assert!(runner
-        .try_set_variable("missing", Value::Integer(1))
-        .is_err());
+    assert!(
+        runner
+            .try_set_variable("missing", Value::Integer(1))
+            .is_err()
+    );
 
     let script = compile("runner.velin", "perform emit(1)\nperform emit(2)\n").unwrap();
     let mut runner = ScriptRunner::configured(
         &script,
         0,
-        ExecutionLimits { max_host_effects: 0 },
+        ExecutionLimits {
+            max_host_effects: 0,
+        },
         None,
     )
     .unwrap();

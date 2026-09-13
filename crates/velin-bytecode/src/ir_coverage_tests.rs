@@ -1,5 +1,5 @@
 use super::*;
-use crate::{ExprChunk, ExprOp, SlotTable};
+use crate::{ExprChunk, ExprOp, Op, SlotTable};
 use velin_syntax::BinaryOp;
 
 fn constant_chunk(value: Value) -> ExprChunk {
@@ -94,9 +94,17 @@ fn constant_lookup_and_value_types_cover_compound_values() {
     );
     let ir = TypedIr::from_program(&program);
     assert!(ir.constant(IrValue(ir.value_count())).is_none());
-    assert!(ir.blocks().iter().any(|block| block.operations.iter().any(
-        |operation| matches!(operation, IrOp::Constant { value_type: IrType::Compound, .. })
-    )));
+    assert!(
+        ir.blocks()
+            .iter()
+            .any(|block| block.operations.iter().any(|operation| matches!(
+                operation,
+                IrOp::Constant {
+                    value_type: IrType::Compound,
+                    ..
+                }
+            )))
+    );
 }
 
 #[test]

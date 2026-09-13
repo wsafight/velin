@@ -127,12 +127,9 @@ pub unsafe extern "C" fn velin_machine_new(
         );
         return std::ptr::null_mut();
     };
-    let machine = Machine::from_validated_with_seed_and_frame(
-        &program.program,
-        seed,
-        &program.initial,
-    )
-    .expect("the empty initial frame matches the validated program");
+    let machine =
+        Machine::from_validated_with_seed_and_frame(&program.program, seed, &program.initial)
+            .expect("the empty initial frame matches the validated program");
     Box::into_raw(Box::new(VelinMachine {
         machine,
         initial: program.initial.clone(),

@@ -115,10 +115,11 @@ impl InitialFrame {
                 })?;
             frame_values[index] = Some(initial.value);
             footprints[index] = initial.metrics.footprint;
-            depths[index] = u8::try_from(initial.metrics.max_depth).map_err(|_| InitialFrameError {
-                name: name(),
-                message: "initial value depth overflow",
-            })?;
+            depths[index] =
+                u8::try_from(initial.metrics.max_depth).map_err(|_| InitialFrameError {
+                    name: name(),
+                    message: "initial value depth overflow",
+                })?;
             bindings.push(initial.slot);
         }
         bindings.sort_unstable_by(|left, right| slots.name(*left).cmp(&slots.name(*right)));

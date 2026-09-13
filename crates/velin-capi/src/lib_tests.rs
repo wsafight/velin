@@ -23,9 +23,8 @@ fn load(json: &[u8]) -> Loaded {
         )
     };
     assert!(!program.is_null(), "load failed");
-    let machine = unsafe {
-        velin_machine_new(program, 0, &mut error, &mut error_len, &mut error_capacity)
-    };
+    let machine =
+        unsafe { velin_machine_new(program, 0, &mut error, &mut error_len, &mut error_capacity) };
     assert!(!machine.is_null());
     Loaded { program, machine }
 }
@@ -92,7 +91,13 @@ fn malformed_input_returns_owned_error_bytes() {
     unsafe { velin_buffer_free(error, error_len, error_capacity) };
 
     let program = unsafe {
-        velin_program_load_json(std::ptr::null(), 4, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut())
+        velin_program_load_json(
+            std::ptr::null(),
+            4,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
     };
     assert!(program.is_null());
 }

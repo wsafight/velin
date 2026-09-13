@@ -36,8 +36,7 @@ fn initializes_defaults_resolves_names_and_counts_effects() {
 #[test]
 fn enforces_host_arguments_and_allows_reply_retry() {
     let emit = compile("runner.velin", "perform emit(1)\n").unwrap();
-    let schema =
-        HostSchema::new().command("emit", HostSignature::exact(vec![Type::String], None));
+    let schema = HostSchema::new().command("emit", HostSignature::exact(vec![Type::String], None));
     let mut runner =
         ScriptRunner::configured(&emit, 0, ExecutionLimits::default(), Some(&schema)).unwrap();
     assert!(matches!(

@@ -1,5 +1,5 @@
 use super::*;
-use crate::{ExprChunk, ExprOp, SlotTable};
+use crate::{ExprChunk, ExprOp, Op, SlotTable};
 
 fn constant_chunk(value: Value) -> ExprChunk {
     ExprChunk {

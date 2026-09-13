@@ -239,7 +239,12 @@ fn recovering_parse_covers_indent_elif_else_and_header_errors() {
              \x20\x20\x20\x20\x20\x20\x20\x20set nested = 2\n\
              \x20\x20\x20\x20set after = 3\n",
     );
-    assert!(indent.errors.iter().any(|error| error.message.contains("indentation")));
+    assert!(
+        indent
+            .errors
+            .iter()
+            .any(|error| error.message.contains("indentation"))
+    );
 
     let recovered = parse_recovering(
         "if true:\n\

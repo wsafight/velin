@@ -21,9 +21,10 @@ fn schema_insert_and_unknown_command_diagnostics() {
             .any(|diagnostic| diagnostic.message.contains("`other` is not declared"))
     );
 
-    let schema = HostSchema::new()
-        .allow_unknown(true)
-        .command("emit", HostSignature::variadic(Vec::new(), Type::Integer, None));
+    let schema = HostSchema::new().allow_unknown(true).command(
+        "emit",
+        HostSignature::variadic(Vec::new(), Type::Integer, None),
+    );
     assert!(schema.allows_unknown());
     let diagnostics = script.check_with_host_schema("test.velin", &schema);
     assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()));
@@ -57,9 +58,7 @@ fn schema_reports_variadic_arity_and_checks_session_values() {
     let mut script = compile("test.velin", "perform emit(1)\n").unwrap();
     script.program = std::sync::Arc::new((*script.program).clone());
     assert!(
-        !script
-            .validated_program
-            .refers_to(&script.program),
+        !script.validated_program.refers_to(&script.program),
         "cloned program must drop the cached validation proof"
     );
     let schema = HostSchema::new().command("emit", HostSignature::exact(vec![Type::Integer], None));

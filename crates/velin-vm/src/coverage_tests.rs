@@ -22,10 +22,7 @@ fn string_and_type_error_updates_use_the_generic_add_path() {
         builder.push(Op::update(name, UpdateOp::Add { rhs }, 2, 1));
     });
     assert_eq!(machine.run().unwrap(), Yield::Finished);
-    assert_eq!(
-        machine.variable("name"),
-        Some(&Value::String("ab".into()))
-    );
+    assert_eq!(machine.variable("name"), Some(&Value::String("ab".into())));
     let _ = machine.program();
 
     let mut machine = run(|builder| {
@@ -38,7 +35,13 @@ fn string_and_type_error_updates_use_the_generic_add_path() {
         let rhs = builder.expr(&Expr::Value(Value::String("b".into())), 2);
         builder.push(Op::update(name, UpdateOp::Add { rhs }, 2, 1));
     });
-    assert!(machine.run().unwrap_err().message.contains("`+` cannot combine"));
+    assert!(
+        machine
+            .run()
+            .unwrap_err()
+            .message
+            .contains("`+` cannot combine")
+    );
 }
 
 #[test]
@@ -92,7 +95,13 @@ fn collection_updates_cover_push_put_remove_and_type_errors() {
         let pushed = builder.expr(&Expr::Value(Value::Integer(2)), 2);
         builder.push(Op::update(value, UpdateOp::Push { value: pushed }, 2, 1));
     });
-    assert!(machine.run().unwrap_err().message.contains("push expects a list"));
+    assert!(
+        machine
+            .run()
+            .unwrap_err()
+            .message
+            .contains("push expects a list")
+    );
 
     let mut machine = run(|builder| {
         let value = builder.slot("value");
@@ -142,7 +151,13 @@ fn integer_update_overflow_and_non_integer_sources_are_reported() {
         });
         builder.push(Op::update(counter, UpdateOp::AddInteger { value: 1 }, 2, 1));
     });
-    assert!(machine.run().unwrap_err().message.contains("`+` cannot combine"));
+    assert!(
+        machine
+            .run()
+            .unwrap_err()
+            .message
+            .contains("`+` cannot combine")
+    );
 }
 
 #[test]
@@ -180,7 +195,13 @@ fn integer_compare_and_boolean_guard_cover_mismatched_types() {
         });
         builder.push(Op::Halt);
     });
-    assert!(machine.run().unwrap_err().message.contains("condition expects boolean"));
+    assert!(
+        machine
+            .run()
+            .unwrap_err()
+            .message
+            .contains("condition expects boolean")
+    );
 }
 
 #[test]
@@ -227,11 +248,13 @@ fn batch_steps_non_host_ops_and_reports_runaway_loops() {
     let mut machine = run(|builder| {
         builder.push(Op::Jump(0));
     });
-    assert!(machine
-        .run_effect_batch(8)
-        .unwrap_err()
-        .message
-        .contains("infinite loop"));
+    assert!(
+        machine
+            .run_effect_batch(8)
+            .unwrap_err()
+            .message
+            .contains("infinite loop")
+    );
 
     let mut machine = run(|builder| {
         let boom = builder.expr(
