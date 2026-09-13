@@ -84,6 +84,9 @@ impl ExecutionProfile {
     }
 
     /// Merges counters from another profile with the same program width.
+    ///
+    /// # Errors
+    /// Returns an error if the profiles refer to different program widths.
     pub fn merge(&mut self, other: &Self) -> Result<(), &'static str> {
         if self.op_hits.len() != other.op_hits.len() {
             return Err("execution profiles refer to different program widths");
@@ -188,6 +191,9 @@ impl Machine {
     }
 
     /// Creates a machine from a name-free runtime execution image.
+    ///
+    /// # Errors
+    /// Returns an error when the execution image fails structural validation.
     pub fn new_execution_image(image: ExecutionImage) -> Result<Self, ProgramValidationError> {
         Self::new(image.into_program())
     }

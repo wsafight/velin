@@ -89,6 +89,10 @@ pub struct TypedIr {
 
 impl TypedIr {
     /// Builds block boundaries and typed assignments from a validated program.
+    ///
+    /// # Panics
+    /// Panics if a validated program contains more operations or blocks than
+    /// can be represented by a `u32` program counter or block identifier.
     #[must_use]
     pub fn from_program(program: &Program) -> Self {
         let mut boundaries = BTreeSet::from([0u32]);
@@ -101,7 +105,6 @@ impl TypedIr {
                     boundaries.insert(*target);
                     boundaries.insert(pc.saturating_add(1));
                 }
-                Op::Halt => {}
                 _ => {}
             }
         }
@@ -116,8 +119,9 @@ impl TypedIr {
             }
         }
         if let Some(start) = boundaries.last().copied() {
-            for pc in start as usize..program.ops.len() {
-                block_for_pc[pc] = u32::try_from(boundaries.len() - 1).expect("block id fits");
+            let block_id = u32::try_from(boundaries.len() - 1).expect("block id fits");
+            for block in block_for_pc.iter_mut().skip(start as usize) {
+                *block = block_id;
             }
         }
 
@@ -141,22 +145,16 @@ impl TypedIr {
                         .copied()
                         .unwrap_or(u32::MAX),
                 ),
-                Some(Op::JumpIfFalse { target, .. }) => IrTerminator::Branch {
-                    condition: IrValue(next_value.saturating_sub(1)),
-                    if_true: fallthrough,
-                    if_false: block_for_pc
-                        .get(*target as usize)
-                        .copied()
-                        .unwrap_or(u32::MAX),
-                },
-                Some(Op::JumpIfIntegerCompare { target, .. }) => IrTerminator::Branch {
-                    condition: IrValue(next_value.saturating_sub(1)),
-                    if_true: fallthrough,
-                    if_false: block_for_pc
-                        .get(*target as usize)
-                        .copied()
-                        .unwrap_or(u32::MAX),
-                },
+                Some(Op::JumpIfFalse { target, .. } | Op::JumpIfIntegerCompare { target, .. }) => {
+                    IrTerminator::Branch {
+                        condition: IrValue(next_value.saturating_sub(1)),
+                        if_true: fallthrough,
+                        if_false: block_for_pc
+                            .get(*target as usize)
+                            .copied()
+                            .unwrap_or(u32::MAX),
+                    }
+                }
                 Some(Op::Halt) => IrTerminator::Halt,
                 _ if end as usize >= program.ops.len() => IrTerminator::Halt,
                 _ => IrTerminator::Fallthrough(block_for_pc[end as usize]),

@@ -236,6 +236,10 @@ impl Value {
     ///
     /// Validation is performed once before walking the tree, allowing callers
     /// to reserve the exact output size without temporary scalar strings.
+    ///
+    /// # Errors
+    /// Returns an error if the value is outside the data budget or its display
+    /// length overflows the supported size.
     pub fn display_len(&self) -> Result<usize, &'static str> {
         self.validate_data()?;
         self.display_len_known()
@@ -243,6 +247,9 @@ impl Value {
 
     /// Returns the display length for a value whose metrics were already
     /// validated by the caller. This skips a second validation walk.
+    ///
+    /// # Errors
+    /// Returns an error if the display length overflows the supported size.
     pub fn display_len_known(&self) -> Result<usize, &'static str> {
         display_len(self)
     }
@@ -260,6 +267,10 @@ impl Value {
 
     /// Appends a value whose data metrics were already checked by the caller.
     /// The destination limit is still enforced.
+    ///
+    /// # Errors
+    /// Returns an error if the display length overflows, allocation fails, or
+    /// appending the value would exceed `limit`.
     pub fn append_to_display_known(
         &self,
         output: &mut String,

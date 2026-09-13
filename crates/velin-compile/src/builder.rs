@@ -272,7 +272,7 @@ impl ProgramBuilder {
 
     fn set_known(&mut self, slot: u32, value: Option<Value>) {
         if let Some(known) = self.known_constants.get_mut(slot as usize) {
-            *known = value.clone();
+            known.clone_from(&value);
             if let Some(name) = self.slots.name(slot) {
                 match value {
                     Some(value) => {

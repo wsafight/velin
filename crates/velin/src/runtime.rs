@@ -134,6 +134,10 @@ impl HostEventQueue {
     }
 
     /// Enqueues an event after validating every value and aggregate payload.
+    ///
+    /// # Errors
+    /// Returns an error when the queue is full, a value is invalid, or the
+    /// event would exceed a configured values or text-byte budget.
     pub fn push(&mut self, event: HostEvent) -> Result<(), HostEventQueueError> {
         if self.events.len() >= self.limits.capacity {
             return Err(HostEventQueueError::Full);
@@ -392,6 +396,11 @@ impl<'a> ScriptRunner<'a> {
     /// The VM's reusable buffer is drained into the returned vector, so the
     /// next batch reuses its allocation. A configured host schema is checked
     /// for every event before it is returned to the host.
+    ///
+    /// # Errors
+    /// Returns an error when a pending failure exists, the host-effect budget
+    /// is exhausted, VM evaluation fails, or an event violates the host
+    /// schema or payload limits.
     pub fn run_effect_batch(&mut self, limit: usize) -> Result<Vec<HostEvent>, ScriptRunError> {
         if let Some(failure) = &self.pending_failure {
             return Err(failure.error());

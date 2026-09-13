@@ -234,7 +234,7 @@ pub fn artifact_cache_key(
     optimization_level: &str,
     host_schema: &[u8],
 ) -> String {
-    let mut hash = 0xcbf29ce484222325u64;
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for part in [
         source,
         compiler_semantics.as_bytes(),
@@ -244,11 +244,11 @@ pub fn artifact_cache_key(
     ] {
         for byte in u64::try_from(part.len()).unwrap_or(u64::MAX).to_le_bytes() {
             hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x100000001b3);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
         }
         for byte in part {
             hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x100000001b3);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
         }
     }
     format!("{hash:016x}.velinc")
@@ -262,22 +262,29 @@ pub fn artifact_cache_path(cache_dir: &Path, key: &str) -> PathBuf {
 
 /// Loads an artifact cache entry. A missing or malformed entry is a cache miss
 /// so callers can safely recompile; only filesystem failures are reported.
+///
+/// # Errors
+/// Returns an error when the cache path cannot be read for reasons other than
+/// absence.
 pub fn load_artifact_cache(path: &Path) -> Result<Option<BytecodeArtifact>, ArtifactError> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(ArtifactError::new(format!("cannot read cache: {error}"))),
     };
-    match decode_artifact(&bytes) {
-        Ok(artifact) => Ok(Some(artifact)),
-        Err(_) => {
-            let _ = std::fs::remove_file(path);
-            Ok(None)
-        }
+    if let Ok(artifact) = decode_artifact(&bytes) {
+        Ok(Some(artifact))
+    } else {
+        let _ = std::fs::remove_file(path);
+        Ok(None)
     }
 }
 
 /// Atomically writes a cache entry through a same-directory temporary file.
+///
+/// # Errors
+/// Returns an error when encoding fails, the cache directory cannot be
+/// created, the temporary file cannot be written, or the rename fails.
 pub fn store_artifact_cache(
     path: &Path,
     source_name: &str,

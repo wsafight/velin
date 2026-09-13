@@ -9,6 +9,11 @@ impl Machine {
     /// execution call. Use [`Machine::drain_effect_batch`] to move them into a
     /// host-owned queue while retaining the buffer allocation for later
     /// batches.
+    ///
+    /// # Errors
+    /// Returns an error when `limit` is zero, the machine is waiting for a
+    /// host reply, execution exceeds the immediate-step budget, or an effect
+    /// argument fails evaluation.
     pub fn run_effect_batch_reusable(&mut self, limit: usize) -> Result<usize, EvalError> {
         if limit == 0 {
             return Err(EvalError::new(
@@ -72,7 +77,7 @@ impl Machine {
     /// inside the machine for the next batch.
     pub fn drain_effect_batch(&mut self, destination: &mut Vec<HostEffect>) {
         destination.clear();
-        destination.extend(self.effect_buffer.drain(..));
+        destination.append(&mut self.effect_buffer);
     }
 
     /// Runs until completion, a value-returning host command, or `limit`
