@@ -1,5 +1,6 @@
 use super::*;
 use velin_compile::ProgramBuilder;
+use velin_syntax::{BinaryOp, Expr};
 
 #[test]
 fn batches_side_effects_and_stops_before_bound_hosts() {
@@ -68,4 +69,40 @@ fn reusable_batch_buffer_can_be_drained_without_losing_capacity() {
     let mut next = Machine::new(builder.build()).unwrap();
     assert_eq!(next.run_effect_batch_reusable(1).unwrap(), 1);
     assert_eq!(next.effect_batch()[0].host_id, 3);
+}
+
+#[test]
+fn batch_delivers_collected_effects_before_reporting_an_error() {
+    let mut builder = ProgramBuilder::new();
+    let error_argument = builder.expr(
+        &Expr::Binary {
+            left: Box::new(Expr::Value(Value::Integer(1))),
+            op: BinaryOp::Divide,
+            right: Box::new(Expr::Value(Value::Integer(0))),
+        },
+        2,
+    );
+    builder.push(Op::host(1, Vec::new(), None, 1));
+    builder.push(Op::host(2, vec![error_argument], None, 2));
+    let mut machine = Machine::new(builder.build()).unwrap();
+
+    let effects = machine.run_effect_batch(8).unwrap();
+    assert_eq!(effects.len(), 1);
+    assert_eq!(effects[0].host_id, 1);
+
+    let error = machine.run_effect_batch(8).unwrap_err();
+    assert_eq!(error.line, 2);
+    assert!(error.message.contains("division by zero"));
+    assert_eq!(machine.run_effect_batch(8), Err(error));
+}
+
+#[test]
+fn batch_caps_preallocation_and_records_host_profile_hits() {
+    let mut builder = ProgramBuilder::new();
+    builder.push(Op::host(1, Vec::new(), None, 1));
+    builder.push(Op::Halt);
+    let mut machine = Machine::new(builder.build()).unwrap();
+
+    assert_eq!(machine.run_effect_batch(usize::MAX).unwrap().len(), 1);
+    assert_eq!(machine.profile().op_hits()[0], 1);
 }

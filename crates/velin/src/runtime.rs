@@ -272,26 +272,35 @@ impl<'a> ScriptRunner<'a> {
             .map_err(ScriptRunError::Evaluation)?;
         let raw = self.machine.effect_batch().to_vec();
         let mut events = Vec::with_capacity(count);
+        let mut failure = None;
         for effect in raw {
             let Some(name) = self.script.host_name(effect.host_id) else {
-                let failure = PendingFailure::HostContract(format!(
+                failure = Some(PendingFailure::HostContract(format!(
                     "bytecode yielded unknown host id {}",
                     effect.host_id
-                ));
-                let error = failure.error();
-                self.pending_failure = Some(failure);
-                return Err(error);
+                )));
+                break;
             };
             if let Err(message) = self.validate_call(name, &effect.values) {
-                let failure = PendingFailure::HostContract(message);
-                let error = failure.error();
-                self.pending_failure = Some(failure);
-                return Err(error);
+                failure = Some(PendingFailure::HostContract(message));
+                break;
             }
             events.push(HostEvent {
                 name: name.to_owned(),
                 values: effect.values,
             });
+        }
+        if let Some(failure) = failure {
+            let error = failure.error();
+            self.pending_failure = Some(failure);
+            self.host_effects += events.len();
+            let mut discarded = Vec::new();
+            self.machine.drain_effect_batch(&mut discarded);
+            return if events.is_empty() {
+                Err(error)
+            } else {
+                Ok(events)
+            };
         }
         self.host_effects += count;
         let mut discarded = Vec::new();

@@ -36,6 +36,7 @@ VM:      resume(Some(value)) -> 写入 `answer` -> 继续
 
 连续的无绑定 `perform` 可以通过 `Machine::run_effect_batch_reusable` 或
 `ScriptRunner::run_effect_batch` 一次取出。VM 按源码顺序执行，并在遇到绑定效果、错误、完成或批次上限时停止；不会越过需要 `resume` 的 Host 屏障。
+如果收集到一个或多个效果后才发生错误，批次会先返回此前的合法前缀，下一次执行调用再报告挂起的错误；重启机器会清除该错误。
 
 批量 API 只负责有界 VM 批次。持久队列和宿主消费速度由嵌入方控制，可使用 `HostEventQueue` 设置事件数量、值数量和文本字节上限。队列满或 payload 超限时应暂停继续驱动 VM，待宿主消费后再取下一批；这样不会丢失或重复事件。
 

@@ -68,6 +68,7 @@ impl Machine {
         self.effect_buffer.clear();
         self.pc = 0;
         self.pending_host = None;
+        self.pending_batch_error = None;
         self.finished = false;
         Ok(())
     }
@@ -124,6 +125,9 @@ impl Machine {
                 "machine is waiting for the host; call `resume`",
             ));
         }
+        if let Some(error) = &self.pending_batch_error {
+            return Err(error.clone());
+        }
         let mut steps = 0;
         while !self.finished {
             steps += self.step_cost();
@@ -150,6 +154,9 @@ impl Machine {
     /// # Errors
     /// Propagates evaluation errors from continued execution.
     pub fn resume(&mut self, value: Option<Value>) -> Result<Yield, EvalError> {
+        if let Some(error) = &self.pending_batch_error {
+            return Err(error.clone());
+        }
         let pending = self.pending_host.ok_or_else(|| {
             EvalError::new(
                 self.current_line(),

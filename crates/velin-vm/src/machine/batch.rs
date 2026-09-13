@@ -8,12 +8,14 @@ impl Machine {
     /// The returned effects remain borrowed from the machine until the next
     /// execution call. Use [`Machine::drain_effect_batch`] to move them into a
     /// host-owned queue while retaining the buffer allocation for later
-    /// batches.
+    /// batches. If execution fails after collecting effects, the effects are
+    /// returned first and the error is reported by the next execution call.
     ///
     /// # Errors
     /// Returns an error when `limit` is zero, the machine is waiting for a
-    /// host reply, execution exceeds the immediate-step budget, or an effect
-    /// argument fails evaluation.
+    /// host reply, or a previously deferred execution error is pending. An
+    /// immediate-step or effect-argument error is deferred when the batch has
+    /// already collected effects, and returned on the next execution call.
     pub fn run_effect_batch_reusable(&mut self, limit: usize) -> Result<usize, EvalError> {
         if limit == 0 {
             return Err(EvalError::new(
@@ -27,13 +29,16 @@ impl Machine {
                 "machine is waiting for the host; call `resume`",
             ));
         }
+        if let Some(error) = &self.pending_batch_error {
+            return Err(error.clone());
+        }
         self.effect_buffer.clear();
-        self.effect_buffer.reserve(limit);
+        self.effect_buffer.reserve(limit.min(MAX_IMMEDIATE_STEPS));
         let mut steps = 0;
         while !self.finished && self.effect_buffer.len() < limit {
             steps += self.step_cost();
             if steps > MAX_IMMEDIATE_STEPS {
-                return Err(EvalError::new(
+                return self.defer_batch_error(EvalError::new(
                     self.current_line(),
                     "possible infinite loop: too many steps without yielding",
                 ));
@@ -51,19 +56,32 @@ impl Machine {
             if host.bind.is_some() {
                 break;
             }
+            self.profile.record(self.pc);
             let host_id = host.host_id;
-            let values = eval_host_args(
+            let values = match eval_host_args(
                 &self.program,
                 &self.metadata,
                 &mut self.frame,
                 &mut self.register_values,
                 &mut self.register_metrics,
                 host,
-            )?;
+            ) {
+                Ok(values) => values,
+                Err(error) => return self.defer_batch_error(error),
+            };
             self.pc += 1;
             self.effect_buffer.push(HostEffect { host_id, values });
         }
         Ok(self.effect_buffer.len())
+    }
+
+    fn defer_batch_error(&mut self, error: EvalError) -> Result<usize, EvalError> {
+        if self.effect_buffer.is_empty() {
+            Err(error)
+        } else {
+            self.pending_batch_error = Some(error);
+            Ok(self.effect_buffer.len())
+        }
     }
 
     /// Borrows the effects collected by [`Machine::run_effect_batch_reusable`].
@@ -90,6 +108,8 @@ impl Machine {
     ///
     /// # Errors
     /// Returns the same evaluation and immediate-step errors as [`Machine::run`].
+    /// When an error occurs after effects were collected, the effects are
+    /// returned first and the error is returned by the next execution call.
     pub fn run_effect_batch(&mut self, limit: usize) -> Result<Vec<HostEffect>, EvalError> {
         self.run_effect_batch_reusable(limit)?;
         let mut effects = Vec::new();

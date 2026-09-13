@@ -157,6 +157,23 @@ fn batches_unbound_effects_and_stops_at_bound_effect() {
 }
 
 #[test]
+fn batch_returns_valid_prefix_before_host_contract_failure() {
+    let script = compile("runner.velin", "perform emit(1)\nperform other(2)\n").unwrap();
+    let schema = HostSchema::new().command("emit", HostSignature::exact(vec![Type::Integer], None));
+    let mut runner =
+        ScriptRunner::configured(&script, 0, ExecutionLimits::default(), Some(&schema)).unwrap();
+
+    let events = runner.run_effect_batch(8).unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].name, "emit");
+    assert_eq!(runner.host_effects(), 1);
+    assert!(matches!(
+        runner.run_effect_batch(8),
+        Err(ScriptRunError::HostContract(_))
+    ));
+}
+
+#[test]
 fn host_event_queue_applies_capacity_and_payload_backpressure() {
     let mut queue = HostEventQueue::new(HostEventQueueLimits {
         capacity: 1,

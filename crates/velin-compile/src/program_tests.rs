@@ -182,6 +182,32 @@ fn validation_precomputes_execution_metadata() {
 }
 
 #[test]
+fn nameless_programs_round_trip_with_slot_width_and_rng_state() {
+    let mut builder = ProgramBuilder::new();
+    let result = builder.slot("result");
+    let random = Expr::Invoke {
+        function: Builtin::Random,
+        arguments: vec![
+            Expr::Value(Value::Integer(1)),
+            Expr::Value(Value::Integer(6)),
+        ],
+    };
+    let chunk = builder.expr(&random, 1);
+    builder.push(Op::Set {
+        slot: result,
+        value: chunk,
+    });
+    let program = builder.build();
+    let image = program.clone().into_execution_image();
+    let json = serde_json::to_string(image.program()).unwrap();
+    let restored: Program = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(restored.slots.len(), program.slots.len());
+    assert_eq!(restored.slots.rng_state(), program.slots.rng_state());
+    assert_eq!(restored.ops, program.ops);
+}
+
+#[test]
 fn compiler_emits_register_bytecode_for_long_scalar_expressions() {
     let mut builder = ProgramBuilder::new();
     let _left = builder.slot("left");

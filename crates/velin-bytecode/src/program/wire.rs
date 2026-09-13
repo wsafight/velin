@@ -47,23 +47,52 @@ impl Serialize for SerializedChunk<'_> {
 // tooling/inspection, so it derives the same traits via a thin manual impl.
 impl Serialize for SlotTable {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.names().serialize(serializer)
+        if self.has_names() {
+            self.names().serialize(serializer)
+        } else {
+            #[derive(Serialize)]
+            struct NamelessSlotTable {
+                width: usize,
+                rng_state: Option<u32>,
+            }
+            NamelessSlotTable {
+                width: self.len(),
+                rng_state: self.rng_state(),
+            }
+            .serialize(serializer)
+        }
     }
 }
 
 impl<'de> Deserialize<'de> for SlotTable {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let names = Vec::<String>::deserialize(deserializer)?;
-        let mut table = SlotTable::new();
-        for name in names {
-            if table.get(&name).is_some() {
-                return Err(serde::de::Error::custom(format!(
-                    "duplicate slot name `{name}`"
-                )));
-            }
-            table.intern(&name);
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum SlotTableWire {
+            Names(Vec<String>),
+            Nameless {
+                width: usize,
+                rng_state: Option<u32>,
+            },
         }
-        Ok(table)
+
+        match SlotTableWire::deserialize(deserializer)? {
+            SlotTableWire::Names(names) => {
+                let mut table = SlotTable::new();
+                for name in names {
+                    if table.get(&name).is_some() {
+                        return Err(serde::de::Error::custom(format!(
+                            "duplicate slot name `{name}`"
+                        )));
+                    }
+                    table.intern(&name);
+                }
+                Ok(table)
+            }
+            SlotTableWire::Nameless { width, rng_state } => {
+                SlotTable::from_nameless(width, rng_state).map_err(serde::de::Error::custom)
+            }
+        }
     }
 }
 

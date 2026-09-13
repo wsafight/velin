@@ -131,6 +131,22 @@ impl SlotTable {
         self.index = None;
         self
     }
+
+    #[cfg(feature = "serde")]
+    pub(crate) fn from_nameless(
+        width: usize,
+        rng_state: Option<u32>,
+    ) -> Result<Self, &'static str> {
+        if rng_state.is_some_and(|slot| slot as usize >= width) {
+            return Err("RNG slot is outside the nameless slot width");
+        }
+        Ok(Self {
+            names: None,
+            index: None,
+            width,
+            rng_state,
+        })
+    }
 }
 
 #[cfg(test)]

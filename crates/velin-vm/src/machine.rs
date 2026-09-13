@@ -154,6 +154,9 @@ pub struct Machine {
     pc: usize,
     /// The host effect execution is currently waiting to resume from.
     pending_host: Option<PendingHost>,
+    /// An execution error reached after a batch already collected effects.
+    /// The error is reported after those effects have been drained.
+    pending_batch_error: Option<EvalError>,
     finished: bool,
 }
 
@@ -291,6 +294,7 @@ impl Machine {
             profile,
             pc: 0,
             pending_host: None,
+            pending_batch_error: None,
             finished: false,
         })
     }
@@ -325,6 +329,7 @@ impl Machine {
             profile,
             pc: 0,
             pending_host: None,
+            pending_batch_error: None,
             finished: false,
         }
     }
@@ -347,8 +352,18 @@ impl Machine {
         let Some(slot) = self.program.slots.rng_state() else {
             return false;
         };
-        self.frame.values[slot as usize] = Some(Value::Integer(seed));
-        true
+        self.replace_slot(
+            slot,
+            Value::Integer(seed),
+            DataMetrics {
+                footprint: DataFootprint {
+                    values: 1,
+                    text_bytes: 0,
+                },
+                max_depth: 0,
+            },
+        )
+        .is_ok()
     }
 
     /// Returns the current RNG state when the program contains random ops.

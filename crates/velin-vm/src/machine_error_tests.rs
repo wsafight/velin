@@ -215,3 +215,34 @@ fn rng_seed_and_unknown_variables_and_jump_off_end() {
     let error = Machine::new(jump.build()).unwrap_err();
     assert!(error.message.contains("past program end"));
 }
+
+#[test]
+fn reseeding_rng_refreshes_frame_metrics() {
+    let mut builder = ProgramBuilder::new();
+    let roll = builder.slot("roll");
+    let expression = velin_parse::parse_expression("random(0, 10)", "t", 1, 1).unwrap();
+    let chunk = builder.expr(&expression, 1);
+    builder.push(Op::Set {
+        slot: roll,
+        value: chunk,
+    });
+    let names: Vec<String> = (0..16).map(|index| format!("value_{index}")).collect();
+    for name in &names {
+        builder.slot(name);
+    }
+
+    let mut machine = Machine::new(builder.build()).unwrap();
+    let payload = Value::String("x".repeat(velin_syntax::MAX_DATA_TEXT_BYTES).into());
+    machine
+        .try_set_variable(velin_compile::RNG_STATE_SLOT, payload.clone())
+        .unwrap();
+    assert!(machine.set_rng_seed(1));
+
+    for name in &names {
+        machine.try_set_variable(name, payload.clone()).unwrap();
+    }
+    assert_eq!(
+        machine.frame_total.text_bytes,
+        16 * velin_syntax::MAX_DATA_TEXT_BYTES
+    );
+}
