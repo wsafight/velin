@@ -227,7 +227,7 @@ fn prepare_expression(chunk: ExprChunkRef<'_>) -> Option<PreparedExpr> {
 }
 
 fn prepare_register_expression(chunk: ExprChunkRef<'_>) -> Option<RegisterExpr> {
-    if chunk.ops.len() < 12 {
+    if chunk.ops.is_empty() {
         return None;
     }
     let mut stack = Vec::new();
