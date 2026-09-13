@@ -2,7 +2,8 @@
 //!
 //! The ABI deliberately exposes opaque program and machine handles. The only
 //! data crossing the boundary are fixed-layout tags, integers, booleans and
-//! owned UTF-8 buffers. Programs are loaded from JSON once; host effects use
+//! owned UTF-8 buffers. Programs are loaded from JSON once at the raw ABI
+//! boundary and immediately retained as a validated proof; host effects use
 //! the binary `VelinValue` array and do not require JSON round trips.
 
 #![allow(clippy::missing_safety_doc)]
@@ -19,7 +20,7 @@ pub use result::{VelinBatch, VelinEffect};
 use result::{batch_from_result, error_yield, yield_from_result};
 use std::slice;
 use std::sync::Arc;
-use velin_bytecode::Program;
+use velin_bytecode::{InitialFrame, Program, ValidatedProgram};
 use velin_vm::Machine;
 
 pub use result::{
@@ -78,18 +79,34 @@ pub unsafe extern "C" fn velin_program_load_json(
             return std::ptr::null_mut();
         }
     };
-    if let Err(error) = program.validate() {
-        write_error(
-            &format!("invalid program: {error}"),
-            error_ptr,
-            error_len,
-            error_capacity,
-        );
-        return std::ptr::null_mut();
-    }
-    Box::into_raw(Box::new(VelinProgram {
-        program: Arc::new(program),
-    }))
+    let program = match ValidatedProgram::new(Arc::new(program)) {
+        Ok(program) => program,
+        Err(error) => {
+            write_error(
+                &format!("invalid program: {error}"),
+                error_ptr,
+                error_len,
+                error_capacity,
+            );
+            return std::ptr::null_mut();
+        }
+    };
+    let initial = match InitialFrame::from_named_values(
+        &program.program().slots,
+        std::iter::empty::<(&str, &velin_syntax::Value)>(),
+    ) {
+        Ok(initial) => initial,
+        Err(error) => {
+            write_error(
+                &format!("invalid initial frame: {error}"),
+                error_ptr,
+                error_len,
+                error_capacity,
+            );
+            return std::ptr::null_mut();
+        }
+    };
+    Box::into_raw(Box::new(VelinProgram { program, initial }))
 }
 
 /// Releases a program handle. Null is accepted.
@@ -121,19 +138,24 @@ pub unsafe extern "C" fn velin_machine_new(
         );
         return std::ptr::null_mut();
     };
-    let machine = match Machine::with_seed(Arc::clone(&program.program), seed) {
-        Ok(machine) => machine,
-        Err(error) => {
-            write_error(
-                &format!("cannot create machine: {error}"),
-                error_ptr,
-                error_len,
-                error_capacity,
-            );
-            return std::ptr::null_mut();
-        }
-    };
-    Box::into_raw(Box::new(VelinMachine { machine }))
+    let machine =
+        match Machine::from_validated_with_seed_and_frame(&program.program, seed, &program.initial)
+        {
+            Some(machine) => machine,
+            None => {
+                write_error(
+                    "cannot create machine from the validated initial frame",
+                    error_ptr,
+                    error_len,
+                    error_capacity,
+                );
+                return std::ptr::null_mut();
+            }
+        };
+    Box::into_raw(Box::new(VelinMachine {
+        machine,
+        initial: program.initial.clone(),
+    }))
 }
 
 /// Releases a machine handle. Null is accepted.
@@ -196,11 +218,9 @@ pub unsafe extern "C" fn velin_machine_restart(
     let Some(machine) = (unsafe { machine.as_mut() }) else {
         return error_yield("machine handle is null");
     };
-    let program = machine.machine.program().clone();
-    machine.machine = match Machine::with_seed(program, seed) {
-        Ok(machine) => machine,
-        Err(error) => return error_yield(&format!("cannot restart machine: {error}")),
-    };
+    if let Err(error) = machine.machine.restart(&machine.initial, seed) {
+        return error_yield(&format!("cannot restart machine: {error}"));
+    }
     yield_from_result(machine.machine.run())
 }
 

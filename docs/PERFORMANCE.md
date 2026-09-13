@@ -166,6 +166,16 @@ A validated program lazily constructs `ExecutionMetadata` through `OnceLock`. Co
 
 Metadata records each expression's maximum stack depth, whether it mutates RNG state, whether it inherits slot metrics directly, constant result metrics, source lines, and directly addressable built-in call plans. These properties do not change during the program's lifetime and need not be rediscovered on each run.
 
+### Artifacts use a bounded binary payload
+
+`.velinc` payloads now use a tagged, length-bounded binary value encoding
+instead of storing the `Program` as JSON text. The format version increments
+directly; decoding checks lengths, tags, UTF-8, nesting, and program budgets
+before constructing the shared validation proof. Source bytes, compiler
+semantics, optimization level, and Host schema inputs form the cache key;
+entries are installed through a same-directory temporary file and atomic rename,
+and malformed entries are treated as cache misses.
+
 ## VM execution
 
 ### Interpolation avoids repeated validation

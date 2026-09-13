@@ -2,7 +2,9 @@
 
 use crate::host::CompiledScript;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value as JsonValue};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use velin_bytecode::{InitialFrame, Op, Pc, Program, ProgramValidationError, ValidatedProgram};
 use velin_syntax::{DataFootprint, Value};
@@ -10,7 +12,7 @@ use velin_syntax::{DataFootprint, Value};
 /// Fixed marker at the start of every `.velinc` file.
 pub const ARTIFACT_MAGIC: &[u8; 8] = b"VELINBC\0";
 /// Current artifact payload version.
-pub const ARTIFACT_VERSION: u16 = 1;
+pub const ARTIFACT_VERSION: u16 = 2;
 /// Maximum complete artifact size accepted by the decoder.
 pub const MAX_ARTIFACT_BYTES: usize = 16 * 1024 * 1024;
 const HEADER_BYTES: usize = ARTIFACT_MAGIC.len() + 2 + 8;
@@ -104,8 +106,10 @@ pub fn encode_artifact(
         labels: script.labels.clone(),
         defaults: script.defaults.clone(),
     };
-    let payload = serde_json::to_vec(&payload)
+    let value = serde_json::to_value(payload)
         .map_err(|error| ArtifactError::new(format!("cannot encode artifact: {error}")))?;
+    let mut payload = Vec::new();
+    encode_wire_value(&value, &mut payload)?;
     let total = HEADER_BYTES
         .checked_add(payload.len())
         .ok_or_else(|| ArtifactError::new("artifact size overflow"))?;
@@ -172,7 +176,12 @@ pub fn decode_artifact(bytes: &[u8]) -> Result<BytecodeArtifact, ArtifactError> 
             "artifact payload length does not match file size",
         ));
     }
-    let payload: ArtifactPayload = serde_json::from_slice(&bytes[HEADER_BYTES..])
+    let mut cursor = 0;
+    let value = decode_wire_value(&bytes[HEADER_BYTES..], &mut cursor, 0)?;
+    if cursor != payload_len {
+        return Err(ArtifactError::new("artifact payload has trailing bytes"));
+    }
+    let payload: ArtifactPayload = serde_json::from_value(value)
         .map_err(|error| ArtifactError::new(format!("cannot decode artifact payload: {error}")))?;
     validate_source_name(&payload.source_name)?;
     validate_metadata(
@@ -214,6 +223,229 @@ pub fn decode_artifact(bytes: &[u8]) -> Result<BytecodeArtifact, ArtifactError> 
         source_name: payload.source_name,
         script,
     })
+}
+
+/// Computes a stable cache key for source and every input that can change the
+/// resulting execution unit. The key is deliberately independent of paths.
+#[must_use]
+pub fn artifact_cache_key(
+    source: &[u8],
+    compiler_semantics: &str,
+    optimization_level: &str,
+    host_schema: &[u8],
+) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for part in [
+        source,
+        compiler_semantics.as_bytes(),
+        optimization_level.as_bytes(),
+        host_schema,
+        &ARTIFACT_VERSION.to_le_bytes(),
+    ] {
+        for byte in u64::try_from(part.len()).unwrap_or(u64::MAX).to_le_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        for byte in part {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    format!("{hash:016x}.velinc")
+}
+
+/// Returns the path used for one cache key without creating the directory.
+#[must_use]
+pub fn artifact_cache_path(cache_dir: &Path, key: &str) -> PathBuf {
+    cache_dir.join(key)
+}
+
+/// Loads an artifact cache entry. A missing or malformed entry is a cache miss
+/// so callers can safely recompile; only filesystem failures are reported.
+pub fn load_artifact_cache(path: &Path) -> Result<Option<BytecodeArtifact>, ArtifactError> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(ArtifactError::new(format!("cannot read cache: {error}"))),
+    };
+    match decode_artifact(&bytes) {
+        Ok(artifact) => Ok(Some(artifact)),
+        Err(_) => {
+            let _ = std::fs::remove_file(path);
+            Ok(None)
+        }
+    }
+}
+
+/// Atomically writes a cache entry through a same-directory temporary file.
+pub fn store_artifact_cache(
+    path: &Path,
+    source_name: &str,
+    script: &CompiledScript,
+) -> Result<(), ArtifactError> {
+    let bytes = encode_artifact(source_name, script)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| ArtifactError::new("cache path has no parent directory"))?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| ArtifactError::new(format!("cannot create cache directory: {error}")))?;
+    let temporary = parent.join(format!(
+        ".{}.{}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("artifact"),
+        std::process::id()
+    ));
+    std::fs::write(&temporary, &bytes)
+        .map_err(|error| ArtifactError::new(format!("cannot write cache: {error}")))?;
+    if let Err(error) = std::fs::rename(&temporary, path) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(ArtifactError::new(format!("cannot install cache: {error}")));
+    }
+    Ok(())
+}
+
+const MAX_WIRE_DEPTH: usize = 64;
+
+fn encode_wire_value(value: &JsonValue, output: &mut Vec<u8>) -> Result<(), ArtifactError> {
+    match value {
+        JsonValue::Null => output.push(0),
+        JsonValue::Bool(false) => output.push(1),
+        JsonValue::Bool(true) => output.push(2),
+        JsonValue::Number(number) => {
+            let number = number
+                .as_i64()
+                .ok_or_else(|| ArtifactError::new("artifact contains a non-integer number"))?;
+            output.push(3);
+            output.extend_from_slice(&number.to_le_bytes());
+        }
+        JsonValue::String(text) => {
+            output.push(4);
+            write_wire_bytes(text.as_bytes(), output)?;
+        }
+        JsonValue::Array(items) => {
+            output.push(5);
+            write_wire_len(items.len(), output)?;
+            for item in items {
+                encode_wire_value(item, output)?;
+            }
+        }
+        JsonValue::Object(fields) => {
+            output.push(6);
+            write_wire_len(fields.len(), output)?;
+            for (key, value) in fields {
+                write_wire_bytes(key.as_bytes(), output)?;
+                encode_wire_value(value, output)?;
+            }
+        }
+    }
+    if output.len() > MAX_ARTIFACT_BYTES {
+        return Err(ArtifactError::new(format!(
+            "artifact exceeds {MAX_ARTIFACT_BYTES} bytes"
+        )));
+    }
+    Ok(())
+}
+
+fn write_wire_len(length: usize, output: &mut Vec<u8>) -> Result<(), ArtifactError> {
+    let length =
+        u32::try_from(length).map_err(|_| ArtifactError::new("artifact count overflow"))?;
+    output.extend_from_slice(&length.to_le_bytes());
+    Ok(())
+}
+
+fn write_wire_bytes(bytes: &[u8], output: &mut Vec<u8>) -> Result<(), ArtifactError> {
+    write_wire_len(bytes.len(), output)?;
+    output.extend_from_slice(bytes);
+    Ok(())
+}
+
+fn decode_wire_value(
+    input: &[u8],
+    cursor: &mut usize,
+    depth: usize,
+) -> Result<JsonValue, ArtifactError> {
+    if depth > MAX_WIRE_DEPTH {
+        return Err(ArtifactError::new("artifact nesting exceeds limit"));
+    }
+    let tag = read_wire_byte(input, cursor)?;
+    match tag {
+        0 => Ok(JsonValue::Null),
+        1 => Ok(JsonValue::Bool(false)),
+        2 => Ok(JsonValue::Bool(true)),
+        3 => {
+            let bytes = read_wire_slice(input, cursor, 8)?;
+            let number = i64::from_le_bytes(bytes.try_into().expect("wire length is eight"));
+            Ok(JsonValue::Number(number.into()))
+        }
+        4 => Ok(JsonValue::String(read_wire_string(input, cursor)?)),
+        5 => {
+            let count = read_wire_len(input, cursor)?;
+            let mut items = Vec::with_capacity(count.min(1_024));
+            for _ in 0..count {
+                items.push(decode_wire_value(input, cursor, depth + 1)?);
+            }
+            Ok(JsonValue::Array(items))
+        }
+        6 => {
+            let count = read_wire_len(input, cursor)?;
+            let mut fields = Map::new();
+            for _ in 0..count {
+                let key = read_wire_string(input, cursor)?;
+                if fields
+                    .insert(key, decode_wire_value(input, cursor, depth + 1)?)
+                    .is_some()
+                {
+                    return Err(ArtifactError::new(
+                        "artifact contains duplicate object keys",
+                    ));
+                }
+            }
+            Ok(JsonValue::Object(fields))
+        }
+        _ => Err(ArtifactError::new("artifact contains an unknown wire tag")),
+    }
+}
+
+fn read_wire_byte(input: &[u8], cursor: &mut usize) -> Result<u8, ArtifactError> {
+    let byte = *input
+        .get(*cursor)
+        .ok_or_else(|| ArtifactError::new("artifact payload is truncated"))?;
+    *cursor += 1;
+    Ok(byte)
+}
+
+fn read_wire_len(input: &[u8], cursor: &mut usize) -> Result<usize, ArtifactError> {
+    let bytes = read_wire_slice(input, cursor, 4)?;
+    let length = u32::from_le_bytes(bytes.try_into().expect("wire length is four"));
+    let length =
+        usize::try_from(length).map_err(|_| ArtifactError::new("artifact length overflow"))?;
+    if length > MAX_ARTIFACT_BYTES {
+        return Err(ArtifactError::new("artifact length exceeds limit"));
+    }
+    Ok(length)
+}
+
+fn read_wire_string(input: &[u8], cursor: &mut usize) -> Result<String, ArtifactError> {
+    let length = read_wire_len(input, cursor)?;
+    let bytes = read_wire_slice(input, cursor, length)?;
+    String::from_utf8(bytes.to_vec())
+        .map_err(|_| ArtifactError::new("artifact contains invalid UTF-8"))
+}
+
+fn read_wire_slice<'a>(
+    input: &'a [u8],
+    cursor: &mut usize,
+    length: usize,
+) -> Result<&'a [u8], ArtifactError> {
+    let end = cursor
+        .checked_add(length)
+        .ok_or_else(|| ArtifactError::new("artifact payload length overflow"))?;
+    let bytes = input
+        .get(*cursor..end)
+        .ok_or_else(|| ArtifactError::new("artifact payload is truncated"))?;
+    *cursor = end;
+    Ok(bytes)
 }
 
 fn validate_source_name(source_name: &str) -> Result<(), ArtifactError> {
@@ -312,6 +544,7 @@ mod tests {
         let script = compile("story.velin", "default hp = 3\nperform say(hp)\n").unwrap();
         let bytes = encode_artifact("story.velin", &script).unwrap();
         assert!(bytes.starts_with(ARTIFACT_MAGIC));
+        assert_eq!(bytes[HEADER_BYTES], 6, "payload uses the binary object tag");
         let artifact = decode_artifact(&bytes).unwrap();
         assert_eq!(artifact.source_name(), "story.velin");
         assert_eq!(artifact.script().hosts, script.hosts);
@@ -327,7 +560,7 @@ mod tests {
         assert!(decode_artifact(&bytes[..HEADER_BYTES - 1]).is_err());
 
         let mut unknown_version = bytes.clone();
-        unknown_version[ARTIFACT_MAGIC.len()] = 2;
+        unknown_version[ARTIFACT_MAGIC.len()] = 3;
         assert!(
             decode_artifact(&unknown_version)
                 .unwrap_err()
@@ -357,5 +590,20 @@ mod tests {
         invalid.hosts.clear();
         let error = encode_artifact("test.velin", &invalid).unwrap_err();
         assert!(error.to_string().contains("unknown host"));
+    }
+
+    #[test]
+    fn cache_key_changes_with_semantic_inputs_and_cache_round_trips() {
+        let script = compile("test.velin", "set x = 1\n").unwrap();
+        let first = artifact_cache_key(b"set x = 1\n", "compiler-a", "speed", b"schema-a");
+        let second = artifact_cache_key(b"set x = 1\n", "compiler-b", "speed", b"schema-a");
+        assert_ne!(first, second);
+        let directory =
+            std::env::temp_dir().join(format!("velin-artifact-cache-{}", std::process::id()));
+        let path = artifact_cache_path(&directory, &first);
+        store_artifact_cache(&path, "test.velin", &script).unwrap();
+        let cached = load_artifact_cache(&path).unwrap().unwrap();
+        assert_eq!(cached.script().program, script.program);
+        let _ = std::fs::remove_dir_all(directory);
     }
 }

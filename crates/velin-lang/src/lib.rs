@@ -49,7 +49,8 @@ mod token;
 
 pub use artifact::{
     ARTIFACT_MAGIC, ARTIFACT_VERSION, ArtifactError, BytecodeArtifact, MAX_ARTIFACT_BYTES,
-    decode_artifact, encode_artifact,
+    artifact_cache_key, artifact_cache_path, decode_artifact, encode_artifact, load_artifact_cache,
+    store_artifact_cache,
 };
 pub use ast::{Condition, Stmt};
 pub use error::ParseError;

@@ -15,10 +15,12 @@
 mod host;
 
 use std::io::{self, Read, Write};
+use std::path::Path;
 use std::process::ExitCode;
 use velin::{
-    ARTIFACT_MAGIC, MAX_ARTIFACT_BYTES, MAX_SOURCE_BYTES, check_script, compile, decode_artifact,
-    encode_artifact,
+    ARTIFACT_MAGIC, CompiledScript, MAX_ARTIFACT_BYTES, MAX_SOURCE_BYTES, artifact_cache_key,
+    artifact_cache_path, check_script, compile, decode_artifact, encode_artifact,
+    load_artifact_cache, store_artifact_cache,
 };
 
 /// Parsed command line: a verb and the script path it applies to.
@@ -197,7 +199,7 @@ fn check(path: &str, json: bool) -> ExitCode {
         }
     };
 
-    let script = match compile(file, &source) {
+    let script = match compile_source_cached(path, file, &source) {
         Ok(script) => script,
         Err(diagnostic) => {
             if json {
@@ -264,7 +266,7 @@ fn execute(path: &str) -> ExitCode {
                     return ExitCode::from(2);
                 }
             };
-            let script = match compile(file, &source) {
+            let script = match compile_source_cached(path, file, &source) {
                 Ok(script) => script,
                 Err(diagnostic) => {
                     eprintln!("{diagnostic}");
@@ -300,6 +302,34 @@ fn execute(path: &str) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn compile_source_cached(
+    path: &str,
+    file: &str,
+    source: &str,
+) -> Result<CompiledScript, velin::Diagnostic> {
+    if path == "-" {
+        return compile(file, source);
+    }
+    let source_path = Path::new(path);
+    let cache_dir = source_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(".velin-cache");
+    let key = artifact_cache_key(
+        source.as_bytes(),
+        concat!("velin-", env!("CARGO_PKG_VERSION")),
+        "default",
+        &[],
+    );
+    let cache_path = artifact_cache_path(&cache_dir, &key);
+    if let Ok(Some(artifact)) = load_artifact_cache(&cache_path) {
+        return Ok(artifact.into_script());
+    }
+    let script = compile(file, source)?;
+    let _ = store_artifact_cache(&cache_path, file, &script);
+    Ok(script)
 }
 
 fn compile_artifact(input: &str, output: &str) -> ExitCode {

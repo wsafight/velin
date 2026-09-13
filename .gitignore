@@ -2,6 +2,8 @@
 # 编译产物目录（workspace 根与各 crate）
 /target/
 **/target/
+.velin-cache/
+**/.velin-cache/
 
 # 由 rustc 生成的增量编译缓存
 **/*.rs.bk

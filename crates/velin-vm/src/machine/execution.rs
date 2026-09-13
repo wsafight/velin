@@ -66,6 +66,7 @@ impl Machine {
         self.expression_stack.clear();
         self.expression_metrics.clear();
         self.register_values.clear();
+        self.effect_buffer.clear();
         self.pc = 0;
         self.pending_host = None;
         self.finished = false;
