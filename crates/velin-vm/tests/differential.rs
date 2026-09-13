@@ -3,11 +3,11 @@
 //! error. This is the safety net that lets the VM replace the tree-walk.
 
 use std::sync::Arc;
-use velin_compile::{SlotTable, compile_expression};
+use velin_compile::{ProgramBuilder, SlotTable, compile_expression};
 use velin_eval::{Variables, evaluate, evaluate_with_rng};
 use velin_parse::parse_expression;
 use velin_syntax::Value;
-use velin_vm::eval_chunk;
+use velin_vm::{Machine, eval_chunk};
 
 /// Evaluates `source` both ways against the same environment and asserts the
 /// results (or errors) match.
@@ -222,5 +222,42 @@ fn invalid_random_calls_match_without_consuming_state() {
         "chance(101)",
     ] {
         agree_rng(source, &vars, 77);
+    }
+}
+
+#[test]
+fn prepared_expression_plan_matches_stack_fallback() {
+    for source in ["x", "x + 3", "(x + 3) * 2", "x + \"!\""] {
+        let expr = parse_expression(source, "prepared", 6, 1).expect("parses");
+
+        let mut builder = ProgramBuilder::new();
+        let result = builder.slot("result");
+        let chunk_id = builder.expr(&expr, 6);
+        builder.push(velin_compile::Op::Set {
+            slot: result,
+            value: chunk_id,
+        });
+        let program = builder.build();
+
+        let mut machine = Machine::new(program).expect("valid program");
+        machine.set_variable("x", Value::Integer(4));
+        let machine_result = machine.run();
+
+        let mut slots = SlotTable::new();
+        let chunk = compile_expression(&expr, &mut slots, 6);
+        let mut frame: Vec<Option<Value>> = vec![None; slots.len()];
+        frame[slots.get("x").expect("x slot") as usize] = Some(Value::Integer(4));
+        let stack_result = eval_chunk(&chunk, &mut frame, |slot| {
+            slots.name(slot).unwrap_or("?").to_owned()
+        });
+
+        match (machine_result, stack_result) {
+            (Ok(_), Ok(value)) => assert_eq!(machine.variable("result"), Some(&value)),
+            (Err(machine_error), Err(stack_error)) => {
+                assert_eq!(machine_error.line, stack_error.line);
+                assert_eq!(machine_error.message, stack_error.message);
+            }
+            (machine, stack) => panic!("outcome mismatch for `{source}`: {machine:?} vs {stack:?}"),
+        }
     }
 }

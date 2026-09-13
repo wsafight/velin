@@ -166,6 +166,22 @@ impl<'a> ScriptRunner<'a> {
         &self.machine
     }
 
+    /// Installs a value into a slot before running an independently compiled
+    /// fragment. This is primarily useful for incremental frontends that keep
+    /// their own session state.
+    ///
+    /// # Errors
+    /// Returns an initialization error when `name` is unknown or the value
+    /// would exceed the machine's aggregate data budget.
+    pub fn try_set_variable(&mut self, name: &str, value: Value) -> Result<(), ScriptRunError> {
+        self.machine
+            .try_set_variable(name, value)
+            .map_err(|source| ScriptRunError::InitialValue {
+                name: name.to_owned(),
+                source,
+            })
+    }
+
     #[must_use]
     pub const fn host_effects(&self) -> usize {
         self.host_effects

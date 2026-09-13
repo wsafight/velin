@@ -131,4 +131,7 @@ pub use velin_lang::{
     check_script_with_host_schema, compile, decode_artifact, encode_artifact, parse_program,
     parse_program_recovering,
 };
+mod repl;
 mod runtime;
+
+pub use repl::{ReplError, ReplSession};

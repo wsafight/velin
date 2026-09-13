@@ -155,25 +155,64 @@ impl CompiledScript {
     /// are attributed to `file`.
     #[must_use]
     pub fn check(&self, file: &str) -> Vec<Diagnostic> {
-        self.check_inner(file, None)
+        self.check_inner(file, None, None)
     }
 
     /// Runs static checks with host-owned command contracts.
     #[must_use]
     pub fn check_with_host_schema(&self, file: &str, schema: &HostSchema) -> Vec<Diagnostic> {
-        self.check_inner(file, Some(schema))
+        self.check_inner(file, Some(schema), None)
     }
 
-    fn check_inner(&self, file: &str, schema: Option<&HostSchema>) -> Vec<Diagnostic> {
+    /// Runs static checks with values supplied by an embedding session treated
+    /// as assigned entry state. Names absent from this program are ignored.
+    /// This is used by incremental frontends such as a REPL without changing
+    /// the program's immutable defaults.
+    #[must_use]
+    pub fn check_with_values(
+        &self,
+        file: &str,
+        values: &BTreeMap<String, Value>,
+    ) -> Vec<Diagnostic> {
+        self.check_inner(file, None, Some(values))
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn check_inner(
+        &self,
+        file: &str,
+        schema: Option<&HostSchema>,
+        bindings: Option<&BTreeMap<String, Value>>,
+    ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
-        let prepared = self
-            .validated_program
-            .refers_to(&self.program)
-            .then(|| self.initial_frame())
-            .flatten();
-        let unassigned = if let Some(frame) = prepared {
-            definite_assignment_slots(&self.program, frame.assigned_slots())
+        let prepared = if bindings.is_none() {
+            self.validated_program
+                .refers_to(&self.program)
+                .then(|| self.initial_frame())
+                .flatten()
+        } else {
+            None
+        };
+        let mut context_assigned = None;
+        let mut context_types = None;
+        if let Some(values) = bindings {
+            let mut assigned = Vec::new();
+            let mut types = vec![Type::Unknown; self.program.slots.len()];
+            for (name, value) in values {
+                if let Some(slot) = self.program.slots.get(name) {
+                    assigned.push(slot);
+                    types[slot as usize] = Type::from(value);
+                }
+            }
+            context_assigned = Some(assigned);
+            context_types = Some(types);
+        } else if let Some(frame) = prepared {
+            context_assigned = Some(frame.assigned_slots().to_vec());
+            context_types = Some(self.initial_types.to_vec());
+        }
+        let unassigned = if let Some(assigned) = context_assigned.as_deref() {
+            definite_assignment_slots(&self.program, assigned)
         } else {
             let preset: BTreeSet<String> = self.defaults.keys().cloned().collect();
             definite_assignment(&self.program, &preset)
@@ -197,10 +236,10 @@ impl CompiledScript {
                     signatures.insert(host_id, signature.clone());
                 }
             }
-            diagnostics.extend(if prepared.is_some() {
+            diagnostics.extend(if let Some(types) = context_types.as_deref() {
                 check_program_types_with_hosts_and_slot_types(
                     &self.program,
-                    &self.initial_types,
+                    types,
                     &self.type_sites,
                     &signatures,
                     file,
@@ -252,13 +291,8 @@ impl CompiledScript {
                 }
             }
         } else {
-            diagnostics.extend(if prepared.is_some() {
-                check_program_types_with_slot_types(
-                    &self.program,
-                    &self.initial_types,
-                    &self.type_sites,
-                    file,
-                )
+            diagnostics.extend(if let Some(types) = context_types.as_deref() {
+                check_program_types_with_slot_types(&self.program, types, &self.type_sites, file)
             } else {
                 let env = self.default_environment();
                 check_program_types(&self.program, &env, &self.type_sites, file)

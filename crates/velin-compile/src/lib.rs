@@ -31,7 +31,8 @@ pub use expr::compile_expression;
 pub use frame::{InitialFrame, InitialFrameError, InitialValue};
 pub use program::{
     ChunkExecutionMetadata, ChunkId, ExecutionMetadata, HostOp, Op, OpExecutionMetadata, Pc,
-    Program, ProgramBuilder, ProgramChunk, QuickenedCallRef, QuickenedOperand, UpdateOp,
+    PreparedExpr, Program, ProgramBuilder, ProgramChunk, QuickenedCallRef, QuickenedOperand,
+    UpdateOp,
 };
 pub use slots::{RNG_STATE_SLOT, SlotTable};
 pub use validate::{

@@ -13,6 +13,9 @@ use velin::{
     parse_program,
 };
 
+#[path = "pipeline/p2.rs"]
+mod pipeline_p2;
+
 /// A non-trivial arithmetic/boolean guard, the shape a real script branches on.
 const GUARD: &str = "hp - 10 > 0 and (level * 2 + 5) <= 100 or defeated == false";
 
@@ -466,11 +469,13 @@ criterion_group!(
     bench_compile_expression_heavy_script,
     bench_constant_folding,
     bench_counter_loop,
+    pipeline_p2::bench_prepared_expression_loop,
     bench_scalar_reassignment,
     bench_boolean_slot_loop,
     bench_builtin_loop,
     bench_growing_list,
     bench_growing_string,
+    pipeline_p2::bench_interpolation,
     bench_string_reads,
     bench_wide_linear_run,
     bench_machine_creation,

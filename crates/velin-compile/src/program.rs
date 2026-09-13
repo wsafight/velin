@@ -167,8 +167,10 @@ pub struct ExecutionMetadata {
     chunks: Box<[ChunkExecutionMetadata]>,
     ops: Box<[OpExecutionMetadata]>,
     metrics: Box<[DataMetrics]>,
+    program_constant_metrics: Box<[DataMetrics]>,
     quickened_calls: Box<[QuickenedCall]>,
     quickened_operands: Box<[QuickenedOperand]>,
+    prepared: Box<[Option<PreparedExpr>]>,
 }
 
 #[derive(Debug)]
@@ -191,6 +193,26 @@ pub struct QuickenedCallRef<'a> {
     pub function: Builtin,
     pub operands: &'a [QuickenedOperand],
     pub line: u32,
+}
+
+/// A non-serialized execution plan for a small straight-line expression.
+///
+/// The canonical [`ExprOp`] sequence remains the compatibility format. This
+/// plan is rebuilt after validation and only removes stack bookkeeping for
+/// direct operands; it never contains alternate operator semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedExpr {
+    Constant {
+        constant: u32,
+    },
+    Load {
+        slot: u32,
+    },
+    IntegerBinaryLiteral {
+        slot: u32,
+        operation: BinaryOp,
+        value: i64,
+    },
 }
 
 /// Execution properties of one expression chunk.

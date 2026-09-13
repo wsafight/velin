@@ -61,6 +61,7 @@ pub fn eval_chunk(
         chunk.as_chunk_ref(),
         FrameAccess::Mutable(frame),
         None,
+        None,
         &mut stack,
         chunk.ops.len(),
         None,
@@ -70,11 +71,12 @@ pub fn eval_chunk(
 }
 
 /// Executes a chunk belonging to a `Program` already validated by `Machine`.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(crate) fn eval_validated_chunk(
     chunk: ExprChunkRef<'_>,
     mut frame: FrameAccess<'_>,
     frame_metrics: Option<(&[DataFootprint], &[u8])>,
+    constant_metrics: Option<(&[DataMetrics], u32)>,
     stack: &mut Vec<Value>,
     max_stack: usize,
     result_metrics: Option<DataMetrics>,
@@ -90,8 +92,16 @@ pub(crate) fn eval_validated_chunk(
     while pc < chunk.ops.len() {
         match &chunk.ops[pc] {
             ExprOp::Const(index) => {
-                stack.push(chunk.constants[*index as usize].clone());
-                top_metrics = None;
+                let value = chunk.constants[*index as usize].clone();
+                let metrics = constant_metrics
+                    .and_then(|(all, start)| {
+                        start
+                            .checked_add(*index)
+                            .and_then(|index| all.get(index as usize).copied())
+                    })
+                    .or_else(|| value.data_metrics().ok());
+                stack.push(value);
+                top_metrics = metrics;
             }
             ExprOp::Load { slot, .. } => {
                 let value = frame
@@ -111,15 +121,17 @@ pub(crate) fn eval_validated_chunk(
             ExprOp::Unary(op) => {
                 let value = stack.pop().expect("unary operand present");
                 let result = apply_unary(*op, value, line)?;
-                top_metrics = Some(scalar_metrics(&result));
+                let metrics = scalar_metrics(&result);
                 stack.push(result);
+                top_metrics = Some(metrics);
             }
             ExprOp::Binary(op) => {
                 let right = stack.pop().expect("binary right operand present");
                 let left = stack.pop().expect("binary left operand present");
                 let result = apply_binary(left, *op, right, line)?;
-                top_metrics = Some(shallow_metrics(&result));
+                let metrics = shallow_metrics(&result);
                 stack.push(result);
+                top_metrics = Some(metrics);
             }
             ExprOp::Call { function, argc } => {
                 let metrics = invoke_stack_measured(*function, stack, *argc as usize, line)?;
@@ -134,8 +146,9 @@ pub(crate) fn eval_validated_chunk(
                     frame.rng_state(*state_slot, line)?,
                     line,
                 )?;
-                top_metrics = Some(scalar_metrics(&result));
+                let metrics = scalar_metrics(&result);
                 stack.push(result);
+                top_metrics = Some(metrics);
             }
             ExprOp::Chance { state_slot } => {
                 let argument = stack.pop().expect("chance percentage present");
@@ -145,12 +158,24 @@ pub(crate) fn eval_validated_chunk(
                     frame.rng_state(*state_slot, line)?,
                     line,
                 )?;
-                top_metrics = Some(scalar_metrics(&result));
+                let metrics = scalar_metrics(&result);
                 stack.push(result);
+                top_metrics = Some(metrics);
             }
             ExprOp::Concat(count) => {
                 let at = stack.len() - *count as usize;
-                let mut text = String::new();
+                let literal_bytes = stack[at..]
+                    .iter()
+                    .filter_map(|piece| match piece {
+                        Value::String(text) => Some(text.len()),
+                        _ => None,
+                    })
+                    .try_fold(0usize, usize::checked_add)
+                    .ok_or_else(|| EvalError::new(line, "string size overflow"))?;
+                if literal_bytes > MAX_DATA_TEXT_BYTES {
+                    return Err(EvalError::new(line, "data text exceeds 1 MiB"));
+                }
+                let mut text = String::with_capacity(literal_bytes);
                 for piece in &stack[at..] {
                     piece
                         .append_to_display(&mut text, MAX_DATA_TEXT_BYTES)
@@ -189,13 +214,13 @@ pub(crate) fn eval_validated_chunk(
 
 fn finish_chunk(
     stack: &mut Vec<Value>,
-    top_metrics: Option<DataMetrics>,
+    result_metrics: Option<DataMetrics>,
     line: usize,
 ) -> Result<(Value, DataMetrics), EvalError> {
     let result = stack
         .pop()
         .ok_or_else(|| EvalError::new(line, "validated bytecode produced no value"))?;
-    let metrics = match top_metrics {
+    let metrics = match result_metrics {
         Some(metrics) => metrics,
         None => result
             .data_metrics()

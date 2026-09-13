@@ -3,6 +3,8 @@ use super::{
     MAX_DATA_DEPTH, MAX_DATA_TEXT_BYTES, MAX_DATA_VALUES, Program, QuickenedCallRef,
     QuickenedOperand, Value, eval_validated_chunk, invoke_readonly_measured, invoke_stack_measured,
 };
+use velin_compile::PreparedExpr;
+use velin_eval::apply_binary;
 
 #[inline]
 pub(super) fn cache_metrics(frame: &mut FrameState, slot: usize, metrics: DataMetrics) {
@@ -24,21 +26,24 @@ pub(super) fn eval_chunk_for(
     if let Some(call) = quickened {
         return eval_quickened_call(program, frame, expression_stack, call);
     }
+    if let Some(prepared) = metadata.prepared_expr(chunk_id) {
+        return eval_prepared_expr(program, frame, chunk_id, prepared, result_metrics);
+    }
     let chunk = program
         .chunk(chunk_id)
         .expect("program expression range was validated");
+    let constant_metrics = Some((
+        metadata.program_constant_metrics(),
+        program.chunks[chunk_id as usize].constants.start,
+    ));
     let (frame, frame_metrics) = if execution.mutates_frame {
-        let frame_metrics = execution
-            .inherits_slot_metrics
-            .then_some((frame.footprints.as_slice(), frame.depths.as_slice()));
+        let frame_metrics = Some((frame.footprints.as_slice(), frame.depths.as_slice()));
         (
             FrameAccess::Mutable(frame.values.as_mut_slice()),
             frame_metrics,
         )
     } else {
-        let frame_metrics = execution
-            .inherits_slot_metrics
-            .then_some((frame.footprints.as_slice(), frame.depths.as_slice()));
+        let frame_metrics = Some((frame.footprints.as_slice(), frame.depths.as_slice()));
         (
             FrameAccess::ReadOnly(frame.values.as_slice()),
             frame_metrics,
@@ -49,11 +54,60 @@ pub(super) fn eval_chunk_for(
         chunk,
         frame,
         frame_metrics,
+        constant_metrics,
         expression_stack,
         execution.max_stack as usize,
         result_metrics,
         |slot| slots.name(slot).unwrap_or("?").to_owned(),
     )
+}
+
+fn eval_prepared_expr(
+    program: &Program,
+    frame: &FrameState,
+    chunk_id: u32,
+    prepared: PreparedExpr,
+    result_metrics: Option<DataMetrics>,
+) -> Result<(Value, DataMetrics), EvalError> {
+    let chunk = program
+        .chunk(chunk_id)
+        .expect("prepared expression references a validated chunk");
+    let line = chunk.line as usize;
+    let (value, known_metrics) = match prepared {
+        PreparedExpr::Constant { constant } => {
+            (chunk.constants[constant as usize].clone(), result_metrics)
+        }
+        PreparedExpr::Load { slot } => {
+            let value = frame.values[slot as usize].clone().ok_or_else(|| {
+                velin_eval::unassigned(line, program.slots.name(slot).unwrap_or("?"))
+            })?;
+            (value, Some(frame.metrics(slot as usize)))
+        }
+        PreparedExpr::IntegerBinaryLiteral {
+            slot,
+            operation,
+            value,
+        } => {
+            let source = frame.values[slot as usize].clone().ok_or_else(|| {
+                velin_eval::unassigned(line, program.slots.name(slot).unwrap_or("?"))
+            })?;
+            let result = apply_binary(source, operation, Value::Integer(value), line)?;
+            let metrics = DataMetrics {
+                footprint: DataFootprint {
+                    values: 1,
+                    text_bytes: 0,
+                },
+                max_depth: 0,
+            };
+            (result, Some(metrics))
+        }
+    };
+    let metrics = known_metrics.unwrap_or_else(|| {
+        value
+            .data_metrics()
+            .expect("validated prepared expression result metrics")
+    });
+    Ok((value, metrics))
 }
 
 #[allow(clippy::option_as_ref_cloned)]

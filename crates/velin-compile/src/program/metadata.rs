@@ -1,23 +1,35 @@
 use super::{
-    ChunkExecutionMetadata, ChunkId, DataMetrics, ExecutionMetadata, ExprChunkRef, ExprOp,
-    NO_METRICS, Op, OpExecutionMetadata, Program, QUICKENED_CALL_TAG, QuickenedCall,
-    QuickenedCallRef, QuickenedOperand, UpdateOp,
+    BinaryOp, ChunkExecutionMetadata, ChunkId, DataMetrics, ExecutionMetadata, ExprChunkRef,
+    ExprOp, NO_METRICS, Op, OpExecutionMetadata, PreparedExpr, Program, QUICKENED_CALL_TAG,
+    QuickenedCall, QuickenedCallRef, QuickenedOperand, UpdateOp, Value,
 };
 
 impl ExecutionMetadata {
     pub(crate) fn new(program: &Program) -> Self {
         let mut metrics = Vec::new();
+        let program_constant_metrics = program
+            .constants
+            .iter()
+            .map(|value| {
+                value
+                    .data_metrics()
+                    .expect("validated program constant metrics")
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
         let mut quickened_calls = Vec::new();
         let mut quickened_operands = Vec::new();
+        let mut prepared = Vec::new();
         let mut expression_heights = Vec::new();
         let chunks = (0..program.chunks.len())
             .map(|id| {
                 let id = u32::try_from(id).expect("validated chunk id fits in u32");
                 let chunk = program.chunk(id).expect("validated chunk range");
+                let constant_start = program.chunks[id as usize].constants.start;
                 let execution_data = match chunk.ops {
-                    [ExprOp::Const(index)] => chunk.constants[*index as usize]
-                        .data_metrics()
-                        .ok()
+                    [ExprOp::Const(index)] => constant_start
+                        .checked_add(*index)
+                        .and_then(|index| program_constant_metrics.get(index as usize).copied())
                         .map_or(NO_METRICS, |value| push_metrics(&mut metrics, value)),
                     _ => quicken_call(
                         program,
@@ -28,6 +40,7 @@ impl ExecutionMetadata {
                     )
                     .map_or(NO_METRICS, |index| QUICKENED_CALL_TAG | index),
                 };
+                prepared.push(prepare_expression(chunk));
                 let (max_stack, mutates_frame) =
                     expression_execution_shape(chunk.ops, &mut expression_heights);
                 ChunkExecutionMetadata {
@@ -61,8 +74,10 @@ impl ExecutionMetadata {
             chunks,
             ops,
             metrics: metrics.into_boxed_slice(),
+            program_constant_metrics,
             quickened_calls: quickened_calls.into_boxed_slice(),
             quickened_operands: quickened_operands.into_boxed_slice(),
+            prepared: prepared.into_boxed_slice(),
         }
     }
 
@@ -104,6 +119,18 @@ impl ExecutionMetadata {
         Some((metadata, metrics, quickened))
     }
 
+    /// Returns a small non-serialized expression plan when one was prepared.
+    #[must_use]
+    pub fn prepared_expr(&self, id: ChunkId) -> Option<PreparedExpr> {
+        self.prepared.get(id as usize).copied().flatten()
+    }
+
+    /// Returns metrics for constants in the program-wide constant arena.
+    #[must_use]
+    pub fn program_constant_metrics(&self) -> &[DataMetrics] {
+        &self.program_constant_metrics
+    }
+
     #[must_use]
     pub fn op(&self, pc: usize) -> Option<OpExecutionMetadata> {
         self.ops.get(pc).copied()
@@ -136,6 +163,36 @@ impl ExecutionMetadata {
             operands,
             line: call.line,
         })
+    }
+}
+
+fn prepare_expression(chunk: ExprChunkRef<'_>) -> Option<PreparedExpr> {
+    match chunk.ops {
+        [ExprOp::Const(constant)] if (*constant as usize) < chunk.constants.len() => {
+            Some(PreparedExpr::Constant {
+                constant: *constant,
+            })
+        }
+        [ExprOp::Load { slot, .. }] => Some(PreparedExpr::Load { slot: *slot }),
+        [
+            ExprOp::Load { slot, .. },
+            ExprOp::Const(constant),
+            ExprOp::Binary(operation),
+        ] if matches!(
+            chunk.constants.get(*constant as usize),
+            Some(Value::Integer(_))
+        ) && !matches!(operation, BinaryOp::And | BinaryOp::Or) =>
+        {
+            let Value::Integer(value) = chunk.constants[*constant as usize] else {
+                unreachable!("integer constant was matched")
+            };
+            Some(PreparedExpr::IntegerBinaryLiteral {
+                slot: *slot,
+                operation: *operation,
+                value,
+            })
+        }
+        _ => None,
     }
 }
 

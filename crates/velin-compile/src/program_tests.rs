@@ -122,6 +122,8 @@ fn validation_precomputes_execution_metadata() {
             .text_bytes,
         3
     );
+    assert_eq!(metadata.program_constant_metrics().len(), 1);
+    assert!(metadata.prepared_expr(chunk).is_some());
 }
 
 #[test]
