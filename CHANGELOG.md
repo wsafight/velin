@@ -6,6 +6,8 @@ change source and Rust APIs between minor releases.
 
 ## Unreleased
 
+## 0.2.1 - 2026-09-14
+
 ### Fixed
 
 - Rust 1.88 Clippy accepts the bytecode metadata matcher used by the CI toolchain.
