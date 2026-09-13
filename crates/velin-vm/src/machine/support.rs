@@ -1,10 +1,10 @@
 use super::{
     Builtin, DataFootprint, DataMetrics, EvalError, ExecutionMetadata, FrameAccess, FrameState,
     MAX_DATA_DEPTH, MAX_DATA_TEXT_BYTES, MAX_DATA_VALUES, Program, QuickenedCallRef,
-    QuickenedOperand, Value, eval_validated_chunk, invoke_readonly_measured, invoke_stack_measured,
+    QuickenedOperand, Value, eval_validated_chunk, invoke_readonly_measured,
 };
 use velin_compile::PreparedExpr;
-use velin_eval::apply_binary;
+use velin_eval::{apply_binary, invoke_stack_measured_with_metrics};
 
 #[inline]
 pub(super) fn cache_metrics(frame: &mut FrameState, slot: usize, metrics: DataMetrics) {
@@ -18,13 +18,21 @@ pub(super) fn eval_chunk_for(
     metadata: &ExecutionMetadata,
     frame: &mut FrameState,
     expression_stack: &mut Vec<Value>,
+    expression_metrics: &mut Vec<DataMetrics>,
     chunk_id: u32,
 ) -> Result<(Value, DataMetrics), EvalError> {
     let (execution, result_metrics, quickened) = metadata
         .chunk_plan(chunk_id)
         .expect("validated chunk metadata");
     if let Some(call) = quickened {
-        return eval_quickened_call(program, frame, expression_stack, call);
+        return eval_quickened_call(
+            program,
+            frame,
+            expression_stack,
+            expression_metrics,
+            metadata.program_constant_metrics(),
+            call,
+        );
     }
     if let Some(prepared) = metadata.prepared_expr(chunk_id) {
         return eval_prepared_expr(program, frame, chunk_id, prepared, result_metrics);
@@ -56,6 +64,7 @@ pub(super) fn eval_chunk_for(
         frame_metrics,
         constant_metrics,
         expression_stack,
+        expression_metrics,
         execution.max_stack as usize,
         result_metrics,
         |slot| slots.name(slot).unwrap_or("?").to_owned(),
@@ -115,15 +124,21 @@ pub(super) fn eval_quickened_call(
     program: &Program,
     frame: &FrameState,
     stack: &mut Vec<Value>,
+    metrics: &mut Vec<DataMetrics>,
+    constant_metrics: &[DataMetrics],
     call: QuickenedCallRef<'_>,
 ) -> Result<(Value, DataMetrics), EvalError> {
     let line = call.line as usize;
     stack.clear();
+    metrics.clear();
     if let Some(result) = eval_quickened_readonly_call(program, frame, call)? {
         return Ok(result);
     }
     if stack.capacity() < call.operands.len() {
         stack.reserve(call.operands.len() - stack.capacity());
+    }
+    if metrics.capacity() < call.operands.len() {
+        metrics.reserve(call.operands.len() - metrics.capacity());
     }
     for operand in call.operands {
         let value = match operand {
@@ -135,14 +150,23 @@ pub(super) fn eval_quickened_call(
                     velin_eval::unassigned(line, program.slots.name(*slot).unwrap_or("?"))
                 })?,
         };
+        let value_metrics = match operand {
+            QuickenedOperand::Constant(index) => constant_metrics[*index as usize],
+            QuickenedOperand::Slot(slot) => frame.metrics(*slot as usize),
+        };
         stack.push(value);
+        metrics.push(value_metrics);
     }
-    let metrics = invoke_stack_measured(call.function, stack, call.operands.len(), line)?;
+    invoke_stack_measured_with_metrics(call.function, stack, metrics, call.operands.len(), line)?;
     let result = stack
         .pop()
         .expect("validated quickened built-in produced a result");
+    let result_metrics = metrics
+        .pop()
+        .expect("validated quickened built-in produced metrics");
     debug_assert!(stack.is_empty());
-    Ok((result, metrics))
+    debug_assert!(metrics.is_empty());
+    Ok((result, result_metrics))
 }
 
 pub(super) fn eval_quickened_readonly_call(

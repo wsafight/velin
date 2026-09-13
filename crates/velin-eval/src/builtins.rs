@@ -9,6 +9,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use velin_syntax::{Builtin, DataMetrics, Value};
 
+mod metrics;
+use metrics::{collection_metrics, push_metrics, record_metrics, scalar_metrics};
+
 /// Invokes `function` with already-evaluated `arguments`.
 ///
 /// # Errors
@@ -59,6 +62,63 @@ pub fn invoke_stack_measured(
     if !function.accepts(argc) || stack.len() < argc {
         return Err(execution(line, "invalid built-in argument count"));
     }
+    let result = invoke_stack(function, stack, argc, line)?;
+    let metrics = result
+        .data_metrics()
+        .map_err(|error| execution(line, error))?;
+    stack.push(result);
+    Ok(metrics)
+}
+
+/// Invokes a built-in while reusing metrics that already belong to its
+/// operands. The value stack and metrics stack must contain the same number of
+/// entries before the call. Collection constructors and `push` can therefore
+/// avoid walking their freshly-created result a second time.
+///
+/// Operations whose result shape depends on searching or replacing an
+/// arbitrary child use the regular measurement fallback. This keeps the
+/// optimization local and leaves all value semantics in [`invoke_stack`].
+///
+/// # Errors
+/// Returns the same failures as [`invoke_stack_measured`].
+pub fn invoke_stack_measured_with_metrics(
+    function: Builtin,
+    stack: &mut Vec<Value>,
+    metrics: &mut Vec<DataMetrics>,
+    argc: usize,
+    line: usize,
+) -> Result<DataMetrics, EvalError> {
+    if !function.accepts(argc) || stack.len() < argc || metrics.len() < argc {
+        return Err(execution(line, "invalid built-in argument count"));
+    }
+    let at = stack.len() - argc;
+    let known_metrics = match function {
+        Builtin::List => Some(collection_metrics(&metrics[at..], line)),
+        Builtin::Record => record_metrics(&stack[at..], &metrics[at..], line),
+        Builtin::Push => push_metrics(&stack[at..], &metrics[at..], line),
+        Builtin::Len | Builtin::Contains => Some(Ok(scalar_metrics())),
+        Builtin::Get | Builtin::Put | Builtin::Remove | Builtin::Random | Builtin::Chance => None,
+    };
+    let result = invoke_stack(function, stack, argc, line)?;
+    metrics.truncate(at);
+    let result_metrics = if let Some(known) = known_metrics.transpose()? {
+        known
+    } else {
+        result
+            .data_metrics()
+            .map_err(|error| execution(line, error))?
+    };
+    stack.push(result);
+    metrics.push(result_metrics);
+    Ok(result_metrics)
+}
+
+fn invoke_stack(
+    function: Builtin,
+    stack: &mut Vec<Value>,
+    argc: usize,
+    line: usize,
+) -> Result<Value, EvalError> {
     let result = match function {
         Builtin::List => construct_list(stack, argc),
         Builtin::Record => construct_record(stack, argc, line)?,
@@ -95,11 +155,7 @@ pub fn invoke_stack_measured(
             ));
         }
     };
-    let metrics = result
-        .data_metrics()
-        .map_err(|error| execution(line, error))?;
-    stack.push(result);
-    Ok(metrics)
+    Ok(result)
 }
 
 /// Invokes a built-in that only reads its arguments without cloning them.

@@ -11,10 +11,10 @@ use self::support::{cache_metrics, checked_total};
 use crate::chunk::{FrameAccess, eval_validated_chunk};
 use std::sync::Arc;
 use velin_compile::{
-    ExecutionMetadata, InitialFrame, Op, Program, ProgramValidationError, QuickenedCallRef,
+    ExecutionMetadata, HostOp, InitialFrame, Op, Program, ProgramValidationError, QuickenedCallRef,
     QuickenedOperand, UpdateOp, ValidatedProgram,
 };
-use velin_eval::{EvalError, invoke_readonly_measured, invoke_stack_measured};
+use velin_eval::{EvalError, invoke_readonly_measured};
 use velin_syntax::{
     BinaryOp, Builtin, DataFootprint, DataMetrics, MAX_DATA_DEPTH, MAX_DATA_TEXT_BYTES,
     MAX_DATA_VALUES, Value,
@@ -51,6 +51,15 @@ pub enum Yield {
     Finished,
 }
 
+/// A side-effect-only host command collected by [`Machine::run_effect_batch`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostEffect {
+    /// The opaque host command identifier supplied by the compiled program.
+    pub host_id: u32,
+    /// Evaluated arguments owned by the host until it finishes the effect.
+    pub values: Vec<Value>,
+}
+
 /// Why a host-provided variable could not be installed in a machine frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SetVariableError {
@@ -82,6 +91,7 @@ pub struct Machine {
     frame: FrameState,
     frame_total: DataFootprint,
     expression_stack: Vec<Value>,
+    expression_metrics: Vec<DataMetrics>,
     pc: usize,
     /// The host effect execution is currently waiting to resume from.
     pending_host: Option<PendingHost>,
@@ -208,6 +218,7 @@ impl Machine {
             frame,
             frame_total,
             expression_stack: Vec::new(),
+            expression_metrics: Vec::new(),
             pc: 0,
             pending_host: None,
             finished: false,
@@ -238,6 +249,7 @@ impl Machine {
             },
             frame_total,
             expression_stack: Vec::new(),
+            expression_metrics: Vec::new(),
             pc: 0,
             pending_host: None,
             finished: false,
@@ -304,6 +316,7 @@ impl Machine {
     }
 }
 
+mod batch;
 mod execution;
 mod support;
 mod updates;
@@ -315,3 +328,7 @@ mod tests;
 #[cfg(test)]
 #[path = "restart_tests.rs"]
 mod restart_tests;
+
+#[cfg(test)]
+#[path = "batch_tests.rs"]
+mod batch_tests;

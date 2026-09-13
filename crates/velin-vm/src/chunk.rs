@@ -8,7 +8,8 @@
 
 use velin_compile::{ExprChunk, ExprChunkRef, ExprOp};
 use velin_eval::{
-    EvalError, apply_binary, apply_unary, invoke_random, invoke_stack_measured, unassigned,
+    EvalError, apply_binary, apply_unary, invoke_random, invoke_stack_measured_with_metrics,
+    unassigned,
 };
 use velin_syntax::{BinaryOp, Builtin, DataFootprint, DataMetrics, MAX_DATA_TEXT_BYTES, Value};
 
@@ -57,12 +58,14 @@ pub fn eval_chunk(
         EvalError::new(chunk.line as usize, format!("invalid bytecode: {error}"))
     })?;
     let mut stack = Vec::new();
+    let mut metrics = Vec::new();
     eval_validated_chunk(
         chunk.as_chunk_ref(),
         FrameAccess::Mutable(frame),
         None,
         None,
         &mut stack,
+        &mut metrics,
         chunk.ops.len(),
         None,
         slot_name,
@@ -78,22 +81,26 @@ pub(crate) fn eval_validated_chunk(
     frame_metrics: Option<(&[DataFootprint], &[u8])>,
     constant_metrics: Option<(&[DataMetrics], u32)>,
     stack: &mut Vec<Value>,
+    metrics: &mut Vec<DataMetrics>,
     max_stack: usize,
     result_metrics: Option<DataMetrics>,
     slot_name: impl Fn(u32) -> String,
 ) -> Result<(Value, DataMetrics), EvalError> {
     let line = chunk.line as usize;
     stack.clear();
+    metrics.clear();
     if stack.capacity() < max_stack {
         stack.reserve(max_stack - stack.capacity());
     }
+    if metrics.capacity() < max_stack {
+        metrics.reserve(max_stack - metrics.capacity());
+    }
     let mut pc = 0;
-    let mut top_metrics = None;
     while pc < chunk.ops.len() {
         match &chunk.ops[pc] {
             ExprOp::Const(index) => {
                 let value = chunk.constants[*index as usize].clone();
-                let metrics = constant_metrics
+                let value_metrics = constant_metrics
                     .and_then(|(all, start)| {
                         start
                             .checked_add(*index)
@@ -101,7 +108,7 @@ pub(crate) fn eval_validated_chunk(
                     })
                     .or_else(|| value.data_metrics().ok());
                 stack.push(value);
-                top_metrics = metrics;
+                metrics.push(value_metrics.expect("validated constant metrics"));
             }
             ExprOp::Load { slot, .. } => {
                 let value = frame
@@ -110,57 +117,72 @@ pub(crate) fn eval_validated_chunk(
                     .and_then(Option::as_ref)
                     .cloned()
                     .ok_or_else(|| unassigned(line, &slot_name(*slot)))?;
-                stack.push(value);
-                top_metrics = frame_metrics.and_then(|(footprints, depths)| {
-                    Some(DataMetrics {
-                        footprint: *footprints.get(*slot as usize)?,
-                        max_depth: usize::from(*depths.get(*slot as usize)?),
+                let value_metrics = frame_metrics
+                    .and_then(|(footprints, depths)| {
+                        Some(DataMetrics {
+                            footprint: *footprints.get(*slot as usize)?,
+                            max_depth: usize::from(*depths.get(*slot as usize)?),
+                        })
                     })
-                });
+                    .or_else(|| value.data_metrics().ok())
+                    .expect("validated frame metrics");
+                stack.push(value);
+                metrics.push(value_metrics);
             }
             ExprOp::Unary(op) => {
                 let value = stack.pop().expect("unary operand present");
+                metrics.pop().expect("unary operand metrics present");
                 let result = apply_unary(*op, value, line)?;
-                let metrics = scalar_metrics(&result);
+                let result_metrics = scalar_metrics(&result);
                 stack.push(result);
-                top_metrics = Some(metrics);
+                metrics.push(result_metrics);
             }
             ExprOp::Binary(op) => {
                 let right = stack.pop().expect("binary right operand present");
                 let left = stack.pop().expect("binary left operand present");
+                metrics.pop().expect("binary right metrics present");
+                metrics.pop().expect("binary left metrics present");
                 let result = apply_binary(left, *op, right, line)?;
-                let metrics = shallow_metrics(&result);
+                let result_metrics = shallow_metrics(&result);
                 stack.push(result);
-                top_metrics = Some(metrics);
+                metrics.push(result_metrics);
             }
             ExprOp::Call { function, argc } => {
-                let metrics = invoke_stack_measured(*function, stack, *argc as usize, line)?;
-                top_metrics = Some(metrics);
+                invoke_stack_measured_with_metrics(
+                    *function,
+                    stack,
+                    metrics,
+                    *argc as usize,
+                    line,
+                )?;
             }
             ExprOp::Random { state_slot } => {
                 let high = stack.pop().expect("random upper bound present");
                 let low = stack.pop().expect("random lower bound present");
+                metrics.pop().expect("random upper metrics present");
+                metrics.pop().expect("random lower metrics present");
                 let result = invoke_random(
                     Builtin::Random,
                     &[low, high],
                     frame.rng_state(*state_slot, line)?,
                     line,
                 )?;
-                let metrics = scalar_metrics(&result);
+                let result_metrics = scalar_metrics(&result);
                 stack.push(result);
-                top_metrics = Some(metrics);
+                metrics.push(result_metrics);
             }
             ExprOp::Chance { state_slot } => {
                 let argument = stack.pop().expect("chance percentage present");
+                metrics.pop().expect("chance argument metrics present");
                 let result = invoke_random(
                     Builtin::Chance,
                     &[argument],
                     frame.rng_state(*state_slot, line)?,
                     line,
                 )?;
-                let metrics = scalar_metrics(&result);
+                let result_metrics = scalar_metrics(&result);
                 stack.push(result);
-                top_metrics = Some(metrics);
+                metrics.push(result_metrics);
             }
             ExprOp::Concat(count) => {
                 let at = stack.len() - *count as usize;
@@ -182,9 +204,10 @@ pub(crate) fn eval_validated_chunk(
                         .map_err(|error| EvalError::new(line, error))?;
                 }
                 stack.truncate(at);
-                let metrics = string_metrics(&text);
+                metrics.truncate(at);
+                let result_metrics = string_metrics(&text);
                 stack.push(Value::String(text.into()));
-                top_metrics = Some(metrics);
+                metrics.push(result_metrics);
             }
             ExprOp::JumpIfFalse(target) => {
                 if stack.last() == Some(&Value::Boolean(false)) {
@@ -209,24 +232,26 @@ pub(crate) fn eval_validated_chunk(
         }
         pc += 1;
     }
-    finish_chunk(stack, top_metrics.or(result_metrics), line)
+    finish_chunk(stack, metrics, result_metrics, line)
 }
 
 fn finish_chunk(
     stack: &mut Vec<Value>,
+    metrics: &mut Vec<DataMetrics>,
     result_metrics: Option<DataMetrics>,
     line: usize,
 ) -> Result<(Value, DataMetrics), EvalError> {
     let result = stack
         .pop()
         .ok_or_else(|| EvalError::new(line, "validated bytecode produced no value"))?;
-    let metrics = match result_metrics {
+    let stack_metrics = metrics.pop();
+    let result_metrics = match result_metrics.or(stack_metrics) {
         Some(metrics) => metrics,
         None => result
             .data_metrics()
             .map_err(|error| EvalError::new(line, error))?,
     };
-    Ok((result, metrics))
+    Ok((result, result_metrics))
 }
 
 fn scalar_metrics(value: &Value) -> DataMetrics {

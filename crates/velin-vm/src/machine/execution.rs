@@ -1,8 +1,9 @@
 use super::support::{cache_metrics, checked_total, eval_chunk_for};
 use super::{
-    BinaryOp, DataFootprint, DataMetrics, EvalError, InitialFrame, MAX_HOST_PAYLOAD_TEXT_BYTES,
-    MAX_HOST_PAYLOAD_VALUES, MAX_IMMEDIATE_STEPS, MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES,
-    Machine, Op, PendingHost, UpdateOp, Value, Yield,
+    BinaryOp, DataFootprint, DataMetrics, EvalError, ExecutionMetadata, FrameState, HostOp,
+    InitialFrame, MAX_HOST_PAYLOAD_TEXT_BYTES, MAX_HOST_PAYLOAD_VALUES, MAX_IMMEDIATE_STEPS,
+    MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES, Machine, Op, PendingHost, Program, UpdateOp,
+    Value, Yield,
 };
 
 impl Machine {
@@ -64,6 +65,7 @@ impl Machine {
             );
         }
         self.expression_stack.clear();
+        self.expression_metrics.clear();
         self.pc = 0;
         self.pending_host = None;
         self.finished = false;
@@ -87,6 +89,7 @@ impl Machine {
                     &self.metadata,
                     &mut self.frame,
                     &mut self.expression_stack,
+                    &mut self.expression_metrics,
                     rhs,
                 )?;
                 self.update_add(slot, rhs, line)
@@ -98,6 +101,7 @@ impl Machine {
                     &self.metadata,
                     &mut self.frame,
                     &mut self.expression_stack,
+                    &mut self.expression_metrics,
                     value,
                 )?;
                 self.update_push(slot, value, metrics, line)
@@ -108,6 +112,7 @@ impl Machine {
                     &self.metadata,
                     &mut self.frame,
                     &mut self.expression_stack,
+                    &mut self.expression_metrics,
                     key,
                 )?;
                 let (value, metrics) = eval_chunk_for(
@@ -115,6 +120,7 @@ impl Machine {
                     &self.metadata,
                     &mut self.frame,
                     &mut self.expression_stack,
+                    &mut self.expression_metrics,
                     value,
                 )?;
                 self.update_put(slot, key, value, metrics, line)
@@ -125,6 +131,7 @@ impl Machine {
                     &self.metadata,
                     &mut self.frame,
                     &mut self.expression_stack,
+                    &mut self.expression_metrics,
                     key,
                 )?;
                 self.update_remove(slot, key, line)
@@ -275,7 +282,7 @@ impl Machine {
     /// Executes one op. Returns `Some(Yield::Host)` if it yielded, `None`
     /// otherwise. Advances `pc` accordingly.
     #[allow(clippy::too_many_lines)]
-    fn step(&mut self) -> Result<Option<Yield>, EvalError> {
+    pub(super) fn step(&mut self) -> Result<Option<Yield>, EvalError> {
         match &self.program.ops[self.pc] {
             Op::Set { slot, value } => {
                 let slot = *slot;
@@ -285,6 +292,7 @@ impl Machine {
                     &self.metadata,
                     &mut self.frame,
                     &mut self.expression_stack,
+                    &mut self.expression_metrics,
                     value,
                 )?;
                 let line = self.program.chunks[value as usize].line as usize;
@@ -339,6 +347,7 @@ impl Machine {
                     &self.metadata,
                     &mut self.frame,
                     &mut self.expression_stack,
+                    &mut self.expression_metrics,
                     *condition,
                 )?
                 .0;
@@ -376,26 +385,14 @@ impl Machine {
                 let host_id = host.host_id;
                 let bind = host.bind;
                 let line = host.line as usize;
-                let mut values = Vec::with_capacity(host.args.len());
-                let mut payload = DataFootprint::default();
-                for chunk in host.args.iter().copied() {
-                    let (value, metrics) = eval_chunk_for(
-                        &self.program,
-                        &self.metadata,
-                        &mut self.frame,
-                        &mut self.expression_stack,
-                        chunk,
-                    )?;
-                    payload = checked_total(
-                        payload,
-                        metrics.footprint,
-                        MAX_HOST_PAYLOAD_VALUES,
-                        MAX_HOST_PAYLOAD_TEXT_BYTES,
-                        "host payload",
-                    )
-                    .map_err(|error| EvalError::new(line, error))?;
-                    values.push(value);
-                }
+                let values = eval_host_args(
+                    &self.program,
+                    &self.metadata,
+                    &mut self.frame,
+                    &mut self.expression_stack,
+                    &mut self.expression_metrics,
+                    host,
+                )?;
                 self.pc += 1; // resume past the effect, never re-run it
                 self.pending_host = Some(PendingHost { bind, line });
                 return Ok(Some(Yield::Host { host_id, values }));
@@ -455,9 +452,42 @@ impl Machine {
         Ok(())
     }
 
-    fn current_line(&self) -> usize {
+    pub(super) fn current_line(&self) -> usize {
         self.metadata
             .op(self.pc)
             .map_or(0, |metadata| metadata.line as usize)
     }
+}
+
+pub(super) fn eval_host_args(
+    program: &Program,
+    metadata: &ExecutionMetadata,
+    frame: &mut FrameState,
+    expression_stack: &mut Vec<Value>,
+    expression_metrics: &mut Vec<DataMetrics>,
+    host: &HostOp,
+) -> Result<Vec<Value>, EvalError> {
+    let line = host.line as usize;
+    let mut values = Vec::with_capacity(host.args.len());
+    let mut payload = DataFootprint::default();
+    for chunk in host.args.iter().copied() {
+        let (value, metrics) = eval_chunk_for(
+            program,
+            metadata,
+            frame,
+            expression_stack,
+            expression_metrics,
+            chunk,
+        )?;
+        payload = checked_total(
+            payload,
+            metrics.footprint,
+            MAX_HOST_PAYLOAD_VALUES,
+            MAX_HOST_PAYLOAD_TEXT_BYTES,
+            "host payload",
+        )
+        .map_err(|error| EvalError::new(line, error))?;
+        values.push(value);
+    }
+    Ok(values)
 }

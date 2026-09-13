@@ -260,6 +260,28 @@ fn readonly_invocation_matches_owned_builtin_results() {
 }
 
 #[test]
+fn metric_aware_collection_calls_match_value_metrics() {
+    let mut stack = vec![Value::Integer(1), Value::String("xy".into())];
+    let mut metrics = stack
+        .iter()
+        .map(|value| value.data_metrics().unwrap())
+        .collect();
+    let list_metrics =
+        invoke_stack_measured_with_metrics(Builtin::List, &mut stack, &mut metrics, 2, 1).unwrap();
+    assert_eq!(list_metrics, stack[0].data_metrics().unwrap());
+    assert_eq!(metrics, vec![list_metrics]);
+
+    let child = Value::List(Arc::new(vec![Value::Boolean(true)]));
+    let child_metrics = child.data_metrics().unwrap();
+    stack.push(child);
+    metrics.push(child_metrics);
+    let pushed_metrics =
+        invoke_stack_measured_with_metrics(Builtin::Push, &mut stack, &mut metrics, 2, 1).unwrap();
+    assert_eq!(pushed_metrics, stack[0].data_metrics().unwrap());
+    assert_eq!(metrics, vec![pushed_metrics]);
+}
+
+#[test]
 fn record_edits_and_random_arity_errors() {
     let record = invoke(
         Builtin::Record,
