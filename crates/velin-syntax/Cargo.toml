@@ -10,8 +10,12 @@ homepage.workspace = true
 documentation.workspace = true
 description = "Core language types (values, expressions, diagnostics) for the Velin embeddable scripting language"
 
+[features]
+default = ["serde"]
+serde = ["dep:serde"]
+
 [dependencies]
-serde = { workspace = true, features = ["derive", "rc"] }
+serde = { workspace = true, features = ["derive", "rc"], optional = true }
 
 [lints]
 workspace = true

@@ -11,11 +11,11 @@ documentation.workspace = true
 description = "Velin language front-end: indentation-sensitive statement syntax lowering to the Velin bytecode program"
 
 [dependencies]
-velin-syntax.workspace = true
+velin-syntax = { workspace = true, features = ["serde"] }
 velin-parse.workspace = true
 velin-eval.workspace = true
 velin-compile.workspace = true
-velin-bytecode.workspace = true
+velin-bytecode = { workspace = true, features = ["serde"] }
 velin-check.workspace = true
 serde.workspace = true
 serde_json.workspace = true

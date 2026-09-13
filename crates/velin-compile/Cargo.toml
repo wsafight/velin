@@ -10,10 +10,14 @@ homepage.workspace = true
 documentation.workspace = true
 description = "Bytecode compiler: lowers Velin expressions and programs to a flat, slot-addressed IR"
 
+[features]
+default = ["serde"]
+serde = ["velin-syntax/serde", "velin-bytecode/serde"]
+
 [dependencies]
-velin-syntax.workspace = true
-velin-eval.workspace = true
-velin-bytecode.workspace = true
+velin-syntax = { workspace = true, default-features = false }
+velin-eval = { workspace = true, default-features = false }
+velin-bytecode = { workspace = true, default-features = false }
 
 [dev-dependencies]
 velin-parse.workspace = true

@@ -1,3 +1,4 @@
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use std::sync::Arc;
@@ -5,7 +6,8 @@ use std::sync::Arc;
 pub use crate::data::Builtin;
 
 /// A source location: file, 1-based line, 1-based column.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Span {
     pub source: SharedString,
     pub line: usize,
@@ -29,7 +31,8 @@ impl Span {
 }
 
 /// A pure, host-agnostic expression tree.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     /// An expression node paired with its exact source position. Parsers wrap
     /// every produced node; hand-built expressions may remain unspanned.
@@ -102,7 +105,8 @@ impl Expr {
 }
 
 /// One piece of an interpolated string: either fixed text or an expression hole.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StrPart {
     Literal(String),
     Hole(Box<Expr>),
@@ -112,8 +116,9 @@ pub enum StrPart {
 ///
 /// The wrapper keeps the serialized representation as a string while allowing the VM
 /// to mutate a uniquely owned string in place for `text = text + suffix`.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(transparent)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SharedString(Arc<String>);
 
 impl SharedString {
@@ -177,8 +182,9 @@ impl From<&str> for SharedString {
 ///
 /// There is deliberately no floating-point variant: the language is meant to
 /// be fully deterministic and reproducible across platforms.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(untagged))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
     Integer(i64),
     Boolean(bool),
@@ -285,13 +291,15 @@ fn push_display(output: &mut String, text: &str, limit: Option<usize>) -> Result
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
     Negate,
     Not,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,
     Subtract,

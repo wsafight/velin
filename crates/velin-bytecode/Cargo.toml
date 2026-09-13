@@ -10,9 +10,13 @@ homepage.workspace = true
 documentation.workspace = true
 description = "Validated bytecode model and execution plans for Velin"
 
+[features]
+default = ["serde"]
+serde = ["dep:serde", "velin-syntax/serde"]
+
 [dependencies]
-velin-syntax.workspace = true
-serde = { workspace = true, features = ["derive", "rc"] }
+velin-syntax = { workspace = true, default-features = false }
+serde = { workspace = true, features = ["derive", "rc"], optional = true }
 
 [lints]
 workspace = true

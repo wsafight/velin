@@ -12,6 +12,7 @@
 //! by the opaque [`Op::Host`] opcode, which the VM hands back to the embedder
 //! without interpreting.
 
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use velin_syntax::{BinaryOp, Builtin, UnaryOp, Value};
 
@@ -20,7 +21,8 @@ use velin_syntax::{BinaryOp, Builtin, UnaryOp, Value};
 /// Operands are pushed onto an operand stack; each op consumes its inputs from
 /// the top of the stack and pushes its result. A well-formed chunk always
 /// leaves exactly one value on the stack.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprOp {
     /// Push a constant from the chunk's constant pool.
     Const(u32),
@@ -65,7 +67,8 @@ pub enum ExprOp {
 /// A compiled expression: a constant pool plus a flat op stream.
 ///
 /// `line` is the 1-based source line, carried for error reporting only.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExprChunk {
     pub ops: Vec<ExprOp>,
     pub constants: Vec<Value>,

@@ -11,13 +11,13 @@ documentation.workspace = true
 description = "Deterministic bytecode virtual machine for Velin, with host-effect yielding"
 
 [dependencies]
-velin-syntax.workspace = true
-velin-eval.workspace = true
-velin-bytecode.workspace = true
+velin-syntax = { workspace = true, default-features = false }
+velin-eval = { workspace = true, default-features = false }
+velin-bytecode = { workspace = true, default-features = false }
 
 [dev-dependencies]
 velin-parse.workspace = true
-velin-compile.workspace = true
+velin-compile = { workspace = true, features = ["serde"] }
 
 [lints]
 workspace = true

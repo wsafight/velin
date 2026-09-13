@@ -11,7 +11,7 @@ documentation.workspace = true
 description = "Expression lexer and Pratt parser (source text -> Expr) for Velin"
 
 [dependencies]
-velin-syntax.workspace = true
+velin-syntax = { workspace = true, default-features = false }
 
 [lints]
 workspace = true

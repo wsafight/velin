@@ -9,11 +9,13 @@
 
 use crate::bytecode::{ExprChunk, ExprChunkRef, ExprOp};
 use crate::slots::SlotTable;
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 use velin_syntax::{BinaryOp, Builtin, DataMetrics, UnaryOp, Value};
 
 mod metadata;
+#[cfg(feature = "serde")]
 mod wire;
 
 /// An index into [`Program::chunks`].
@@ -22,7 +24,8 @@ pub type ChunkId = u32;
 pub type Pc = u32;
 
 /// Ranges for one expression stored in [`Program`]'s contiguous arenas.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProgramChunk {
     pub ops: Range<u32>,
     pub constants: Range<u32>,
@@ -35,7 +38,8 @@ pub struct ProgramChunk {
 /// the assignment target itself, such as `items = push(items, value)`. Keeping
 /// the remaining operands as chunks lets the VM evaluate them before taking
 /// ownership of the destination, so failures leave the old value untouched.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateOp {
     Add { rhs: ChunkId },
     AddInteger { value: i64 },
@@ -49,7 +53,8 @@ pub enum UpdateOp {
 /// Host instructions are comparatively rare and stop the VM. Keeping their
 /// variable-sized payload behind a pointer prevents every hot control-flow
 /// instruction from being sized like a host call.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostOp {
     pub host_id: u32,
     pub args: Box<[ChunkId]>,
@@ -79,7 +84,8 @@ impl HostOp {
 }
 
 /// A control-flow instruction.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
     /// Evaluate a chunk and store the result into a frame slot.
     Set { slot: u32, value: ChunkId },

@@ -11,7 +11,7 @@ documentation.workspace = true
 description = "Deterministic expression evaluator and built-in functions for Velin"
 
 [dependencies]
-velin-syntax.workspace = true
+velin-syntax = { workspace = true, default-features = false }
 
 [dev-dependencies]
 velin-parse.workspace = true

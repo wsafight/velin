@@ -1,4 +1,5 @@
 use crate::expr::Value;
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// Maximum number of values in one validated value tree, including containers.
@@ -34,8 +35,9 @@ pub struct DataMetrics {
 /// These are deterministic helpers with no host, I/O, network, or foreign-code
 /// capability. `Random` and `Chance` are stateful, but their state is threaded
 /// explicitly by the evaluator/VM rather than hidden in a global generator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Builtin {
     List,
     Record,
