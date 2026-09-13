@@ -6,6 +6,8 @@ change source and Rust APIs between minor releases.
 
 ## Unreleased
 
+## 0.1.2 - 2026-09-13
+
 ### Added
 
 - Aggregate VM frame and host-payload data budgets.
@@ -17,6 +19,12 @@ change source and Rust APIs between minor releases.
 - Web Worker execution, timeout/stop controls, and strict reply validation in the Playground.
 - Cross-platform CLI/LSP archives and platform VSIX packaging in the release workflow.
 - Property tests for parser robustness, deserialization validation, and evaluator/VM agreement.
+- A standalone `velin-bytecode` crate for embedding validated bytecode without the compiler.
+
+### Changed
+
+- Runtime bytecode ownership is separated from compilation and checking dependencies.
+- Release builds use ThinLTO and strip symbols to reduce embedded binary size.
 
 ### Fixed
 
