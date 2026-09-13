@@ -1,8 +1,8 @@
 use super::{
     BinaryOp, ChunkExecutionMetadata, ChunkId, DataMetrics, ExecutionMetadata, ExprChunkRef,
-    ExprOp, NO_METRICS, Op, OpExecutionMetadata, PreparedExpr, Program, QUICKENED_CALL_TAG,
-    QuickenedCall, QuickenedCallRef, QuickenedOperand, RegisterExpr, RegisterOp, RegisterType,
-    UpdateOp, Value,
+    ExprOp, NO_METRICS, NO_PLAN, Op, OpExecutionMetadata, PreparedExpr, Program,
+    QUICKENED_CALL_TAG, QuickenedCall, QuickenedCallRef, QuickenedOperand, RegisterExpr,
+    RegisterOp, RegisterType, UpdateOp, Value,
 };
 
 impl ExecutionMetadata {
@@ -20,8 +20,10 @@ impl ExecutionMetadata {
             .into_boxed_slice();
         let mut quickened_calls = Vec::new();
         let mut quickened_operands = Vec::new();
-        let mut prepared = Vec::new();
-        let mut registers = Vec::new();
+        let mut prepared = Vec::with_capacity(program.chunks.len());
+        let mut prepared_values = Vec::new();
+        let mut registers = Vec::with_capacity(program.chunks.len());
+        let mut register_values = Vec::new();
         let mut expression_heights = Vec::new();
         let chunks = (0..program.chunks.len())
             .map(|id| {
@@ -42,8 +44,18 @@ impl ExecutionMetadata {
                     )
                     .map_or(NO_METRICS, |index| QUICKENED_CALL_TAG | index),
                 };
-                prepared.push(prepare_expression(chunk));
-                registers.push(prepare_register_expression(chunk));
+                prepared.push(prepare_expression(chunk).map_or(NO_PLAN, |plan| {
+                    let index = u32::try_from(prepared_values.len())
+                        .expect("prepared plan count fits in u32");
+                    prepared_values.push(plan);
+                    index
+                }));
+                registers.push(prepare_register_expression(chunk).map_or(NO_PLAN, |plan| {
+                    let index = u32::try_from(register_values.len())
+                        .expect("register plan count fits in u32");
+                    register_values.push(plan);
+                    index
+                }));
                 let (max_stack, mutates_frame) =
                     expression_execution_shape(chunk.ops, &mut expression_heights);
                 ChunkExecutionMetadata {
@@ -81,7 +93,9 @@ impl ExecutionMetadata {
             quickened_calls: quickened_calls.into_boxed_slice(),
             quickened_operands: quickened_operands.into_boxed_slice(),
             prepared: prepared.into_boxed_slice(),
+            prepared_values: prepared_values.into_boxed_slice(),
             registers: registers.into_boxed_slice(),
+            register_values: register_values.into_boxed_slice(),
         }
     }
 
@@ -126,13 +140,19 @@ impl ExecutionMetadata {
     /// Returns a small non-serialized expression plan when one was prepared.
     #[must_use]
     pub fn prepared_expr(&self, id: ChunkId) -> Option<PreparedExpr> {
-        self.prepared.get(id as usize).copied().flatten()
+        let index = *self.prepared.get(id as usize)?;
+        (index != NO_PLAN)
+            .then(|| self.prepared_values.get(index as usize).copied())
+            .flatten()
     }
 
     /// Returns a non-serialized register plan when one was prepared.
     #[must_use]
     pub fn register_expr(&self, id: ChunkId) -> Option<&RegisterExpr> {
-        self.registers.get(id as usize)?.as_ref()
+        let index = *self.registers.get(id as usize)?;
+        (index != NO_PLAN)
+            .then(|| self.register_values.get(index as usize))
+            .flatten()
     }
 
     /// Returns metrics for constants in the program-wide constant arena.

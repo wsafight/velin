@@ -245,8 +245,10 @@ pub struct ExecutionMetadata {
     program_constant_metrics: Box<[DataMetrics]>,
     quickened_calls: Box<[QuickenedCall]>,
     quickened_operands: Box<[QuickenedOperand]>,
-    prepared: Box<[Option<PreparedExpr>]>,
-    registers: Box<[Option<RegisterExpr>]>,
+    prepared: Box<[u32]>,
+    prepared_values: Box<[PreparedExpr]>,
+    registers: Box<[u32]>,
+    register_values: Box<[RegisterExpr]>,
 }
 
 #[derive(Debug)]
@@ -365,6 +367,7 @@ pub struct OpExecutionMetadata {
 
 const NO_METRICS: u32 = u32::MAX;
 const QUICKENED_CALL_TAG: u32 = 1 << 31;
+const NO_PLAN: u32 = u32::MAX;
 
 impl Program {
     /// Packs independently allocated expression chunks into contiguous arenas.
