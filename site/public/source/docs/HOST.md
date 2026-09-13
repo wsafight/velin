@@ -38,6 +38,9 @@ Consecutive unbound `perform` commands can be collected with
 `Machine::run_effect_batch_reusable` or `ScriptRunner::run_effect_batch`. The
 VM preserves source order and stops at a bound effect, an error, completion, or
 the batch limit; it never crosses a host barrier that needs `resume`.
+If an error occurs after one or more effects have been collected, the batch
+returns that valid prefix first; the next execution call reports the pending
+error. Restarting the machine clears the pending error.
 
 The batch API only bounds VM work. The embedder owns the persistent queue and
 consumer pacing; `HostEventQueue` can enforce event-count, value-count, and text

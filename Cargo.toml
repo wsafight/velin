@@ -17,7 +17,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -33,15 +33,15 @@ lto = "thin"
 strip = "symbols"
 
 [workspace.dependencies]
-velin-syntax = { version = "0.1.2", path = "crates/velin-syntax", default-features = false }
-velin-parse = { version = "0.1.2", path = "crates/velin-parse", default-features = false }
-velin-eval = { version = "0.1.2", path = "crates/velin-eval", default-features = false }
-velin-bytecode = { version = "0.1.2", path = "crates/velin-bytecode", default-features = false }
-velin-compile = { version = "0.1.2", path = "crates/velin-compile", default-features = false }
-velin-vm = { version = "0.1.2", path = "crates/velin-vm", default-features = false }
-velin-check = { version = "0.1.2", path = "crates/velin-check", default-features = false }
-velin-lang = { version = "0.1.2", path = "crates/velin-lang", default-features = false }
-velin = { version = "0.1.2", path = "crates/velin", default-features = false }
+velin-syntax = { version = "0.2.0", path = "crates/velin-syntax", default-features = false }
+velin-parse = { version = "0.2.0", path = "crates/velin-parse", default-features = false }
+velin-eval = { version = "0.2.0", path = "crates/velin-eval", default-features = false }
+velin-bytecode = { version = "0.2.0", path = "crates/velin-bytecode", default-features = false }
+velin-compile = { version = "0.2.0", path = "crates/velin-compile", default-features = false }
+velin-vm = { version = "0.2.0", path = "crates/velin-vm", default-features = false }
+velin-check = { version = "0.2.0", path = "crates/velin-check", default-features = false }
+velin-lang = { version = "0.2.0", path = "crates/velin-lang", default-features = false }
+velin = { version = "0.2.0", path = "crates/velin", default-features = false }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 

@@ -6,11 +6,25 @@ change source and Rust APIs between minor releases.
 
 ## Unreleased
 
+## 0.2.0 - 2026-09-14
+
+### Added
+
+- Runtime execution images can omit slot names while preserving frame width and RNG state; optional debug sidecars and anonymous execution profiles support small embedders.
+- Stable C runtime bindings, a runtime-only WebAssembly entrypoint, binary artifacts, and cached machine restarts are available for embedding.
+- Bounded host-effect batching, aggregate machine-state budgets, host-payload budgets, and conservative typed SSA optimizations are included.
+
 ### Changed
 
 - Expression bytecode now uses explicit registers for arithmetic, short-circuit control flow, built-ins, interpolation, and random operations; the VM no longer maintains an operand-stack fallback.
 - Built-in evaluation accepts owned argument arrays directly; the legacy `invoke_stack_*` entry points were removed.
 - Artifact version 3 stores the register bytecode format and rejects earlier artifacts at the version boundary.
+
+### Fixed
+
+- Batch limits no longer preallocate beyond the immediate-step budget.
+- Batches return already collected valid effects before reporting a later evaluation or host-contract error.
+- Manual batch Host operations are included in execution profiles, and reseeding refreshes frame metrics.
 
 ## 0.1.2 - 2026-09-13
 

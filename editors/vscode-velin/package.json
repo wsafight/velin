@@ -2,7 +2,7 @@
   "name": "vscode-velin",
   "displayName": "Velin",
   "description": "Syntax highlighting and language support for the Velin scripting language, backed by velin-lsp.",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "license": "MIT",
   "publisher": "velin",
   "repository": {

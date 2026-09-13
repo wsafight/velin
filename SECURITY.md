@@ -2,12 +2,12 @@
 
 ## Supported versions
 
-Security fixes are applied to the latest `0.1.x` release and the default branch.
+Security fixes are applied to the latest `0.2.x` release and the default branch.
 Older development snapshots are not supported.
 
 | Version | Supported |
 | --- | --- |
-| Latest `0.1.x` | Yes |
+| Latest `0.2.x` | Yes |
 | Older versions | No |
 
 ## Reporting a vulnerability
