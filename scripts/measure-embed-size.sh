@@ -28,7 +28,17 @@ printf 'cargo target: %s\n\n' "$target_dir"
 cargo build --release --no-default-features -p velin-vm --bin runtime_only
 report "runtime-only example" "$target_dir/release/runtime_only"
 
+cargo build --release -p velin-capi
+report "C runtime staticlib" "$target_dir/release/libvelin_capi.a"
+
 if rustup target list --installed | grep -qx 'wasm32-unknown-unknown'; then
+    cargo build --release --target wasm32-unknown-unknown \
+        -p velin-wasm --no-default-features --features runtime
+    runtime_wasm="$target_dir/wasm32-unknown-unknown/release/velin_wasm.wasm"
+    runtime_copy="$target_dir/wasm32-unknown-unknown/release/velin_wasm.runtime.wasm"
+    cp "$runtime_wasm" "$runtime_copy"
+    report "runtime-only wasm" "$runtime_copy"
+
     cargo build --release --target wasm32-unknown-unknown -p velin-wasm
     report "source-to-run wasm" \
         "$target_dir/wasm32-unknown-unknown/release/velin_wasm.wasm"
