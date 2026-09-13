@@ -112,6 +112,8 @@ fn missing_block_and_bad_indent_are_errors() {
     assert!(parse("if hp > 0:\nset x = 1\n").is_err()); // body not indented
     assert!(parse("\x20\x20\x20\x20set x = 1\n").is_err()); // leading indent with no header
     assert!(parse("label 1bad:\n").is_err()); // invalid identifier
+    let leftover = parse("set x = 1\n        set y = 2\n").unwrap_err();
+    assert!(leftover.message.contains("indentation"));
 }
 
 #[test]
@@ -227,4 +229,59 @@ fn recovering_parse_resynchronizes_after_a_missing_block() {
         recovered.statements.as_slice(),
         [Stmt::Label { name, .. }] if name == "done"
     ));
+}
+
+#[test]
+fn recovering_parse_covers_indent_elif_else_and_header_errors() {
+    let indent = parse_recovering(
+        "label start:\n\
+             \x20\x20\x20\x20set before = 1\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20set nested = 2\n\
+             \x20\x20\x20\x20set after = 3\n",
+    );
+    assert!(indent.errors.iter().any(|error| error.message.contains("indentation")));
+
+    let recovered = parse_recovering(
+        "if true:\n\
+             \x20\x20\x20\x20set x = 1\n\
+             elif false:\n\
+             \x20\x20\x20\x20set y = 2\n\
+             else:\n\
+             \x20\x20\x20\x20set z = 3\n",
+    );
+    assert!(recovered.errors.is_empty());
+    assert!(matches!(recovered.statements[0], Stmt::If { .. }));
+
+    let else_error = parse_recovering(
+        "if true:\n\
+             \x20\x20\x20\x20set x = 1\n\
+             else extra:\n\
+             \x20\x20\x20\x20set y = 2\n",
+    );
+    assert!(else_error.errors.iter().any(|error| error.line == 3));
+
+    let label = parse_recovering("label :\n    set x = 1\n");
+    assert!(!label.errors.is_empty());
+
+    let while_error = parse_recovering("while:\n    set x = 1\n");
+    assert!(!while_error.errors.is_empty());
+
+    let mut nested = String::new();
+    for depth in 0..=MAX_STATEMENT_DEPTH {
+        nested.push_str(&"    ".repeat(depth));
+        nested.push_str("while true:\n");
+    }
+    nested.push_str(&"    ".repeat(MAX_STATEMENT_DEPTH + 1));
+    nested.push_str("set x = 1\n");
+    let recovered = parse_recovering(&nested);
+    assert!(
+        recovered
+            .errors
+            .iter()
+            .any(|error| error.message.contains("nesting"))
+    );
+
+    let tabs = parse_recovering("\tset x = 1\n");
+    assert_eq!(tabs.statements.len(), 0);
+    assert!(!tabs.errors.is_empty());
 }

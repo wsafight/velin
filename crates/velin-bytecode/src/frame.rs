@@ -115,11 +115,10 @@ impl InitialFrame {
                 })?;
             frame_values[index] = Some(initial.value);
             footprints[index] = initial.metrics.footprint;
-            depths[index] =
-                u8::try_from(initial.metrics.max_depth).map_err(|_| InitialFrameError {
-                    name: name(),
-                    message: "initial value depth overflow",
-                })?;
+            depths[index] = u8::try_from(initial.metrics.max_depth).map_err(|_| InitialFrameError {
+                name: name(),
+                message: "initial value depth overflow",
+            })?;
             bindings.push(initial.slot);
         }
         bindings.sort_unstable_by(|left, right| slots.name(*left).cmp(&slots.name(*right)));
@@ -199,20 +198,5 @@ impl InitialFrame {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn prepares_dense_metrics_and_detects_source_changes() {
-        let mut slots = SlotTable::new();
-        slots.intern("unused");
-        slots.intern("hp");
-        let hp = Value::Integer(3);
-        let frame = InitialFrame::from_named_values(&slots, [("hp", &hp)]).unwrap();
-        assert_eq!(frame.values(), &[None, Some(Value::Integer(3))]);
-        assert_eq!(frame.total().values, 1);
-        assert!(frame.matches_named_values(&slots, [("hp", &hp)]));
-        assert!(!frame.matches_named_values(&slots, [("hp", &Value::Integer(4))]));
-        assert!(!frame.matches_named_values(&slots, [("other", &hp)]));
-    }
-}
+#[path = "frame_tests.rs"]
+mod tests;

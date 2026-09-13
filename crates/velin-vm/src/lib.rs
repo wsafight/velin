@@ -20,3 +20,7 @@ pub use machine::{
     MAX_HOST_PAYLOAD_VALUES, MAX_IMMEDIATE_STEPS, MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES,
     Machine, SetVariableError, Yield,
 };
+
+#[cfg(test)]
+#[path = "lib_tests.rs"]
+mod tests;

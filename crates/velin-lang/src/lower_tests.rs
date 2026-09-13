@@ -50,6 +50,157 @@ fn perform_interns_host_commands_in_first_seen_order() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
+fn nested_lowering_is_bounded_and_string_add_is_detected() {
+    let mut source = String::new();
+    for depth in 0..=MAX_STATEMENT_DEPTH {
+        source.push_str(&"    ".repeat(depth));
+        source.push_str("while true:\n");
+    }
+    source.push_str(&"    ".repeat(MAX_STATEMENT_DEPTH + 1));
+    source.push_str("set x = 1\n");
+    // The parser rejects this first; a recovered empty block still hits the
+    // depth guard if lowering is asked to walk a handmade tree.
+    let error = lower(vec![deep_while(MAX_STATEMENT_DEPTH + 1)]).unwrap_err();
+    assert!(error.message.contains("nesting"));
+    let error = lower(vec![deep_if(MAX_STATEMENT_DEPTH + 1)]).unwrap_err();
+    assert!(error.message.contains("nesting"));
+    let empty_overflow = {
+        let mut statement = Stmt::While {
+            condition: crate::ast::Condition {
+                expr: velin_syntax::Expr::Value(Value::Boolean(true)),
+                line: 1,
+            },
+            body: Vec::new(),
+        };
+        for _ in 0..MAX_STATEMENT_DEPTH {
+            statement = Stmt::While {
+                condition: crate::ast::Condition {
+                    expr: velin_syntax::Expr::Value(Value::Boolean(true)),
+                    line: 1,
+                },
+                body: vec![statement],
+            };
+        }
+        statement
+    };
+    let error = lower(vec![empty_overflow]).unwrap_err();
+    assert!(error.message.contains("nesting"));
+    let mut labeled = Stmt::Set {
+        name: "x".into(),
+        value: velin_syntax::Expr::Value(Value::Integer(1)),
+        line: 9,
+    };
+    for index in 0..=MAX_STATEMENT_DEPTH {
+        labeled = Stmt::Label {
+            name: format!("n{index}"),
+            body: vec![labeled],
+            line: 1,
+        };
+    }
+    let error = lower(vec![labeled]).unwrap_err();
+    assert!(error.message.contains("nesting"));
+    for leaf in [
+        Stmt::Default {
+            name: "d".into(),
+            value: velin_syntax::Expr::Value(Value::Integer(1)),
+            line: 2,
+        },
+        Stmt::Perform {
+            command: "say".into(),
+            arguments: Vec::new(),
+            bind: None,
+            line: 3,
+        },
+        Stmt::Jump {
+            label: "gone".into(),
+            line: 4,
+        },
+    ] {
+        let mut wrapped = leaf;
+        for _ in 0..=MAX_STATEMENT_DEPTH {
+            wrapped = Stmt::While {
+                condition: crate::ast::Condition {
+                    expr: velin_syntax::Expr::Value(Value::Boolean(true)),
+                    line: 1,
+                },
+                body: vec![wrapped],
+            };
+        }
+        let error = lower(vec![wrapped]).unwrap_err();
+        assert!(error.message.contains("nesting"));
+    }
+    let _ = lower(vec![Stmt::If {
+        branches: Vec::new(),
+        otherwise: None,
+    }]);
+
+    let script = compile("set title = \"a\"\nset title = title + \"b\"\n");
+    assert!(script.program.ops.iter().any(|op| matches!(
+        op,
+        velin_bytecode::Op::Update {
+            operation: UpdateOp::Add { .. },
+            ..
+        }
+    )));
+    let interpolated = compile("set title = \"a\"\nset title = title + \"x[y]\"\n");
+    assert!(interpolated.program.ops.iter().any(|op| matches!(
+        op,
+        velin_bytecode::Op::Update {
+            operation: UpdateOp::Add { .. },
+            ..
+        }
+    )));
+    let nested = compile("set title = \"a\"\nset title = title + (\"b\" + \"c\")\n");
+    assert!(nested.program.ops.iter().any(|op| matches!(
+        op,
+        velin_bytecode::Op::Update {
+            operation: UpdateOp::Add { .. },
+            ..
+        }
+    )));
+    let ignored = compile("set items = list(1)\nset items = get(items, 0)\n");
+    assert!(!ignored.program.ops.is_empty());
+}
+
+fn deep_if(depth: usize) -> Stmt {
+    let body = if depth == 0 {
+        Vec::new()
+    } else {
+        vec![deep_if(depth - 1)]
+    };
+    Stmt::If {
+        branches: vec![crate::ast::Branch {
+            condition: crate::ast::Condition {
+                expr: velin_syntax::Expr::Value(Value::Boolean(true)),
+                line: 1,
+            },
+            body,
+        }],
+        otherwise: None,
+    }
+}
+
+fn deep_while(depth: usize) -> Stmt {
+    let body = if depth == 0 {
+        vec![Stmt::Set {
+            name: "x".into(),
+            value: velin_syntax::Expr::Value(Value::Integer(1)),
+            line: 1,
+        }]
+    } else {
+        vec![deep_while(depth - 1)]
+    };
+    Stmt::While {
+        condition: crate::ast::Condition {
+            expr: velin_syntax::Expr::Value(Value::Boolean(true)),
+            line: 1,
+        },
+        body,
+    }
+}
+
+#[test]
 fn bound_perform_stores_its_destination_on_the_host_op() {
     let script = compile("choice = perform ask(\"go?\")\n");
     assert!(matches!(

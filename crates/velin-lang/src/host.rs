@@ -338,3 +338,7 @@ impl HostTable {
         self.names
     }
 }
+
+#[cfg(test)]
+#[path = "host_coverage_tests.rs"]
+mod coverage_tests;

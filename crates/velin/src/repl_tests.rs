@@ -93,3 +93,69 @@ fn defaults_are_explicitly_rejected_in_fragments() {
     assert!(matches!(error, ReplError::DefaultNotAllowed { line: 1 }));
     assert!(session.variables().is_empty());
 }
+
+#[test]
+fn error_display_and_source_cover_every_variant() {
+    let mut session = ReplSession::new();
+    let compile = session.execute("if hp > 0\n").unwrap_err();
+    assert!(matches!(compile, ReplError::Compile(_)));
+    assert!(!compile.to_string().is_empty());
+    assert!(std::error::Error::source(&compile).is_some());
+
+    session.execute("set hp = 1\n").unwrap();
+    let static_error = session.execute("set hp = missing + 1\n").unwrap_err();
+    assert!(matches!(static_error, ReplError::Static(_)));
+    assert!(static_error.to_string().contains("missing"));
+    assert!(std::error::Error::source(&static_error).is_none());
+
+    let default = session
+        .execute("if true:\n    default nested = 1\n")
+        .unwrap_err();
+    assert!(matches!(default, ReplError::DefaultNotAllowed { .. }));
+    assert!(default.to_string().contains("default declarations"));
+    assert!(std::error::Error::source(&default).is_none());
+
+    let runtime = session.execute("set hp = 1 / 0\n").unwrap_err();
+    assert!(matches!(runtime, ReplError::Runtime(_)));
+    assert!(runtime.to_string().contains("runtime error"));
+    assert!(std::error::Error::source(&runtime).is_some());
+
+    assert_eq!(
+        ReplError::Static(Vec::new()).to_string(),
+        "REPL static check failed"
+    );
+
+    let host = session.execute("perform emit(1)\n").unwrap_err();
+    assert!(matches!(host, ReplError::Host(_)));
+    assert!(host.to_string().contains("execute_with_host"));
+    assert!(std::error::Error::source(&host).is_none());
+}
+
+#[test]
+fn nested_defaults_are_rejected_in_every_compound_shape() {
+    let mut session = ReplSession::new();
+    assert!(matches!(
+        session
+            .execute("label start:\n    default hp = 1\n")
+            .unwrap_err(),
+        ReplError::DefaultNotAllowed { line: 2 }
+    ));
+    assert!(matches!(
+        session
+            .execute("while false:\n    default hp = 1\n")
+            .unwrap_err(),
+        ReplError::DefaultNotAllowed { line: 2 }
+    ));
+    assert!(matches!(
+        session
+            .execute("if false:\n    set x = 1\nelse:\n    default hp = 1\n")
+            .unwrap_err(),
+        ReplError::DefaultNotAllowed { line: 4 }
+    ));
+    assert!(matches!(
+        session
+            .execute("if true:\n    if true:\n        default hp = 1\n")
+            .unwrap_err(),
+        ReplError::DefaultNotAllowed { line: 3 }
+    ));
+}

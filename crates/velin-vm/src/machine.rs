@@ -125,6 +125,7 @@ pub enum SetVariableError {
 }
 
 impl std::fmt::Display for SetVariableError {
+    #[inline(never)]
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownVariable(name) => write!(formatter, "unknown variable `{name}`"),
@@ -414,3 +415,11 @@ mod batch_tests;
 #[cfg(test)]
 #[path = "register_tests.rs"]
 mod register_tests;
+
+#[cfg(test)]
+#[path = "coverage_tests.rs"]
+mod coverage_tests;
+
+#[cfg(test)]
+#[path = "coverage_more_tests.rs"]
+mod coverage_more_tests;

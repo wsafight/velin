@@ -327,3 +327,116 @@ fn execution_image_drops_slot_names_but_keeps_runtime_width() {
     assert!(image.program().validate().is_ok());
     assert_eq!(image.debug().op(0).unwrap().line, 0);
 }
+
+#[test]
+fn validates_every_program_operation_shape() {
+    let mut slots = SlotTable::new();
+    let target = slots.intern("target");
+    let source = slots.intern("source");
+    let chunk = constant_chunk(Value::Integer(1));
+    let program = Program::from_chunks(
+        vec![
+            Op::Set {
+                slot: target,
+                value: 0,
+            },
+            Op::SetConst {
+                slot: target,
+                value: Value::Integer(1),
+                line: 3,
+            },
+            Op::CopySlot {
+                slot: target,
+                source,
+                line: 4,
+                column: 2,
+            },
+            Op::Update {
+                slot: target,
+                operation: UpdateOp::Add { rhs: 0 },
+                line: 5,
+                column: 1,
+            },
+            Op::Update {
+                slot: target,
+                operation: UpdateOp::AddInteger { value: 1 },
+                line: 6,
+                column: 1,
+            },
+            Op::Update {
+                slot: target,
+                operation: UpdateOp::Push { value: 0 },
+                line: 7,
+                column: 1,
+            },
+            Op::Update {
+                slot: target,
+                operation: UpdateOp::Put { key: 0, value: 0 },
+                line: 8,
+                column: 1,
+            },
+            Op::Update {
+                slot: target,
+                operation: UpdateOp::Remove { key: 0 },
+                line: 9,
+                column: 1,
+            },
+            Op::JumpIfFalse {
+                condition: 0,
+                target: 10,
+            },
+            Op::JumpIfIntegerCompare {
+                condition: 0,
+                slot: source,
+                comparison: BinaryOp::Equal,
+                value: 1,
+                target: 11,
+            },
+            Op::host(0, vec![0], Some(source), 11),
+            Op::Halt,
+        ],
+        vec![chunk],
+        slots,
+    );
+    assert!(program.validate().is_ok());
+}
+
+#[test]
+fn rejects_invalid_integer_comparisons_and_host_slots() {
+    let mut slots = SlotTable::new();
+    let slot = slots.intern("x");
+    let invalid_comparison = Program::from_chunks(
+        vec![
+            Op::JumpIfIntegerCompare {
+                condition: 0,
+                slot,
+                comparison: BinaryOp::Add,
+                value: 1,
+                target: 2,
+            },
+            Op::Halt,
+        ],
+        vec![constant_chunk(Value::Integer(1))],
+        slots.clone(),
+    );
+    assert!(
+        invalid_comparison
+            .validate()
+            .unwrap_err()
+            .message
+            .contains("invalid integer comparison")
+    );
+
+    let invalid_host_slot = Program::from_chunks(
+        vec![Op::host(0, Vec::new(), Some(9), 1), Op::Halt],
+        Vec::new(),
+        slots,
+    );
+    assert!(
+        invalid_host_slot
+            .validate()
+            .unwrap_err()
+            .message
+            .contains("missing slot")
+    );
+}

@@ -44,6 +44,10 @@ pub extern "C" fn velin_c_api_version() -> u32 {
 ///
 /// `error_ptr` and `error_len` receive an owned UTF-8 error buffer on failure.
 /// Release it with [`velin_buffer_free`]. The input is borrowed for the call.
+///
+/// # Panics
+/// Panics only if JSON deserialization and the follow-up validation proof
+/// disagree, which would be a loader bug.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn velin_program_load_json(
     bytes: *const u8,
@@ -79,33 +83,14 @@ pub unsafe extern "C" fn velin_program_load_json(
             return std::ptr::null_mut();
         }
     };
-    let program = match ValidatedProgram::new(Arc::new(program)) {
-        Ok(program) => program,
-        Err(error) => {
-            write_error(
-                &format!("invalid program: {error}"),
-                error_ptr,
-                error_len,
-                error_capacity,
-            );
-            return std::ptr::null_mut();
-        }
-    };
-    let initial = match InitialFrame::from_named_values(
+    // JSON deserialization already ran `Program::validate`.
+    let program = ValidatedProgram::new(Arc::new(program))
+        .expect("deserialized programs have already been validated");
+    let initial = InitialFrame::from_named_values(
         &program.program().slots,
         std::iter::empty::<(&str, &velin_syntax::Value)>(),
-    ) {
-        Ok(initial) => initial,
-        Err(error) => {
-            write_error(
-                &format!("invalid initial frame: {error}"),
-                error_ptr,
-                error_len,
-                error_capacity,
-            );
-            return std::ptr::null_mut();
-        }
-    };
+    )
+    .expect("an empty initial frame cannot fail");
     Box::into_raw(Box::new(VelinProgram { program, initial }))
 }
 
@@ -120,6 +105,10 @@ pub unsafe extern "C" fn velin_program_free(program: *mut VelinProgram) {
 /// Creates a machine from a loaded program using the supplied RNG seed.
 ///
 /// The program remains independently owned and may be freed after this call.
+///
+/// # Panics
+/// Panics only if the empty initial frame stored with the program cannot
+/// instantiate the validated machine.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn velin_machine_new(
     program: *const VelinProgram,
@@ -138,20 +127,12 @@ pub unsafe extern "C" fn velin_machine_new(
         );
         return std::ptr::null_mut();
     };
-    let machine =
-        match Machine::from_validated_with_seed_and_frame(&program.program, seed, &program.initial)
-        {
-            Some(machine) => machine,
-            None => {
-                write_error(
-                    "cannot create machine from the validated initial frame",
-                    error_ptr,
-                    error_len,
-                    error_capacity,
-                );
-                return std::ptr::null_mut();
-            }
-        };
+    let machine = Machine::from_validated_with_seed_and_frame(
+        &program.program,
+        seed,
+        &program.initial,
+    )
+    .expect("the empty initial frame matches the validated program");
     Box::into_raw(Box::new(VelinMachine {
         machine,
         initial: program.initial.clone(),
@@ -210,6 +191,9 @@ pub unsafe extern "C" fn velin_machine_resume(
 }
 
 /// Restarts a machine with an empty frame and a new RNG seed, then runs it.
+///
+/// # Panics
+/// Panics only if restarting with the machine's own initial frame fails.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn velin_machine_restart(
     machine: *mut VelinMachine,
@@ -218,9 +202,10 @@ pub unsafe extern "C" fn velin_machine_restart(
     let Some(machine) = (unsafe { machine.as_mut() }) else {
         return error_yield("machine handle is null");
     };
-    if let Err(error) = machine.machine.restart(&machine.initial, seed) {
-        return error_yield(&format!("cannot restart machine: {error}"));
-    }
+    machine
+        .machine
+        .restart(&machine.initial, seed)
+        .expect("restarting with the program's own initial frame succeeds");
     yield_from_result(machine.machine.run())
 }
 
@@ -278,105 +263,5 @@ fn write_error(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const HOST_PROGRAM: &[u8] = br#"{"ops":[{"Host":{"host_id":7,"args":[],"bind":0,"line":1}},"Halt"],"chunks":[],"slots":["answer"]}"#;
-    const BATCH_PROGRAM: &[u8] = br#"{"ops":[{"Host":{"host_id":1,"args":[],"bind":null,"line":1}},{"Host":{"host_id":2,"args":[],"bind":null,"line":2}},"Halt"],"chunks":[],"slots":[]}"#;
-
-    #[test]
-    fn host_yield_and_scalar_resume_cross_the_c_boundary() {
-        let mut error = std::ptr::null_mut();
-        let mut error_len = 0;
-        let mut error_capacity = 0;
-        let program = unsafe {
-            velin_program_load_json(
-                HOST_PROGRAM.as_ptr(),
-                HOST_PROGRAM.len(),
-                &mut error,
-                &mut error_len,
-                &mut error_capacity,
-            )
-        };
-        assert!(!program.is_null());
-        assert!(error.is_null());
-        let machine = unsafe {
-            velin_machine_new(program, 0, &mut error, &mut error_len, &mut error_capacity)
-        };
-        assert!(!machine.is_null());
-        let mut yielded = unsafe { velin_machine_run(machine) };
-        assert_eq!(yielded.kind, VELIN_YIELD_HOST);
-        assert_eq!(yielded.host_id, 7);
-        assert_eq!(yielded.values_len, 0);
-        unsafe { velin_yield_free(&mut yielded) };
-
-        let answer = VelinValue {
-            tag: VELIN_VALUE_INTEGER,
-            integer: 42,
-            boolean: 0,
-            text_ptr: std::ptr::null_mut(),
-            text_len: 0,
-            text_capacity: 0,
-        };
-        let mut finished = unsafe { velin_machine_resume(machine, &answer) };
-        assert_eq!(finished.kind, VELIN_YIELD_FINISHED);
-        unsafe {
-            velin_yield_free(&mut finished);
-            velin_machine_free(machine);
-            velin_program_free(program);
-        }
-    }
-
-    #[test]
-    fn malformed_input_returns_owned_error_bytes() {
-        let mut error = std::ptr::null_mut();
-        let mut error_len = 0;
-        let mut error_capacity = 0;
-        let program = unsafe {
-            velin_program_load_json(
-                std::ptr::null(),
-                0,
-                &mut error,
-                &mut error_len,
-                &mut error_capacity,
-            )
-        };
-        assert!(program.is_null());
-        assert!(!error.is_null());
-        assert!(error_len > 0);
-        unsafe { velin_buffer_free(error, error_len, error_capacity) };
-    }
-
-    #[test]
-    fn batch_returns_ordered_side_effects_and_can_be_freed() {
-        let mut error = std::ptr::null_mut();
-        let mut error_len = 0;
-        let mut error_capacity = 0;
-        let program = unsafe {
-            velin_program_load_json(
-                BATCH_PROGRAM.as_ptr(),
-                BATCH_PROGRAM.len(),
-                &mut error,
-                &mut error_len,
-                &mut error_capacity,
-            )
-        };
-        assert!(!program.is_null());
-        let machine = unsafe {
-            velin_machine_new(program, 0, &mut error, &mut error_len, &mut error_capacity)
-        };
-        assert!(!machine.is_null());
-        let mut batch = unsafe { velin_machine_run_batch(machine, 8) };
-        assert_eq!(batch.kind, VELIN_BATCH_EFFECTS);
-        assert_eq!(batch.effects_len, 2);
-        let effects = unsafe { std::slice::from_raw_parts(batch.effects, batch.effects_len) };
-        assert_eq!(effects[0].host_id, 1);
-        assert_eq!(effects[1].host_id, 2);
-        unsafe {
-            velin_batch_free(&mut batch);
-            velin_machine_free(machine);
-            velin_program_free(program);
-        }
-        assert_eq!(batch.kind, VELIN_BATCH_EMPTY);
-    }
-}
+#[path = "lib_tests.rs"]
+mod tests;

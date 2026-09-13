@@ -120,3 +120,7 @@ fn op_location(program: &Program, op: &Op) -> DebugLocation {
         Op::Jump(_) | Op::Halt => DebugLocation { line: 0, column: 0 },
     }
 }
+
+#[cfg(test)]
+#[path = "debug_tests.rs"]
+mod tests;

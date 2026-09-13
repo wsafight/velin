@@ -224,3 +224,155 @@ fn binary_run_executes_ask_and_runtime_errors() {
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("one"));
 }
+
+fn temp_path(suffix: &str) -> String {
+    let path = std::env::temp_dir().join(format!(
+        "velin-cli-int-{}-{suffix}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    path.to_str().unwrap().to_owned()
+}
+
+#[test]
+fn binary_compile_writes_an_artifact_that_check_and_run_accept() {
+    let source = temp_script("perform say(\"artifact\")\n");
+    let output = temp_path("out.velinc");
+    let compiled = velin()
+        .args(["compile", &source, "-o", &output])
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+
+    let checked = velin().args(["check", &output]).output().unwrap();
+    assert!(checked.status.success());
+    assert!(String::from_utf8_lossy(&checked.stdout).contains("ok"));
+
+    let json = velin()
+        .args(["check", "--json", &output])
+        .output()
+        .unwrap();
+    assert!(json.status.success());
+    let payload: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(payload["ok"], true);
+
+    let run = velin().args(["run", &output]).output().unwrap();
+    assert!(run.status.success());
+    assert!(String::from_utf8_lossy(&run.stdout).contains("artifact"));
+    let _ = std::fs::remove_file(output);
+}
+
+#[test]
+fn binary_compile_rejects_bad_arguments_and_inputs() {
+    let source = temp_script("set value = 1\n");
+    let output = temp_path("out.velinc");
+
+    let stdin = velin()
+        .args(["compile", "-", "-o", &output])
+        .output()
+        .unwrap();
+    assert_eq!(stdin.status.code(), Some(2));
+
+    let missing = velin()
+        .args(["compile", "/no/such/velin.velin", "-o", &output])
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(2));
+
+    let parse_error = temp_script("if hp > 0\n");
+    let parsed = velin()
+        .args(["compile", &parse_error, "-o", &output])
+        .output()
+        .unwrap();
+    assert_eq!(parsed.status.code(), Some(1));
+
+    let unassigned = temp_script("set total = mystery + 1\n");
+    let checked = velin()
+        .args(["compile", &unassigned, "-o", &output])
+        .output()
+        .unwrap();
+    assert_eq!(checked.status.code(), Some(1));
+
+    for args in [
+        &["compile"][..],
+        &["compile", "--oops", "-o", "out.velinc"],
+        &["compile", &source, "not-o", &output],
+        &["compile", &source, "-o"],
+        &["compile", &source, "-o", "--oops"],
+        &["compile", &source, "-o", &output, "extra"],
+        &["check", "--unknown", &source],
+        &["check", "--json", "--json", &source],
+        &["run", "--unknown", &source],
+        &["run", &source, "extra"],
+        &["--help", "extra"],
+        &["--version", "extra"],
+    ] {
+        let failed = velin().args(args.iter().copied()).output().unwrap();
+        assert_eq!(failed.status.code(), Some(2), "args={args:?}");
+    }
+}
+
+#[test]
+fn binary_check_json_reports_io_and_artifact_failures() {
+    let missing = velin()
+        .args(["check", "--json", "/no/such/velin.velin"])
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(2));
+    let payload: serde_json::Value = serde_json::from_slice(&missing.stdout).unwrap();
+    assert_eq!(payload["ok"], false);
+
+    let invalid_utf8 = temp_path("invalid.velin");
+    std::fs::write(&invalid_utf8, [0xff, 0xfe]).unwrap();
+    let utf8 = velin().args(["check", &invalid_utf8]).output().unwrap();
+    assert_eq!(utf8.status.code(), Some(2));
+    let utf8_run = velin().args(["run", &invalid_utf8]).output().unwrap();
+    assert_eq!(utf8_run.status.code(), Some(2));
+    let utf8_json = velin()
+        .args(["check", "--json", &invalid_utf8])
+        .output()
+        .unwrap();
+    assert_eq!(utf8_json.status.code(), Some(2));
+
+    let broken_artifact = temp_path("broken.velinc");
+    let mut bytes = b"VELINBC\0".to_vec();
+    bytes.extend_from_slice(&3_u16.to_le_bytes());
+    bytes.extend_from_slice(&0_u64.to_le_bytes());
+    std::fs::write(&broken_artifact, bytes).unwrap();
+    let artifact = velin().args(["check", &broken_artifact]).output().unwrap();
+    assert_eq!(artifact.status.code(), Some(1));
+    let artifact_json = velin()
+        .args(["check", "--json", &broken_artifact])
+        .output()
+        .unwrap();
+    assert_eq!(artifact_json.status.code(), Some(1));
+    let run = velin().args(["run", &broken_artifact]).output().unwrap();
+    assert_eq!(run.status.code(), Some(1));
+    let _ = std::fs::remove_file(invalid_utf8);
+    let _ = std::fs::remove_file(broken_artifact);
+}
+
+#[test]
+fn binary_check_hits_the_artifact_cache_and_compile_write_errors() {
+    let source = temp_script("set value = 1\n");
+    let first = velin().args(["check", &source]).output().unwrap();
+    assert!(first.status.success());
+    let second = velin().args(["check", &source]).output().unwrap();
+    assert!(second.status.success());
+
+    let parent = temp_path("parent");
+    std::fs::write(&parent, b"not a directory").unwrap();
+    let output = format!("{parent}/out.velinc");
+    let failed = velin()
+        .args(["compile", &source, "-o", &output])
+        .output()
+        .unwrap();
+    assert_eq!(failed.status.code(), Some(2));
+    let _ = std::fs::remove_file(parent);
+}

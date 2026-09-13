@@ -42,14 +42,16 @@ pub(super) fn collection_metrics(
     )
 }
 
+/// Sums record children whose key metrics were already computed.
+///
+/// The caller guarantees an even argument count with one metric per argument,
+/// so this returns `None` only for a non-string key and otherwise always
+/// yields a metrics result.
 pub(super) fn record_metrics(
     values: &[Value],
     metrics: &[DataMetrics],
     line: usize,
 ) -> Option<Result<DataMetrics, crate::eval::EvalError>> {
-    if !values.len().is_multiple_of(2) {
-        return None;
-    }
     let mut result = DataMetrics {
         footprint: DataFootprint {
             values: 1,
@@ -57,11 +59,8 @@ pub(super) fn record_metrics(
         },
         max_depth: 0,
     };
-    let (value_pairs, value_remainder) = values.as_chunks::<2>();
-    let (metric_pairs, metric_remainder) = metrics.as_chunks::<2>();
-    if !value_remainder.is_empty() || !metric_remainder.is_empty() {
-        return None;
-    }
+    let (value_pairs, _) = values.as_chunks::<2>();
+    let (metric_pairs, _) = metrics.as_chunks::<2>();
     for ([key, _], [_, value]) in value_pairs.iter().zip(metric_pairs) {
         let Value::String(key) = key else {
             return None;
@@ -80,14 +79,14 @@ pub(super) fn record_metrics(
     Some(validate_metrics(result, line))
 }
 
+/// Sums a `push(source, value)` result from the source and value metrics.
+///
+/// The caller preflights that the source is a list with a matching metric, so
+/// only an unexpected metric count makes this decline.
 pub(super) fn push_metrics(
-    values: &[Value],
     metrics: &[DataMetrics],
     line: usize,
 ) -> Option<Result<DataMetrics, crate::eval::EvalError>> {
-    let [Value::List(_), _] = values else {
-        return None;
-    };
     let [source, value] = metrics else {
         return None;
     };
@@ -124,3 +123,7 @@ fn validate_metrics(
     }
     Ok(metrics)
 }
+
+#[cfg(test)]
+#[path = "metrics_tests.rs"]
+mod tests;

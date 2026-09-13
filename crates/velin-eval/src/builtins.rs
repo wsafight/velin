@@ -61,7 +61,7 @@ pub fn invoke_measured_with_metrics(
     let known_metrics = match function {
         Builtin::List => Some(collection_metrics(argument_metrics, line)),
         Builtin::Record => record_metrics(&arguments, argument_metrics, line),
-        Builtin::Push => push_metrics(&arguments, argument_metrics, line),
+        Builtin::Push => push_metrics(argument_metrics, line),
         Builtin::Len | Builtin::Contains => Some(Ok(scalar_metrics())),
         Builtin::Get | Builtin::Put | Builtin::Remove | Builtin::Random | Builtin::Chance => None,
     };

@@ -1,4 +1,5 @@
 use super::*;
+use velin_syntax::MAX_DATA_TEXT_BYTES;
 
 #[test]
 fn list_and_record_construct_and_read_back() {
@@ -280,6 +281,133 @@ fn metric_aware_collection_calls_match_value_metrics() {
     )
     .unwrap();
     assert_eq!(pushed_metrics, pushed.data_metrics().unwrap());
+}
+
+#[test]
+fn metric_aware_calls_cover_scalars_records_and_failures() {
+    let scalar = scalar_metrics();
+    let arguments = vec![Value::String("xy".into()), Value::Integer(1)];
+    let argument_metrics = vec![Value::String("xy".into()).data_metrics().unwrap(), scalar];
+    let (list, list_metrics) =
+        invoke_measured_with_metrics(Builtin::List, arguments, &argument_metrics, 1).unwrap();
+    assert_eq!(list_metrics, list.data_metrics().unwrap());
+
+    let (length, length_metrics) =
+        invoke_measured_with_metrics(Builtin::Len, vec![list.clone()], &[list_metrics], 1).unwrap();
+    assert_eq!(length, Value::Integer(2));
+    assert_eq!(length_metrics, length.data_metrics().unwrap());
+
+    assert!(
+        invoke_measured_with_metrics(
+            Builtin::List,
+            vec![Value::Integer(1), Value::Integer(2)],
+            &[scalar],
+            1,
+        )
+        .unwrap_err()
+        .message
+        .contains("argument metrics")
+    );
+
+    let (record, record_metrics) = invoke_measured_with_metrics(
+        Builtin::Record,
+        vec![Value::String("k".into()), Value::Integer(1)],
+        &[Value::String("k".into()).data_metrics().unwrap(), scalar],
+        1,
+    )
+    .unwrap();
+    assert_eq!(record_metrics, record.data_metrics().unwrap());
+
+    let (pushed, pushed_metrics) = invoke_measured_with_metrics(
+        Builtin::Push,
+        vec![list, Value::Integer(3)],
+        &[list_metrics, scalar],
+        1,
+    )
+    .unwrap();
+    assert_eq!(pushed_metrics, pushed.data_metrics().unwrap());
+}
+
+#[test]
+fn metric_aware_collection_calls_reject_oversized_and_non_string_shapes() {
+    let scalar = scalar_metrics();
+    // `list` rejects more than its 128-argument limit before measuring.
+    assert!(
+        invoke_measured_with_metrics(
+            Builtin::List,
+            vec![Value::Integer(0); 129],
+            &vec![scalar; 129],
+            1,
+        )
+        .unwrap_err()
+        .message
+        .contains("argument count")
+    );
+
+    // A record with a non-string key declines the fast path.
+    assert!(
+        invoke_measured_with_metrics(
+            Builtin::Record,
+            vec![Value::Integer(1), Value::Integer(2)],
+            &[scalar, scalar],
+            1,
+        )
+        .unwrap_err()
+        .message
+        .contains("must be strings")
+    );
+
+    // A text child that exhausts the shared text budget is rejected.
+    let text = Value::String("x".repeat(MAX_DATA_TEXT_BYTES).into());
+    let text_metrics = text.data_metrics().unwrap();
+    assert!(
+        invoke_measured_with_metrics(
+            Builtin::Record,
+            vec![
+                Value::String("big".into()),
+                text,
+                Value::String("b".into()),
+                Value::String("c".into()),
+            ],
+            &[scalar, text_metrics, scalar, scalar],
+            1,
+        )
+        .unwrap_err()
+        .message
+        .contains("1 MiB")
+    );
+
+    // A child list that fills the value budget pushes the aggregate over it.
+    let big = Value::List(Arc::new((0..4095).map(Value::Integer).collect::<Vec<_>>()));
+    let big_metrics = big.data_metrics().unwrap();
+    assert!(
+        invoke_measured_with_metrics(
+            Builtin::Record,
+            vec![Value::String("k".into()), big],
+            &[scalar, big_metrics],
+            1,
+        )
+        .unwrap_err()
+        .message
+        .contains("4096")
+    );
+
+    // `push` declines when the fast path cannot prove the list shape.
+    assert!(
+        invoke_measured_with_metrics(
+            Builtin::Push,
+            vec![Value::Integer(1), Value::Integer(2)],
+            &[scalar, scalar],
+            1,
+        )
+        .unwrap_err()
+        .message
+        .contains("push expects a list")
+    );
+
+    let (empty_record, empty_metrics) =
+        invoke_measured_with_metrics(Builtin::Record, Vec::new(), &[], 1).unwrap();
+    assert_eq!(empty_metrics, empty_record.data_metrics().unwrap());
 }
 
 #[test]
