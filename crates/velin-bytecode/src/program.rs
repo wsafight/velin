@@ -163,6 +163,35 @@ pub struct Program {
     pub slots: SlotTable,
 }
 
+/// Runtime-only image with source names and debug columns moved out of the
+/// hot program representation. The image keeps the canonical instruction and
+/// constant arenas unchanged, so validation and VM semantics have one source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionImage {
+    program: Program,
+    debug: DebugTable,
+}
+
+impl ExecutionImage {
+    /// Returns the name-free program consumed by the runtime.
+    #[must_use]
+    pub const fn program(&self) -> &Program {
+        &self.program
+    }
+
+    /// Returns optional source locations retained for tooling.
+    #[must_use]
+    pub const fn debug(&self) -> &DebugTable {
+        &self.debug
+    }
+
+    /// Consumes the image and returns its runtime program.
+    #[must_use]
+    pub fn into_program(self) -> Program {
+        self.program
+    }
+}
+
 /// Storage for the packed expression arenas assembled by the compiler.
 ///
 /// The arena keeps expression instructions and constants contiguous while the
@@ -428,6 +457,16 @@ impl Program {
             }
         }
         (self, debug)
+    }
+
+    /// Builds a runtime-only image by dropping slot names and moving source
+    /// columns into a compact sidecar. The returned program is suitable for
+    /// hosts that address only numeric slots and do not need source labels.
+    #[must_use]
+    pub fn into_execution_image(self) -> ExecutionImage {
+        let (mut program, debug) = self.without_debug_columns();
+        program.slots = program.slots.clone().without_names();
+        ExecutionImage { program, debug }
     }
 
     /// Removes slot names and reverse lookup for numeric-slot-only hosts.

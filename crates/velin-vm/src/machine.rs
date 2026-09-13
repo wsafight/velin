@@ -11,8 +11,9 @@ use self::support::{cache_metrics, checked_total};
 use crate::chunk::{FrameAccess, eval_validated_chunk};
 use std::sync::Arc;
 use velin_bytecode::{
-    ExecutionMetadata, HostOp, InitialFrame, Op, Program, ProgramValidationError, QuickenedCallRef,
-    QuickenedOperand, RegisterExpr, RegisterOp, RegisterType, UpdateOp, ValidatedProgram,
+    ExecutionImage, ExecutionMetadata, HostOp, InitialFrame, Op, Program, ProgramValidationError,
+    QuickenedCallRef, QuickenedOperand, RegisterExpr, RegisterOp, RegisterType, UpdateOp,
+    ValidatedProgram,
 };
 use velin_eval::{EvalError, invoke_readonly_measured};
 use velin_syntax::{
@@ -40,6 +41,59 @@ pub const MAX_HOST_PAYLOAD_TEXT_BYTES: usize = 16 * 1024 * 1024;
 
 /// Seed used by [`Machine::new`] when a program contains random expressions.
 pub const DEFAULT_RNG_SEED: i64 = 0;
+
+/// Bounded execution counters suitable for an offline profile-guided compile.
+/// Only validated program-counter IDs are recorded; values and host payloads
+/// never enter the profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionProfile {
+    op_hits: Box<[u64]>,
+}
+
+impl ExecutionProfile {
+    fn new(op_count: usize) -> Self {
+        Self {
+            op_hits: vec![0; op_count].into_boxed_slice(),
+        }
+    }
+
+    fn record(&mut self, pc: usize) {
+        if let Some(hits) = self.op_hits.get_mut(pc) {
+            *hits = hits.saturating_add(1);
+        }
+    }
+
+    /// Returns per-op hit counters in program-counter order.
+    #[must_use]
+    pub fn op_hits(&self) -> &[u64] {
+        &self.op_hits
+    }
+
+    /// Returns anonymous hot op IDs at or above `threshold` hits.
+    #[must_use]
+    pub fn hot_ops(&self, threshold: u64) -> Vec<(u32, u64)> {
+        self.op_hits
+            .iter()
+            .enumerate()
+            .filter_map(|(pc, hits)| {
+                (*hits >= threshold)
+                    .then(|| Some((u32::try_from(pc).ok()?, *hits)))
+                    .flatten()
+            })
+            .collect()
+    }
+
+    /// Merges counters from another profile with the same program width.
+    pub fn merge(&mut self, other: &Self) -> Result<(), &'static str> {
+        if self.op_hits.len() != other.op_hits.len() {
+            return Err("execution profiles refer to different program widths");
+        }
+        for (left, right) in self.op_hits.iter_mut().zip(&other.op_hits) {
+            *left = left.saturating_add(*right);
+        }
+        Ok(())
+    }
+}
 
 /// Why the machine stopped running.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +148,7 @@ pub struct Machine {
     expression_metrics: Vec<DataMetrics>,
     register_values: Vec<Option<Value>>,
     effect_buffer: Vec<HostEffect>,
+    profile: ExecutionProfile,
     pc: usize,
     /// The host effect execution is currently waiting to resume from.
     pending_host: Option<PendingHost>,
@@ -132,6 +187,11 @@ impl Machine {
         Self::with_seed(program, DEFAULT_RNG_SEED)
     }
 
+    /// Creates a machine from a name-free runtime execution image.
+    pub fn new_execution_image(image: ExecutionImage) -> Result<Self, ProgramValidationError> {
+        Self::new(image.into_program())
+    }
+
     /// Creates a machine and initializes its threaded RNG slot with `seed`.
     ///
     /// # Errors
@@ -168,6 +228,7 @@ impl Machine {
     ) -> Option<Self> {
         let metadata = program.shared_execution_metadata();
         let program = program.shared();
+        let profile = ExecutionProfile::new(program.ops.len());
         if initial.values().len() != program.slots.len() {
             return None;
         }
@@ -223,6 +284,7 @@ impl Machine {
             expression_metrics: Vec::new(),
             register_values: Vec::new(),
             effect_buffer: Vec::new(),
+            profile,
             pc: 0,
             pending_host: None,
             finished: false,
@@ -231,6 +293,7 @@ impl Machine {
 
     fn initialize(program: Arc<Program>, metadata: Arc<ExecutionMetadata>, seed: i64) -> Self {
         let width = program.slots.len();
+        let profile = ExecutionProfile::new(program.ops.len());
         let mut frame = vec![None; width];
         let mut frame_footprints = vec![DataFootprint::default(); width];
         let frame_depths = vec![0; width];
@@ -256,6 +319,7 @@ impl Machine {
             expression_metrics: Vec::new(),
             register_values: Vec::new(),
             effect_buffer: Vec::new(),
+            profile,
             pc: 0,
             pending_host: None,
             finished: false,
@@ -266,6 +330,12 @@ impl Machine {
     #[must_use]
     pub fn program(&self) -> &Program {
         &self.program
+    }
+
+    /// Returns the anonymous execution profile accumulated by this machine.
+    #[must_use]
+    pub const fn profile(&self) -> &ExecutionProfile {
+        &self.profile
     }
 
     /// Re-seeds the RNG state. Returns `false` when the program has no random

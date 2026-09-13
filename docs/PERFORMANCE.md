@@ -106,6 +106,12 @@ During built-in type inference, the first four argument types live in an inline 
 
 `Program` stores all expression operations and constants in contiguous `expr_ops` and `constants` arenas. A `ProgramChunk` contains only two ranges and a source line. The VM borrows slices through those ranges and never has to assemble an instruction object for each evaluation.
 
+Runtime hosts can call `Program::into_execution_image` to move slot names and
+expression/operation columns out of the hot image. Numeric slots and contiguous
+arenas remain unchanged while source locations live in an optional
+`DebugTable` sidecar. This image is intended for C/Wasm runtimes that do not
+need name binding or editor diagnostics.
+
 `ProgramBuilder` owns one reusable `ExprChunk` scratch buffer. After an expression is compiled, its contents move into the arenas while the scratch capacity remains available for the next expression. At program completion, the main vectors call `shrink_to_fit` so build-time excess capacity is not retained indefinitely.
 
 On current 64-bit targets, layout tests fix `ExprOp` at 12 bytes, `Op` at 32 bytes, and `ProgramChunk` at 20 bytes. These tests expose accidental growth when fields are added to hot enums. Variable-sized host arguments are boxed so their cold payload does not widen every `Op`.
@@ -196,9 +202,14 @@ After machine construction, straight-line scalar expressions normally require on
 
 ### Long scalar expressions can use a register plan
 
-During execution preparation, a long expression with only constants, slot loads, unary operators, and ordinary binary operators is lowered to a non-serialized register plan. Each value is assigned a stable temporary register, so evaluation reads operands by index instead of maintaining a value stack for every intermediate. The plan is stored in execution metadata and rebuilt from the validated expression chunk; it is not part of the serialized bytecode format.
+During execution preparation, a straight-line scalar expression with only constants, slot loads, unary operators, and ordinary binary operators is lowered to a non-serialized register plan. Each value is assigned a stable temporary register, so evaluation reads operands by index instead of maintaining a value stack for every intermediate. The plan is stored in execution metadata and rebuilt from the validated expression chunk; it is not part of the serialized bytecode format.
 
-The register path uses the same `apply_unary` and `apply_binary` functions as the stack evaluator and reports errors with the expression's source line. Short expressions, short-circuit operators, built-ins, concatenation, random operations, and any shape that cannot be proven straight-line continue through the canonical `ExprOp` stack path. A reusable `Option<Value>` workspace keeps temporary allocations out of repeated evaluations, and the final value is measured before it enters the frame's normal resource accounting.
+The register path uses the same `apply_unary` and `apply_binary` functions as the stack evaluator and reports errors with the expression's source line. Short-circuit operators, built-ins, concatenation, random operations, and any shape that cannot be proven straight-line continue through the canonical `ExprOp` stack path. A reusable `Option<Value>` workspace keeps temporary allocations out of repeated evaluations, and the final value is measured before it enters the frame's normal resource accounting.
+
+The VM also exposes a bounded `ExecutionProfile` containing only validated,
+anonymous program-counter hit counts. `hot_ops` and `merge` provide an offline
+feedback input; profiles never contain values, strings, or Host payloads and do
+not alter default execution semantics.
 
 The plan carries a small inferred type tag for each operation. Integer arithmetic and boolean negation can use typed helpers when the runtime values agree; a mismatch immediately falls back to the shared dynamic operator so externally supplied values keep the same diagnostics. Logical values are represented in SSA order and mapped to reusable physical registers using a compact linear-lifetime strategy, without adding a second semantic representation.
 

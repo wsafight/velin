@@ -20,9 +20,9 @@ pub use bytecode::{ExprChunk, ExprChunkRef, ExprOp};
 pub use debug::{DebugLocation, DebugTable};
 pub use frame::{InitialFrame, InitialFrameError, InitialValue};
 pub use program::{
-    ChunkExecutionMetadata, ChunkId, ExecutionMetadata, HostOp, Op, OpExecutionMetadata, Pc,
-    PreparedExpr, Program, ProgramArena, ProgramChunk, QuickenedCallRef, QuickenedOperand,
-    RegisterExpr, RegisterOp, RegisterType, UpdateOp,
+    ChunkExecutionMetadata, ChunkId, ExecutionImage, ExecutionMetadata, HostOp, Op,
+    OpExecutionMetadata, Pc, PreparedExpr, Program, ProgramArena, ProgramChunk, QuickenedCallRef,
+    QuickenedOperand, RegisterExpr, RegisterOp, RegisterType, UpdateOp,
 };
 pub use slots::{RNG_STATE_SLOT, SlotTable};
 pub use validate::{

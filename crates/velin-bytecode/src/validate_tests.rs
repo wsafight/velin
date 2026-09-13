@@ -187,3 +187,16 @@ fn execution_image_can_move_columns_to_a_debug_sidecar() {
     assert!(matches!(image.ops[1], Op::CopySlot { column: 0, .. }));
     assert!(image.validate().is_ok());
 }
+
+#[test]
+fn execution_image_drops_slot_names_but_keeps_runtime_width() {
+    let mut slots = SlotTable::new();
+    slots.intern("value");
+    let program = Program::from_chunks(vec![Op::Halt], Vec::new(), slots);
+    let width = program.slots.len();
+    let image = program.into_execution_image();
+    assert_eq!(image.program().slots.len(), width);
+    assert!(!image.program().slots.has_names());
+    assert!(image.program().validate().is_ok());
+    assert_eq!(image.debug().op(0).unwrap().line, 0);
+}

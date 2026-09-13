@@ -289,6 +289,11 @@ impl Machine {
     /// otherwise. Advances `pc` accordingly.
     #[allow(clippy::too_many_lines)]
     pub(super) fn step(&mut self) -> Result<Option<Yield>, EvalError> {
+        let current_pc = self.pc;
+        self.profile.record(current_pc);
+        if self.update_jump_target().is_some() {
+            self.profile.record(current_pc.saturating_add(1));
+        }
         match &self.program.ops[self.pc] {
             Op::Set { slot, value } => {
                 let slot = *slot;

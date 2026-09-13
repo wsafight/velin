@@ -16,7 +16,7 @@ mod machine;
 
 pub use chunk::{Frame, eval_chunk};
 pub use machine::{
-    DEFAULT_RNG_SEED, HostEffect, MAX_HOST_PAYLOAD_TEXT_BYTES, MAX_HOST_PAYLOAD_VALUES,
-    MAX_IMMEDIATE_STEPS, MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES, Machine,
-    SetVariableError, Yield,
+    DEFAULT_RNG_SEED, ExecutionProfile, HostEffect, MAX_HOST_PAYLOAD_TEXT_BYTES,
+    MAX_HOST_PAYLOAD_VALUES, MAX_IMMEDIATE_STEPS, MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES,
+    Machine, SetVariableError, Yield,
 };

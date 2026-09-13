@@ -191,6 +191,33 @@ fn fused_update_jump_keeps_the_original_step_budget() {
 }
 
 #[test]
+fn execution_profile_records_anonymous_op_hits_and_merges() {
+    let mut builder = ProgramBuilder::new();
+    let value = builder.slot("value");
+    let constant = builder.expr(&Expr::Value(Value::Integer(1)), 1);
+    builder.push(Op::Set {
+        slot: value,
+        value: constant,
+    });
+    builder.push(Op::Halt);
+    let program = builder.build();
+    let mut machine = Machine::new(program).unwrap();
+    assert_eq!(machine.run(), Ok(Yield::Finished));
+    let profile = machine.profile().clone();
+    assert!(profile.op_hits().iter().any(|hits| *hits > 0));
+    assert!(!profile.hot_ops(1).is_empty());
+    let mut merged = profile.clone();
+    merged.merge(&profile).unwrap();
+    assert!(
+        merged
+            .op_hits()
+            .iter()
+            .zip(profile.op_hits())
+            .all(|(merged, original)| *merged >= *original)
+    );
+}
+
+#[test]
 fn cloning_a_machine_rolls_back_rng_with_the_frame() {
     // Draw and yield once, clone the yielded machine as a checkpoint, then
     // draw again. Resuming the checkpoint must reproduce the second draw.

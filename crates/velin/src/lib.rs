@@ -104,17 +104,17 @@ pub use velin_parse::parse_expression;
 pub use velin_eval::{EvalError, Variables, evaluate, evaluate_with_rng};
 
 pub use velin_bytecode::{
-    ChunkId, ExprChunk, ExprChunkRef, ExprOp, HostOp, InitialFrame, InitialFrameError,
-    InitialValue, Op, Pc, Program, ProgramChunk, ProgramValidationError, SlotTable, UpdateOp,
-    ValidatedProgram,
+    ChunkId, ExecutionImage, ExprChunk, ExprChunkRef, ExprOp, HostOp, InitialFrame,
+    InitialFrameError, InitialValue, Op, Pc, Program, ProgramChunk, ProgramValidationError,
+    SlotTable, UpdateOp, ValidatedProgram,
 };
 
 pub use velin_compile::{ProgramBuilder, compile_expression};
 
 pub use velin_vm::{
-    DEFAULT_RNG_SEED, HostEffect, MAX_HOST_PAYLOAD_TEXT_BYTES, MAX_HOST_PAYLOAD_VALUES,
-    MAX_IMMEDIATE_STEPS, MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES, Machine,
-    SetVariableError, Yield,
+    DEFAULT_RNG_SEED, ExecutionProfile, HostEffect, MAX_HOST_PAYLOAD_TEXT_BYTES,
+    MAX_HOST_PAYLOAD_VALUES, MAX_IMMEDIATE_STEPS, MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES,
+    Machine, SetVariableError, Yield,
 };
 
 pub use runtime::{
