@@ -40,6 +40,8 @@ For a known host vocabulary, build a `HostSchema` from `HostSignature::exact` or
 
 For most surface-language hosts, prefer `ScriptRunner`: it validates bytecode, installs defaults, resolves host IDs to names, enforces a cumulative host-effect budget, and can apply the same `HostSchema` at runtime. Use `Machine` directly when an embedder needs lower-level control.
 
+For consecutive commands without a return value, use `ScriptRunner::run_effect_batch` to collect events before handing them to the host. `HostEventQueue` lives in the host driver and applies event-count, value-count, and text-byte backpressure; a bound command remains a natural barrier handled through `run` / `resume`.
+
 ## Create a machine
 
 `Machine::new` validates the complete program before execution. Apply every script default to the new frame:

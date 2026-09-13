@@ -118,7 +118,8 @@ pub use velin_vm::{
 };
 
 pub use runtime::{
-    DEFAULT_MAX_HOST_EFFECTS, ExecutionLimits, ScriptRunError, ScriptRunner, ScriptYield,
+    DEFAULT_MAX_HOST_EFFECTS, ExecutionLimits, HostEvent, HostEventQueue,
+    HostEventQueueError, HostEventQueueLimits, ScriptRunError, ScriptRunner, ScriptYield,
 };
 
 pub use velin_check::{

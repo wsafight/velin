@@ -48,3 +48,24 @@ fn batch_limit_preserves_order_and_finished_state() {
     assert!(machine.run_effect_batch(1).unwrap().is_empty());
     assert_eq!(machine.run().unwrap(), Yield::Finished);
 }
+
+#[test]
+fn reusable_batch_buffer_can_be_drained_without_losing_capacity() {
+    let mut builder = ProgramBuilder::new();
+    builder.push(Op::host(1, Vec::new(), None, 1));
+    builder.push(Op::host(2, Vec::new(), None, 2));
+    let mut machine = Machine::new(builder.build()).unwrap();
+
+    assert_eq!(machine.run_effect_batch_reusable(2).unwrap(), 2);
+    assert_eq!(machine.effect_batch()[1].host_id, 2);
+    let mut drained = Vec::new();
+    machine.drain_effect_batch(&mut drained);
+    assert_eq!(drained.len(), 2);
+    assert!(machine.effect_batch().is_empty());
+
+    builder = ProgramBuilder::new();
+    builder.push(Op::host(3, Vec::new(), None, 3));
+    let mut next = Machine::new(builder.build()).unwrap();
+    assert_eq!(next.run_effect_batch_reusable(1).unwrap(), 1);
+    assert_eq!(next.effect_batch()[0].host_id, 3);
+}

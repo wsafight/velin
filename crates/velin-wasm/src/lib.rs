@@ -86,6 +86,13 @@ impl RuntimeMachine {
         runtime::yield_to_json(self.machine.run())
     }
 
+    /// Collects side-effect-only host events in source order until `limit`, a
+    /// bound host event, completion, or an execution error.
+    #[must_use]
+    pub fn run_batch(&mut self, limit: usize) -> String {
+        runtime::batch_to_json(self.machine.run_effect_batch(limit))
+    }
+
     /// Resumes a pending host event. Use the JSON literal `null` when the host
     /// command has no return value.
     #[must_use]

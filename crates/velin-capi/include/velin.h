@@ -26,6 +26,12 @@ enum {
     VELIN_YIELD_ERROR = 2
 };
 
+enum {
+    VELIN_BATCH_EMPTY = 0,
+    VELIN_BATCH_EFFECTS = 1,
+    VELIN_BATCH_ERROR = 2
+};
+
 typedef struct VelinValue {
     uint32_t tag;
     int64_t integer;
@@ -45,6 +51,21 @@ typedef struct VelinYield {
     size_t error_capacity;
 } VelinYield;
 
+typedef struct VelinEffect {
+    uint32_t host_id;
+    VelinValue *values;
+    size_t values_len;
+} VelinEffect;
+
+typedef struct VelinBatch {
+    uint32_t kind;
+    VelinEffect *effects;
+    size_t effects_len;
+    uint8_t *error_ptr;
+    size_t error_len;
+    size_t error_capacity;
+} VelinBatch;
+
 uint32_t velin_c_api_version(void);
 
 VelinProgram *velin_program_load_json(const uint8_t *bytes, size_t len,
@@ -57,10 +78,12 @@ VelinMachine *velin_machine_new(const VelinProgram *program, int64_t seed,
                                 size_t *error_capacity);
 void velin_machine_free(VelinMachine *machine);
 VelinYield velin_machine_run(VelinMachine *machine);
+VelinBatch velin_machine_run_batch(VelinMachine *machine, size_t limit);
 VelinYield velin_machine_resume(VelinMachine *machine, const VelinValue *value);
 VelinYield velin_machine_restart(VelinMachine *machine, int64_t seed);
 
 void velin_yield_free(VelinYield *result);
+void velin_batch_free(VelinBatch *result);
 void velin_buffer_free(uint8_t *ptr, size_t len, size_t capacity);
 
 #ifdef __cplusplus

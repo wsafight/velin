@@ -40,6 +40,8 @@ if diagnostics.iter().any(velin::Diagnostic::is_error) {
 
 大多数语句语言宿主应优先使用 `ScriptRunner`：它会验证字节码、安装默认值、把宿主 ID 解析为名称、执行累计宿主效果预算，并可在运行时应用同一份 `HostSchema`。只有需要更底层控制时才直接使用 `Machine`。
 
+对于连续的无返回值命令，可使用 `ScriptRunner::run_effect_batch` 批量取得事件，再交给宿主队列消费。`HostEventQueue` 位于宿主驱动层，提供容量、值数量和文本字节的背压限制；绑定命令仍会作为自然屏障交给 `run` / `resume`。
+
 ## 创建机器
 
 `Machine::new` 会在执行前验证完整程序。新建帧后需要应用脚本的全部默认值：

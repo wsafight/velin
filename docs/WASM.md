@@ -35,6 +35,19 @@ const ran = JSON.parse(run(`perform say("hi")\n`, "[]"));
 
 A `RunResult` also carries `error` when execution fails (overflow, missing index, exhausted replies, step budget).
 
+The runtime-only `RuntimeMachine::run_batch(limit)` returns consecutive
+side-effect-only host events in one call:
+
+```json
+{"kind":"effects","effects":[{"host_id":7,"values":[1]}]}
+```
+
+Events preserve source order. Collection stops at a bound host, completion, or
+an error. `{"kind":"empty"}` means that this batch had no side-effect-only
+events; call `run()` next to distinguish completion from a bound host. `limit`
+only bounds VM work; JavaScript still owns queue capacity and payload
+backpressure.
+
 ## Budgets on this path
 
 - Output is capped at 1 MiB.

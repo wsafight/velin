@@ -93,6 +93,7 @@ pub struct Machine {
     expression_stack: Vec<Value>,
     expression_metrics: Vec<DataMetrics>,
     register_values: Vec<Option<Value>>,
+    effect_buffer: Vec<HostEffect>,
     pc: usize,
     /// The host effect execution is currently waiting to resume from.
     pending_host: Option<PendingHost>,
@@ -221,6 +222,7 @@ impl Machine {
             expression_stack: Vec::new(),
             expression_metrics: Vec::new(),
             register_values: Vec::new(),
+            effect_buffer: Vec::new(),
             pc: 0,
             pending_host: None,
             finished: false,
@@ -253,6 +255,7 @@ impl Machine {
             expression_stack: Vec::new(),
             expression_metrics: Vec::new(),
             register_values: Vec::new(),
+            effect_buffer: Vec::new(),
             pc: 0,
             pending_host: None,
             finished: false,

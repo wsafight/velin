@@ -4,6 +4,8 @@ use crate::{
     CompiledScript, DEFAULT_RNG_SEED, EvalError, HostSchema, Machine, ProgramValidationError,
     SetVariableError, Type, Value, Yield,
 };
+use std::collections::VecDeque;
+use velin_syntax::DataFootprint;
 use velin_bytecode::InitialFrame;
 
 /// Default total host effects accepted during one script run.
@@ -28,6 +30,154 @@ impl Default for ExecutionLimits {
 pub enum ScriptYield {
     Host { name: String, values: Vec<Value> },
     Finished,
+}
+
+/// A side-effect-only host event returned by the batch runner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostEvent {
+    pub name: String,
+    pub values: Vec<Value>,
+}
+
+/// Limits for a host-owned event queue. The queue is deliberately outside the
+/// VM so an application can choose a capacity and consumption policy without
+/// changing execution semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostEventQueueLimits {
+    pub capacity: usize,
+    pub max_values: usize,
+    pub max_text_bytes: usize,
+}
+
+impl Default for HostEventQueueLimits {
+    fn default() -> Self {
+        Self {
+            capacity: 1_024,
+            max_values: 1_000_000,
+            max_text_bytes: 64 * 1024 * 1024,
+        }
+    }
+}
+
+/// Failure to enqueue a host event without exceeding the host's backpressure
+/// budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostEventQueueError {
+    Full,
+    ValuesBudget,
+    TextBudget,
+    InvalidValue(&'static str),
+}
+
+impl std::fmt::Display for HostEventQueueError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Full => formatter.write_str("host event queue is full"),
+            Self::ValuesBudget => formatter.write_str("host event queue value budget exceeded"),
+            Self::TextBudget => formatter.write_str("host event queue text budget exceeded"),
+            Self::InvalidValue(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for HostEventQueueError {}
+
+#[derive(Debug)]
+struct QueuedHostEvent {
+    event: HostEvent,
+    footprint: DataFootprint,
+}
+
+/// A bounded, FIFO host queue with aggregate payload accounting.
+#[derive(Debug)]
+pub struct HostEventQueue {
+    limits: HostEventQueueLimits,
+    events: VecDeque<QueuedHostEvent>,
+    values: usize,
+    text_bytes: usize,
+}
+
+impl HostEventQueue {
+    #[must_use]
+    pub fn new(limits: HostEventQueueLimits) -> Self {
+        Self {
+            limits,
+            events: VecDeque::with_capacity(limits.capacity.min(64)),
+            values: 0,
+            text_bytes: 0,
+        }
+    }
+
+    #[must_use]
+    pub const fn limits(&self) -> HostEventQueueLimits {
+        self.limits
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.events.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
+
+    #[must_use]
+    pub fn values(&self) -> usize {
+        self.values
+    }
+
+    #[must_use]
+    pub fn text_bytes(&self) -> usize {
+        self.text_bytes
+    }
+
+    /// Enqueues an event after validating every value and aggregate payload.
+    pub fn push(&mut self, event: HostEvent) -> Result<(), HostEventQueueError> {
+        if self.events.len() >= self.limits.capacity {
+            return Err(HostEventQueueError::Full);
+        }
+        let mut footprint = DataFootprint::default();
+        for value in &event.values {
+            let metrics = value
+                .data_metrics()
+                .map_err(HostEventQueueError::InvalidValue)?;
+            footprint.values = footprint
+                .values
+                .checked_add(metrics.footprint.values)
+                .ok_or(HostEventQueueError::ValuesBudget)?;
+            footprint.text_bytes = footprint
+                .text_bytes
+                .checked_add(metrics.footprint.text_bytes)
+                .ok_or(HostEventQueueError::TextBudget)?;
+        }
+        let values = self
+            .values
+            .checked_add(footprint.values)
+            .ok_or(HostEventQueueError::ValuesBudget)?;
+        if values > self.limits.max_values {
+            return Err(HostEventQueueError::ValuesBudget);
+        }
+        let text_bytes = self
+            .text_bytes
+            .checked_add(footprint.text_bytes)
+            .ok_or(HostEventQueueError::TextBudget)?;
+        if text_bytes > self.limits.max_text_bytes {
+            return Err(HostEventQueueError::TextBudget);
+        }
+        self.values = values;
+        self.text_bytes = text_bytes;
+        self.events.push_back(QueuedHostEvent { event, footprint });
+        Ok(())
+    }
+
+    pub fn pop_front(&mut self) -> Option<HostEvent> {
+        let queued = self.events.pop_front()?;
+        self.values -= queued.footprint.values;
+        self.text_bytes -= queued.footprint.text_bytes;
+        Some(queued.event)
+    }
 }
 
 /// Failure while instantiating or driving a compiled script.
@@ -234,6 +384,61 @@ impl<'a> ScriptRunner<'a> {
         }
         let outcome = self.machine.run().map_err(ScriptRunError::Evaluation)?;
         self.resolve(outcome)
+    }
+
+    /// Runs side-effect-only host commands in order and returns a batch of
+    /// named events. A bound host command is left as the next VM barrier.
+    ///
+    /// The VM's reusable buffer is drained into the returned vector, so the
+    /// next batch reuses its allocation. A configured host schema is checked
+    /// for every event before it is returned to the host.
+    pub fn run_effect_batch(&mut self, limit: usize) -> Result<Vec<HostEvent>, ScriptRunError> {
+        if let Some(failure) = &self.pending_failure {
+            return Err(failure.error());
+        }
+        let remaining = self
+            .limits
+            .max_host_effects
+            .checked_sub(self.host_effects)
+            .ok_or(ScriptRunError::HostEffectsExceeded {
+                limit: self.limits.max_host_effects,
+            })?;
+        if remaining == 0 {
+            return Err(ScriptRunError::HostEffectsExceeded {
+                limit: self.limits.max_host_effects,
+            });
+        }
+        let count = self
+            .machine
+            .run_effect_batch_reusable(limit.min(remaining))
+            .map_err(ScriptRunError::Evaluation)?;
+        let raw = self.machine.effect_batch().to_vec();
+        let mut events = Vec::with_capacity(count);
+        for effect in raw {
+            let Some(name) = self.script.host_name(effect.host_id) else {
+                let failure = PendingFailure::HostContract(format!(
+                    "bytecode yielded unknown host id {}",
+                    effect.host_id
+                ));
+                let error = failure.error();
+                self.pending_failure = Some(failure);
+                return Err(error);
+            };
+            if let Err(message) = self.validate_call(name, &effect.values) {
+                let failure = PendingFailure::HostContract(message);
+                let error = failure.error();
+                self.pending_failure = Some(failure);
+                return Err(error);
+            }
+            events.push(HostEvent {
+                name: name.to_owned(),
+                values: effect.values,
+            });
+        }
+        self.host_effects += count;
+        let mut discarded = Vec::new();
+        self.machine.drain_effect_batch(&mut discarded);
+        Ok(events)
     }
 
     /// Supplies the pending host reply and continues execution.
@@ -475,5 +680,62 @@ mod tests {
             reused.machine().variable("hp"),
             fresh.machine().variable("hp")
         );
+    }
+
+    #[test]
+    fn batches_unbound_effects_and_stops_at_bound_effect() {
+        let script = compile(
+            "runner.velin",
+            "perform emit(1)\nperform emit(2)\nanswer = perform ask()\n",
+        )
+        .unwrap();
+        let mut runner = ScriptRunner::new(&script).unwrap();
+        assert_eq!(
+            runner.run_effect_batch(8).unwrap(),
+            vec![
+                HostEvent {
+                    name: "emit".into(),
+                    values: vec![Value::Integer(1)],
+                },
+                HostEvent {
+                    name: "emit".into(),
+                    values: vec![Value::Integer(2)],
+                },
+            ]
+        );
+        assert!(matches!(
+            runner.run().unwrap(),
+            ScriptYield::Host { ref name, .. } if name == "ask"
+        ));
+        assert_eq!(runner.resume(Some(Value::Integer(9))).unwrap(), ScriptYield::Finished);
+    }
+
+    #[test]
+    fn host_event_queue_applies_capacity_and_payload_backpressure() {
+        let mut queue = HostEventQueue::new(HostEventQueueLimits {
+            capacity: 1,
+            max_values: 2,
+            max_text_bytes: 4,
+        });
+        queue
+            .push(HostEvent {
+                name: "emit".into(),
+                values: vec![Value::String("abc".into())],
+            })
+            .unwrap();
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.push(HostEvent {
+            name: "emit".into(),
+            values: vec![Value::Integer(1)],
+        }), Err(HostEventQueueError::Full));
+        let event = queue.pop_front().unwrap();
+        assert_eq!(event.name, "emit");
+        assert!(queue.is_empty());
+        assert_eq!(queue.values(), 0);
+        assert_eq!(queue.text_bytes(), 0);
+        assert_eq!(queue.push(HostEvent {
+            name: "emit".into(),
+            values: vec![Value::String("abcde".into())],
+        }), Err(HostEventQueueError::TextBudget));
     }
 }

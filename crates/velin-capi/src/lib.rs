@@ -15,13 +15,17 @@ mod value;
 
 pub use handles::{VelinMachine, VelinProgram};
 pub use result::VelinYield;
-use result::{error_yield, yield_from_result};
+pub use result::{VelinBatch, VelinEffect};
+use result::{batch_from_result, error_yield, yield_from_result};
 use std::slice;
 use std::sync::Arc;
 use velin_bytecode::Program;
 use velin_vm::Machine;
 
-pub use result::{VELIN_YIELD_ERROR, VELIN_YIELD_FINISHED, VELIN_YIELD_HOST};
+pub use result::{
+    VELIN_BATCH_EFFECTS, VELIN_BATCH_EMPTY, VELIN_BATCH_ERROR, VELIN_YIELD_ERROR,
+    VELIN_YIELD_FINISHED, VELIN_YIELD_HOST,
+};
 pub use value::{
     VELIN_VALUE_BOOLEAN, VELIN_VALUE_COMPOUND, VELIN_VALUE_INTEGER, VELIN_VALUE_STRING, VelinValue,
 };
@@ -149,6 +153,20 @@ pub unsafe extern "C" fn velin_machine_run(machine: *mut VelinMachine) -> VelinY
     yield_from_result(machine.machine.run())
 }
 
+/// Runs side-effect-only host commands in source order until `limit`, a bound
+/// host command, completion, or an execution error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn velin_machine_run_batch(
+    machine: *mut VelinMachine,
+    limit: usize,
+) -> VelinBatch {
+    let Some(machine) = (unsafe { machine.as_mut() }) else {
+        return result::batch_from_result::<&str>(Err("machine handle is null"));
+    };
+    let result = machine.machine.run_effect_batch(limit);
+    batch_from_result(result)
+}
+
 /// Resumes a pending host effect with a scalar value, or null for no value.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn velin_machine_resume(
@@ -194,6 +212,14 @@ pub unsafe extern "C" fn velin_yield_free(result: *mut VelinYield) {
     }
 }
 
+/// Releases every allocation owned by a batch result and clears it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn velin_batch_free(result: *mut VelinBatch) {
+    if !result.is_null() {
+        unsafe { result::free_batch(&mut *result) };
+    }
+}
+
 /// Releases an error or value text buffer returned by the ABI.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn velin_buffer_free(ptr: *mut u8, len: usize, capacity: usize) {
@@ -236,6 +262,7 @@ mod tests {
     use super::*;
 
     const HOST_PROGRAM: &[u8] = br#"{"ops":[{"Host":{"host_id":7,"args":[],"bind":0,"line":1}},"Halt"],"chunks":[],"slots":["answer"]}"#;
+    const BATCH_PROGRAM: &[u8] = br#"{"ops":[{"Host":{"host_id":1,"args":[],"bind":null,"line":1}},{"Host":{"host_id":2,"args":[],"bind":null,"line":2}},"Halt"],"chunks":[],"slots":[]}"#;
 
     #[test]
     fn host_yield_and_scalar_resume_cross_the_c_boundary() {
@@ -298,5 +325,38 @@ mod tests {
         assert!(!error.is_null());
         assert!(error_len > 0);
         unsafe { velin_buffer_free(error, error_len, error_capacity) };
+    }
+
+    #[test]
+    fn batch_returns_ordered_side_effects_and_can_be_freed() {
+        let mut error = std::ptr::null_mut();
+        let mut error_len = 0;
+        let mut error_capacity = 0;
+        let program = unsafe {
+            velin_program_load_json(
+                BATCH_PROGRAM.as_ptr(),
+                BATCH_PROGRAM.len(),
+                &mut error,
+                &mut error_len,
+                &mut error_capacity,
+            )
+        };
+        assert!(!program.is_null());
+        let machine = unsafe {
+            velin_machine_new(program, 0, &mut error, &mut error_len, &mut error_capacity)
+        };
+        assert!(!machine.is_null());
+        let mut batch = unsafe { velin_machine_run_batch(machine, 8) };
+        assert_eq!(batch.kind, VELIN_BATCH_EFFECTS);
+        assert_eq!(batch.effects_len, 2);
+        let effects = unsafe { std::slice::from_raw_parts(batch.effects, batch.effects_len) };
+        assert_eq!(effects[0].host_id, 1);
+        assert_eq!(effects[1].host_id, 2);
+        unsafe {
+            velin_batch_free(&mut batch);
+            velin_machine_free(machine);
+            velin_program_free(program);
+        }
+        assert_eq!(batch.kind, VELIN_BATCH_EMPTY);
     }
 }
