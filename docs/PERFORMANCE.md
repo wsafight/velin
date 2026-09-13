@@ -143,6 +143,7 @@ Lowering represents these common forms with direct instructions:
 | Constant assignment | `SetConst` | Installs the value with precomputed resource metrics |
 | Variable copy | `CopySlot` | Loads by slot and reuses the source slot's metrics |
 | `count = count + constant` | `Update::AddInteger` | Performs checked addition directly on the slot |
+| `if enabled` | Prepared `Load` path for `JumpIfFalse` | Reads a boolean slot directly without copying a temporary `Value` or metrics |
 | `slot <op> integer literal` condition | `JumpIfIntegerCompare` | Reads the integer slot and decides the branch directly |
 | Self-targeting `push`, `put`, `remove`, or `+` | `Update` | Retains destination ownership and updates after preflight |
 
@@ -246,6 +247,8 @@ This reconciles value semantics with storage reuse. A value being in the destina
 `DataMetrics` records a value tree's node count, UTF-8 text bytes, and maximum nesting depth. Expressions and built-ins return `(Value, DataMetrics)`, and assignment stores both in the frame. The frame maintains compact footprint and depth arrays per slot, plus one aggregate footprint for the whole machine.
 
 Direct constants, variable copies, and ordinary expression results can carry existing metrics forward. A collection edit updates node and text counts by subtracting the removed item and adding the replacement. Depth uses a conservative incremental rule: the result tree is rescanned only when the edit removes a deepest child and the new child cannot preserve the previous depth.
+
+When `Update::AddInteger` has a proven scalar input and result, the VM reuses the unchanged scalar footprint and updates only the value and depth cache. Overflow, type errors, and resource limits retain their existing checks. The boolean-slot branch fast path is enabled only when execution preparation proves a single `Load`; all other conditions use the general expression evaluator.
 
 Logical resource accounting is independent of `Arc` sharing. If multiple slots reference the same collection, each logical value counts against the budget, so execution does not depend on transient ownership state.
 
