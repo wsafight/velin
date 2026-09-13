@@ -15,6 +15,7 @@ pub struct ProgramBuilder {
     slots: SlotTable,
     scratch: ExprChunk,
     known_constants: Vec<Option<Value>>,
+    known_variables: Variables,
 }
 
 impl Default for ProgramBuilder {
@@ -25,6 +26,7 @@ impl Default for ProgramBuilder {
             slots: SlotTable::default(),
             scratch: ExprChunk::new(0),
             known_constants: Vec::new(),
+            known_variables: Variables::new(),
         }
     }
 }
@@ -239,22 +241,10 @@ impl ProgramBuilder {
     }
 
     fn propagated_constant(&self, expression: &Expr, line: usize) -> Option<Value> {
-        if !self.known_constants.iter().any(Option::is_some) {
+        if self.known_variables.is_empty() {
             return None;
         }
-        let variables: Variables = self
-            .known_constants
-            .iter()
-            .enumerate()
-            .filter_map(|(slot, value)| {
-                value.as_ref().and_then(|value| {
-                    self.slots
-                        .name(u32::try_from(slot).ok()?)
-                        .map(|name| (name.to_owned(), value.clone()))
-                })
-            })
-            .collect();
-        evaluate(expression, &variables, line).ok()
+        evaluate(expression, &self.known_variables, line).ok()
     }
 
     fn track_constant_state(&mut self, op: &Op) {
@@ -275,13 +265,24 @@ impl ProgramBuilder {
             | Op::Host(_)
             | Op::Halt => {
                 self.known_constants.fill(None);
+                self.known_variables.clear();
             }
         }
     }
 
     fn set_known(&mut self, slot: u32, value: Option<Value>) {
         if let Some(known) = self.known_constants.get_mut(slot as usize) {
-            *known = value;
+            *known = value.clone();
+            if let Some(name) = self.slots.name(slot) {
+                match value {
+                    Some(value) => {
+                        self.known_variables.insert(name.to_owned(), value);
+                    }
+                    None => {
+                        self.known_variables.remove(name);
+                    }
+                }
+            }
         }
     }
 

@@ -120,6 +120,8 @@ Short-circuit logic follows the same rule. If a constant left operand determines
 
 `ProgramBuilder` also tracks values installed by `SetConst` and `CopySlot` while assembling a straight-line region. A later assignment is evaluated against that small known-value environment; when the pure expression succeeds, it becomes another `SetConst` and does not need expression evaluation at runtime. The environment is cleared at jumps, host effects, unknown writes, and termination, so no value is propagated across a path merge or an external effect. Failed evaluation, random calls, and runtime-error candidates retain their original bytecode and error timing.
 
+The known-value environment also maintains an incremental slot-to-name map. Wide straight-line scripts no longer rebuild a `BTreeMap` from every slot on each assignment; jumps, host effects, and unknown writes still clear the environment.
+
 ### Direct instructions cover exact shapes
 
 Lowering represents these common forms with direct instructions:
