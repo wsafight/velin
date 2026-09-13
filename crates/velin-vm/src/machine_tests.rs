@@ -226,6 +226,26 @@ fn fused_update_jump_keeps_the_original_step_budget() {
 }
 
 #[test]
+fn scalar_update_reuses_the_existing_frame_footprint() {
+    let mut builder = ProgramBuilder::new();
+    let counter = builder.slot("counter");
+    builder.push(Op::SetConst {
+        slot: counter,
+        value: Value::Integer(1),
+        line: 1,
+    });
+    builder.push(Op::update(counter, UpdateOp::AddInteger { value: 1 }, 1, 1));
+    builder.push(Op::Halt);
+
+    let mut machine = Machine::new(builder.build()).unwrap();
+    machine.step().unwrap();
+    let before = machine.frame_total;
+    machine.step().unwrap();
+    assert_eq!(machine.frame_total, before);
+    assert_eq!(machine.variable("counter"), Some(&Value::Integer(2)));
+}
+
+#[test]
 fn execution_profile_records_anonymous_op_hits_and_merges() {
     let mut builder = ProgramBuilder::new();
     let value = builder.slot("value");
