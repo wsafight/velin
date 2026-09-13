@@ -27,6 +27,14 @@ wasm-bindgen = "0.2"
 serde.workspace = true
 serde_json.workspace = true
 
+[dev-dependencies]
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
+velin = { workspace = true }
+
+[[bench]]
+name = "runtime"
+harness = false
+
 # NOTE: unlike the core crates, this shim does not set `unsafe_code = "forbid"`:
 # `#[wasm_bindgen]` expands to generated `unsafe` glue, which `forbid` cannot
 # permit. All *authored* code here is safe; the crate only marshals strings and

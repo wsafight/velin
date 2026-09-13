@@ -2,10 +2,10 @@ use super::{
     ChunkExecutionMetadata, ChunkId, DataMetrics, ExecutionMetadata, ExprOp, NO_METRICS, Op,
     OpExecutionMetadata, Program, TypedIr, UpdateOp,
 };
+use std::sync::Arc;
 
 impl ExecutionMetadata {
-    pub(crate) fn new(program: &Program) -> Self {
-        let typed_ir = TypedIr::from_program(program);
+    pub(crate) fn new(program: Arc<Program>) -> Self {
         let mut metrics = Vec::new();
         let program_constant_metrics = program
             .constants
@@ -56,14 +56,15 @@ impl ExecutionMetadata {
                     _ => NO_METRICS,
                 };
                 OpExecutionMetadata {
-                    line: op_line(program, op),
+                    line: op_line(&program, op),
                     metrics: constant_metrics,
                 }
             })
             .collect::<Vec<_>>()
             .into_boxed_slice();
         Self {
-            typed_ir,
+            program,
+            typed_ir: std::sync::OnceLock::new(),
             chunks,
             ops,
             metrics: metrics.into_boxed_slice(),
@@ -96,7 +97,8 @@ impl ExecutionMetadata {
     /// validated program.
     #[must_use]
     pub fn typed_ir(&self) -> &TypedIr {
-        &self.typed_ir
+        self.typed_ir
+            .get_or_init(|| TypedIr::from_program(&self.program))
     }
 
     /// Returns metrics for constants in the program-wide constant arena.

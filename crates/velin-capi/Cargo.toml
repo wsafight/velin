@@ -10,10 +10,18 @@ homepage.workspace = true
 description = "Stable C ABI for the Velin bytecode runtime"
 
 [lib]
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
 serde_json.workspace = true
 velin-bytecode = { workspace = true, features = ["serde"] }
 velin-vm = { workspace = true, default-features = false }
 velin-syntax = { workspace = true, default-features = false }
+
+[dev-dependencies]
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
+velin = { workspace = true }
+
+[[bench]]
+name = "c_api"
+harness = false

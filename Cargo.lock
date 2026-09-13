@@ -573,7 +573,9 @@ dependencies = [
 name = "velin-capi"
 version = "0.1.2"
 dependencies = [
+ "criterion",
  "serde_json",
+ "velin",
  "velin-bytecode",
  "velin-syntax",
  "velin-vm",
@@ -668,6 +670,7 @@ dependencies = [
 name = "velin-wasm"
 version = "0.1.2"
 dependencies = [
+ "criterion",
  "serde",
  "serde_json",
  "velin",

@@ -37,7 +37,7 @@ impl ValidatedProgram {
     #[must_use]
     pub fn shared_execution_metadata(&self) -> Arc<ExecutionMetadata> {
         self.metadata
-            .get_or_init(|| Arc::new(ExecutionMetadata::new(&self.program)))
+            .get_or_init(|| Arc::new(ExecutionMetadata::new(self.program.clone())))
             .clone()
     }
 

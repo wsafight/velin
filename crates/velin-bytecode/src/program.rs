@@ -14,6 +14,7 @@ use crate::slots::SlotTable;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
+use std::sync::{Arc, OnceLock};
 use velin_syntax::{BinaryOp, DataMetrics, Value};
 
 mod metadata;
@@ -274,7 +275,8 @@ impl ProgramArena {
 /// Precomputed properties used by the VM after a program is validated.
 #[derive(Debug)]
 pub struct ExecutionMetadata {
-    typed_ir: TypedIr,
+    program: Arc<Program>,
+    typed_ir: OnceLock<TypedIr>,
     chunks: Box<[ChunkExecutionMetadata]>,
     ops: Box<[OpExecutionMetadata]>,
     metrics: Box<[DataMetrics]>,
