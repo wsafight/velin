@@ -398,6 +398,17 @@ impl Program {
             line: chunk.line,
         })
     }
+
+    /// Removes slot names and reverse lookup for numeric-slot-only hosts.
+    ///
+    /// Slot IDs, frame width, bytecode, and the internal RNG slot remain
+    /// unchanged. The returned program is intended for execution and cannot
+    /// be used for name-based variable binding or source-friendly diagnostics.
+    #[must_use]
+    pub fn without_slot_names(mut self) -> Self {
+        self.slots = self.slots.without_names();
+        self
+    }
 }
 
 fn append_reusable_chunk(
