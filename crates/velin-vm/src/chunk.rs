@@ -275,7 +275,7 @@ fn string_metrics(text: &str) -> DataMetrics {
     }
 }
 
-fn shallow_metrics(value: &Value) -> DataMetrics {
+pub(crate) fn shallow_metrics(value: &Value) -> DataMetrics {
     match value {
         Value::String(text) => string_metrics(text),
         _ => scalar_metrics(value),

@@ -1,7 +1,7 @@
 use super::{
     BinaryOp, ChunkExecutionMetadata, ChunkId, DataMetrics, ExecutionMetadata, ExprChunkRef,
     ExprOp, NO_METRICS, Op, OpExecutionMetadata, PreparedExpr, Program, QUICKENED_CALL_TAG,
-    QuickenedCall, QuickenedCallRef, QuickenedOperand, UpdateOp, Value,
+    QuickenedCall, QuickenedCallRef, QuickenedOperand, RegisterExpr, RegisterOp, UpdateOp, Value,
 };
 
 impl ExecutionMetadata {
@@ -20,6 +20,7 @@ impl ExecutionMetadata {
         let mut quickened_calls = Vec::new();
         let mut quickened_operands = Vec::new();
         let mut prepared = Vec::new();
+        let mut registers = Vec::new();
         let mut expression_heights = Vec::new();
         let chunks = (0..program.chunks.len())
             .map(|id| {
@@ -41,6 +42,7 @@ impl ExecutionMetadata {
                     .map_or(NO_METRICS, |index| QUICKENED_CALL_TAG | index),
                 };
                 prepared.push(prepare_expression(chunk));
+                registers.push(prepare_register_expression(chunk));
                 let (max_stack, mutates_frame) =
                     expression_execution_shape(chunk.ops, &mut expression_heights);
                 ChunkExecutionMetadata {
@@ -78,6 +80,7 @@ impl ExecutionMetadata {
             quickened_calls: quickened_calls.into_boxed_slice(),
             quickened_operands: quickened_operands.into_boxed_slice(),
             prepared: prepared.into_boxed_slice(),
+            registers: registers.into_boxed_slice(),
         }
     }
 
@@ -123,6 +126,12 @@ impl ExecutionMetadata {
     #[must_use]
     pub fn prepared_expr(&self, id: ChunkId) -> Option<PreparedExpr> {
         self.prepared.get(id as usize).copied().flatten()
+    }
+
+    /// Returns a non-serialized register plan when one was prepared.
+    #[must_use]
+    pub fn register_expr(&self, id: ChunkId) -> Option<&RegisterExpr> {
+        self.registers.get(id as usize)?.as_ref()
     }
 
     /// Returns metrics for constants in the program-wide constant arena.
@@ -194,6 +203,63 @@ fn prepare_expression(chunk: ExprChunkRef<'_>) -> Option<PreparedExpr> {
         }
         _ => None,
     }
+}
+
+fn prepare_register_expression(chunk: ExprChunkRef<'_>) -> Option<RegisterExpr> {
+    if chunk.ops.len() < 12 {
+        return None;
+    }
+    let mut stack = Vec::new();
+    let mut operations = Vec::with_capacity(chunk.ops.len());
+    let mut next_register = 0u16;
+    for op in chunk.ops {
+        match op {
+            ExprOp::Const(constant) => {
+                let dst = next_register;
+                next_register = next_register.checked_add(1)?;
+                stack.push(dst);
+                operations.push(RegisterOp::LoadConstant {
+                    dst,
+                    constant: *constant,
+                });
+            }
+            ExprOp::Load { slot, .. } => {
+                let dst = next_register;
+                next_register = next_register.checked_add(1)?;
+                stack.push(dst);
+                operations.push(RegisterOp::LoadSlot { dst, slot: *slot });
+            }
+            ExprOp::Unary(op) => {
+                let source = stack.pop()?;
+                stack.push(source);
+                operations.push(RegisterOp::Unary {
+                    dst: source,
+                    op: *op,
+                    source,
+                });
+            }
+            ExprOp::Binary(op) if !matches!(op, BinaryOp::And | BinaryOp::Or) => {
+                let right = stack.pop()?;
+                let left = stack.pop()?;
+                stack.push(left);
+                operations.push(RegisterOp::Binary {
+                    dst: left,
+                    left,
+                    op: *op,
+                    right,
+                });
+            }
+            _ => return None,
+        }
+    }
+    let [result] = stack.as_slice() else {
+        return None;
+    };
+    Some(RegisterExpr {
+        ops: operations.into_boxed_slice(),
+        result: *result,
+        registers: next_register,
+    })
 }
 
 fn push_metrics(metrics: &mut Vec<DataMetrics>, value: DataMetrics) -> u32 {

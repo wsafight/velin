@@ -13,7 +13,7 @@ use crate::slots::SlotTable;
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
-use velin_syntax::{BinaryOp, Builtin, DataMetrics, Expr, Value};
+use velin_syntax::{BinaryOp, Builtin, DataMetrics, Expr, UnaryOp, Value};
 
 mod builder;
 mod metadata;
@@ -171,6 +171,7 @@ pub struct ExecutionMetadata {
     quickened_calls: Box<[QuickenedCall]>,
     quickened_operands: Box<[QuickenedOperand]>,
     prepared: Box<[Option<PreparedExpr>]>,
+    registers: Box<[Option<RegisterExpr>]>,
 }
 
 #[derive(Debug)]
@@ -212,6 +213,41 @@ pub enum PreparedExpr {
         slot: u32,
         operation: BinaryOp,
         value: i64,
+    },
+}
+
+/// A non-serialized register plan for a long, straight-line expression.
+///
+/// The canonical [`ExprOp`] sequence remains the source of truth and is kept
+/// as the fallback for short or control-flow-heavy expressions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisterExpr {
+    pub ops: Box<[RegisterOp]>,
+    pub result: u16,
+    pub registers: u16,
+}
+
+/// One operation in a [`RegisterExpr`] execution plan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegisterOp {
+    LoadConstant {
+        dst: u16,
+        constant: u32,
+    },
+    LoadSlot {
+        dst: u16,
+        slot: u32,
+    },
+    Unary {
+        dst: u16,
+        op: UnaryOp,
+        source: u16,
+    },
+    Binary {
+        dst: u16,
+        left: u16,
+        op: BinaryOp,
+        right: u16,
     },
 }
 

@@ -13,6 +13,8 @@ use velin::{
     parse_program,
 };
 
+#[path = "pipeline/p1.rs"]
+mod pipeline_p1;
 #[path = "pipeline/p2.rs"]
 mod pipeline_p2;
 
@@ -469,6 +471,7 @@ criterion_group!(
     bench_compile_expression_heavy_script,
     bench_constant_folding,
     bench_counter_loop,
+    pipeline_p1::bench_register_expression_loop,
     pipeline_p2::bench_prepared_expression_loop,
     bench_scalar_reassignment,
     bench_boolean_slot_loop,

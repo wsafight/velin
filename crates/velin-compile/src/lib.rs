@@ -32,7 +32,7 @@ pub use frame::{InitialFrame, InitialFrameError, InitialValue};
 pub use program::{
     ChunkExecutionMetadata, ChunkId, ExecutionMetadata, HostOp, Op, OpExecutionMetadata, Pc,
     PreparedExpr, Program, ProgramBuilder, ProgramChunk, QuickenedCallRef, QuickenedOperand,
-    UpdateOp,
+    RegisterExpr, RegisterOp, UpdateOp,
 };
 pub use slots::{RNG_STATE_SLOT, SlotTable};
 pub use validate::{

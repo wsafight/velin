@@ -1,4 +1,4 @@
-use super::execution::eval_host_args;
+use super::support::eval_host_args;
 use super::{EvalError, HostEffect, MAX_IMMEDIATE_STEPS, Machine, Op};
 
 impl Machine {
@@ -56,6 +56,7 @@ impl Machine {
                 &mut self.frame,
                 &mut self.expression_stack,
                 &mut self.expression_metrics,
+                &mut self.register_values,
                 host,
             )?;
             self.pc += 1;

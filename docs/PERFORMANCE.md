@@ -164,6 +164,12 @@ Each `Machine` owns an `expression_stack`. Evaluation clears its length and rese
 
 After machine construction, straight-line scalar expressions normally require only stack pushes and pops, without repeatedly creating an operand container.
 
+### Long scalar expressions can use a register plan
+
+During execution preparation, a long expression with only constants, slot loads, unary operators, and ordinary binary operators is lowered to a non-serialized register plan. Each value is assigned a stable temporary register, so evaluation reads operands by index instead of maintaining a value stack for every intermediate. The plan is stored in execution metadata and rebuilt from the validated expression chunk; it is not part of the serialized bytecode format.
+
+The register path uses the same `apply_unary` and `apply_binary` functions as the stack evaluator and reports errors with the expression's source line. Short expressions, short-circuit operators, built-ins, concatenation, random operations, and any shape that cannot be proven straight-line continue through the canonical `ExprOp` stack path. A reusable `Option<Value>` workspace keeps temporary allocations out of repeated evaluations, and the final value is measured before it enters the frame's normal resource accounting.
+
 ### Simple built-in calls are specialized during preparation
 
 When an expression consists only of `Const` or `Load` operands followed by one `Call`, execution metadata resolves the arguments to `QuickenedOperand::Constant` or `QuickenedOperand::Slot`. Runtime execution does not need to interpret those load instructions again.

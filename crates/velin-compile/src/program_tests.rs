@@ -127,6 +127,39 @@ fn validation_precomputes_execution_metadata() {
 }
 
 #[test]
+fn validation_prepares_long_scalar_register_plan() {
+    let mut builder = ProgramBuilder::new();
+    let _left = builder.slot("left");
+    let _right = builder.slot("right");
+    let target = builder.slot("target");
+    let mut expression = Expr::Variable("left".into());
+    for _ in 0..8 {
+        expression = Expr::Binary {
+            left: Box::new(expression),
+            op: BinaryOp::Add,
+            right: Box::new(Expr::Variable("right".into())),
+        };
+    }
+    let chunk = builder.expr(&expression, 3);
+    builder.push(Op::Set {
+        slot: target,
+        value: chunk,
+    });
+    let validated = crate::ValidatedProgram::new(builder.build()).unwrap();
+    let metadata = validated.shared_execution_metadata();
+    let plan = metadata
+        .register_expr(chunk)
+        .expect("long scalar expression should use registers");
+    assert_eq!(plan.result, 0);
+    assert!(plan.registers >= 9);
+    assert!(
+        plan.ops
+            .iter()
+            .any(|op| matches!(op, RegisterOp::Binary { .. }))
+    );
+}
+
+#[test]
 fn validation_quickens_builtins_with_direct_operands() {
     let mut builder = ProgramBuilder::new();
     let items = builder.slot("items");

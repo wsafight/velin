@@ -1,10 +1,12 @@
 use super::{
     Builtin, DataFootprint, DataMetrics, EvalError, ExecutionMetadata, FrameAccess, FrameState,
-    MAX_DATA_DEPTH, MAX_DATA_TEXT_BYTES, MAX_DATA_VALUES, Program, QuickenedCallRef,
-    QuickenedOperand, Value, eval_validated_chunk, invoke_readonly_measured,
+    HostOp, MAX_DATA_DEPTH, MAX_DATA_TEXT_BYTES, MAX_DATA_VALUES, MAX_HOST_PAYLOAD_TEXT_BYTES,
+    MAX_HOST_PAYLOAD_VALUES, Program, QuickenedCallRef, QuickenedOperand, RegisterExpr, RegisterOp,
+    Value, eval_validated_chunk, invoke_readonly_measured,
 };
+use crate::chunk::shallow_metrics;
 use velin_compile::PreparedExpr;
-use velin_eval::{apply_binary, invoke_stack_measured_with_metrics};
+use velin_eval::{apply_binary, apply_unary, invoke_stack_measured_with_metrics};
 
 #[inline]
 pub(super) fn cache_metrics(frame: &mut FrameState, slot: usize, metrics: DataMetrics) {
@@ -19,6 +21,7 @@ pub(super) fn eval_chunk_for(
     frame: &mut FrameState,
     expression_stack: &mut Vec<Value>,
     expression_metrics: &mut Vec<DataMetrics>,
+    register_values: &mut Vec<Option<Value>>,
     chunk_id: u32,
 ) -> Result<(Value, DataMetrics), EvalError> {
     let (execution, result_metrics, quickened) = metadata
@@ -36,6 +39,15 @@ pub(super) fn eval_chunk_for(
     }
     if let Some(prepared) = metadata.prepared_expr(chunk_id) {
         return eval_prepared_expr(program, frame, chunk_id, prepared, result_metrics);
+    }
+    if let Some(registers) = metadata.register_expr(chunk_id) {
+        return eval_register_expr(
+            program,
+            frame,
+            registers,
+            register_values,
+            program.chunks[chunk_id as usize].line as usize,
+        );
     }
     let chunk = program
         .chunk(chunk_id)
@@ -69,6 +81,92 @@ pub(super) fn eval_chunk_for(
         result_metrics,
         |slot| slots.name(slot).unwrap_or("?").to_owned(),
     )
+}
+
+fn eval_register_expr(
+    program: &Program,
+    frame: &FrameState,
+    expression: &RegisterExpr,
+    values: &mut Vec<Option<Value>>,
+    line: usize,
+) -> Result<(Value, DataMetrics), EvalError> {
+    let register_count = expression.registers as usize;
+    if values.len() < register_count {
+        values.resize_with(register_count, || None);
+    }
+    for operation in &expression.ops {
+        match *operation {
+            RegisterOp::LoadConstant { dst, constant } => {
+                values[dst as usize] = Some(program.constants[constant as usize].clone());
+            }
+            RegisterOp::LoadSlot { dst, slot } => {
+                let value = frame.values[slot as usize].clone().ok_or_else(|| {
+                    velin_eval::unassigned(line, program.slots.name(slot).unwrap_or("?"))
+                })?;
+                values[dst as usize] = Some(value);
+            }
+            RegisterOp::Unary { dst, op, source } => {
+                let value = values[source as usize]
+                    .take()
+                    .expect("validated register unary operand");
+                values[dst as usize] = Some(apply_unary(op, value, line)?);
+            }
+            RegisterOp::Binary {
+                dst,
+                left,
+                op,
+                right,
+            } => {
+                let right = values[right as usize]
+                    .take()
+                    .expect("validated register binary right operand");
+                let left = values[left as usize]
+                    .take()
+                    .expect("validated register binary left operand");
+                values[dst as usize] = Some(apply_binary(left, op, right, line)?);
+            }
+        }
+    }
+    let result = values[expression.result as usize]
+        .take()
+        .expect("validated register result");
+    let result_metrics = shallow_metrics(&result);
+    Ok((result, result_metrics))
+}
+
+pub(super) fn eval_host_args(
+    program: &Program,
+    metadata: &ExecutionMetadata,
+    frame: &mut FrameState,
+    expression_stack: &mut Vec<Value>,
+    expression_metrics: &mut Vec<DataMetrics>,
+    register_values: &mut Vec<Option<Value>>,
+    host: &HostOp,
+) -> Result<Vec<Value>, EvalError> {
+    let line = host.line as usize;
+    let mut values = Vec::with_capacity(host.args.len());
+    let mut payload = DataFootprint::default();
+    for chunk in host.args.iter().copied() {
+        let (value, metrics) = eval_chunk_for(
+            program,
+            metadata,
+            frame,
+            expression_stack,
+            expression_metrics,
+            register_values,
+            chunk,
+        )?;
+        payload = checked_total(
+            payload,
+            metrics.footprint,
+            MAX_HOST_PAYLOAD_VALUES,
+            MAX_HOST_PAYLOAD_TEXT_BYTES,
+            "host payload",
+        )
+        .map_err(|error| EvalError::new(line, error))?;
+        values.push(value);
+    }
+    Ok(values)
 }
 
 fn eval_prepared_expr(

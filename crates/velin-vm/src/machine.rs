@@ -12,7 +12,7 @@ use crate::chunk::{FrameAccess, eval_validated_chunk};
 use std::sync::Arc;
 use velin_compile::{
     ExecutionMetadata, HostOp, InitialFrame, Op, Program, ProgramValidationError, QuickenedCallRef,
-    QuickenedOperand, UpdateOp, ValidatedProgram,
+    QuickenedOperand, RegisterExpr, RegisterOp, UpdateOp, ValidatedProgram,
 };
 use velin_eval::{EvalError, invoke_readonly_measured};
 use velin_syntax::{
@@ -92,6 +92,7 @@ pub struct Machine {
     frame_total: DataFootprint,
     expression_stack: Vec<Value>,
     expression_metrics: Vec<DataMetrics>,
+    register_values: Vec<Option<Value>>,
     pc: usize,
     /// The host effect execution is currently waiting to resume from.
     pending_host: Option<PendingHost>,
@@ -219,6 +220,7 @@ impl Machine {
             frame_total,
             expression_stack: Vec::new(),
             expression_metrics: Vec::new(),
+            register_values: Vec::new(),
             pc: 0,
             pending_host: None,
             finished: false,
@@ -250,6 +252,7 @@ impl Machine {
             frame_total,
             expression_stack: Vec::new(),
             expression_metrics: Vec::new(),
+            register_values: Vec::new(),
             pc: 0,
             pending_host: None,
             finished: false,
@@ -332,3 +335,7 @@ mod restart_tests;
 #[cfg(test)]
 #[path = "batch_tests.rs"]
 mod batch_tests;
+
+#[cfg(test)]
+#[path = "register_tests.rs"]
+mod register_tests;
