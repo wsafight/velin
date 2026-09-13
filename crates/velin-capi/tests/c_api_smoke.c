@@ -7,7 +7,8 @@ int main(void) {
     assert(velin_c_api_version() == VELIN_C_API_VERSION);
     static const char program_json[] =
         "{\"ops\":[{\"Set\":{\"slot\":0,\"value\":0}},\"Halt\"],"
-        "\"chunks\":[{\"ops\":[{\"Const\":0}],\"constants\":[42],\"line\":1}],"
+        "\"chunks\":[{\"ops\":[{\"Const\":{\"dst\":0,\"constant\":0}}],"
+        "\"constants\":[42],\"registers\":1,\"result\":0,\"line\":1}],"
         "\"slots\":[\"result\"]}";
     uint8_t *error = NULL;
     size_t error_len = 0;

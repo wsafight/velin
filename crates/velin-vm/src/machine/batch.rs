@@ -56,9 +56,8 @@ impl Machine {
                 &self.program,
                 &self.metadata,
                 &mut self.frame,
-                &mut self.expression_stack,
-                &mut self.expression_metrics,
                 &mut self.register_values,
+                &mut self.register_metrics,
                 host,
             )?;
             self.pc += 1;

@@ -35,6 +35,14 @@ const ran = JSON.parse(run(`perform say("hi")\n`, "[]"));
 
 执行失败时（溢出、缺下标、回复用尽、步数预算）`RunResult` 还会带 `error`。
 
+runtime-only 的 `RuntimeMachine::run_batch(limit)` 可一次返回连续的无返回值 Host 事件：
+
+```json
+{"kind":"effects","effects":[{"host_id":7,"values":[1]}]}
+```
+
+结果按源码顺序排列；遇到绑定 Host、完成或错误时停止。`{"kind":"empty"}` 表示本批没有无返回值事件，宿主随后可调用 `run()` 区分完成和绑定 Host。`limit` 是 VM 批次上限，应用仍应在 JavaScript 驱动层维护队列容量和 payload 背压。
+
 ## 这条路径上的预算
 
 - 输出上限 1 MiB。

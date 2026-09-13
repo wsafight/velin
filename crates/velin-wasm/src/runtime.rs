@@ -81,7 +81,10 @@ mod tests {
         let result = slots.intern("result");
         let mut chunk = ExprChunk::new(1);
         let constant = chunk.constant(Value::Integer(42));
-        chunk.push(ExprOp::Const(constant));
+        chunk.push(ExprOp::Const {
+            dst: chunk.result,
+            constant,
+        });
         let program = Program::from_chunks(
             vec![
                 Op::Set {

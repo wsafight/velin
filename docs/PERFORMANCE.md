@@ -5,7 +5,7 @@
 Velin compiles source code to bytecode and executes that bytecode in a VM. Source is parsed only during compilation, and the resulting `Program` can be reused to create multiple `Machine` instances or run the same script repeatedly. A program has two instruction layers:
 
 - `Op` handles control flow such as assignment, jumps, host calls, and termination.
-- `ExprOp` is a stack-machine instruction set for constants, variable loads, operators, built-ins, and short-circuit logic.
+- `ExprOp` is a register instruction set for constants, variable loads, operators, built-ins, random operations, interpolation, and short-circuit logic.
 
 The complete path is:
 
@@ -90,9 +90,9 @@ The checker reports only type uses that it can prove will fail. `Unknown` remain
 
 ### Short-circuit analysis visits only reachable loads
 
-`and` and `or` use forward jumps in expression bytecode. Definite-assignment analysis runs an abstract stack containing known booleans, known non-booleans, and unknown values. It can therefore exclude variable loads hidden behind a constant short-circuit condition.
+`and` and `or` use forward jumps over explicit condition registers. Definite-assignment analysis propagates an abstract register file containing known booleans, known non-booleans, and unknown values. It can therefore exclude variable loads hidden behind a constant short-circuit condition.
 
-The first eight abstract stack entries live in a fixed array; deeper expressions spill to a `Vec`. Branch-free expressions are scanned directly, and valid forward branches propagate state in program-counter order. If the standalone analysis API receives noncanonical branches, it falls back to a work-queue fixed point instead of relying on compiler-produced input.
+Register states merge at expression control-flow joins. A work queue also keeps the standalone analysis API conservative for malformed or noncanonical input instead of assuming every chunk came from the compiler.
 
 Reachable `Load` sets are cached per expression chunk during one check. The state table and queue storage are also reused across chunks.
 
@@ -104,7 +104,7 @@ During built-in type inference, the first four argument types live in an inline 
 
 ### Expressions live in contiguous arenas
 
-`Program` stores all expression operations and constants in contiguous `expr_ops` and `constants` arenas. A `ProgramChunk` contains only two ranges and a source line. The VM borrows slices through those ranges and never has to assemble an instruction object for each evaluation.
+`Program` stores all expression operations and constants in contiguous `expr_ops` and `constants` arenas. A `ProgramChunk` contains two ranges, the register count, the result register, and a source line. The VM borrows slices through those ranges and never has to assemble an instruction object for each evaluation.
 
 Runtime hosts can call `Program::into_execution_image` to move slot names and
 expression/operation columns out of the hot image. Numeric slots and contiguous
@@ -114,7 +114,7 @@ need name binding or editor diagnostics.
 
 `ProgramBuilder` owns one reusable `ExprChunk` scratch buffer. After an expression is compiled, its contents move into the arenas while the scratch capacity remains available for the next expression. At program completion, the main vectors call `shrink_to_fit` so build-time excess capacity is not retained indefinitely.
 
-On current 64-bit targets, layout tests fix `ExprOp` at 12 bytes, `Op` at 32 bytes, and `ProgramChunk` at 20 bytes. These tests expose accidental growth when fields are added to hot enums. Variable-sized host arguments are boxed so their cold payload does not widen every `Op`.
+On current 64-bit targets, layout tests fix `ExprOp` at 12 bytes, `Op` at 32 bytes, and `ProgramChunk` at 24 bytes. These tests expose accidental growth when fields are added to hot enums. Variable-sized host arguments are boxed so their cold payload does not widen every `Op`.
 
 ### Constant folding is conservative
 
@@ -143,7 +143,6 @@ Lowering represents these common forms with direct instructions:
 | Constant assignment | `SetConst` | Installs the value with precomputed resource metrics |
 | Variable copy | `CopySlot` | Loads by slot and reuses the source slot's metrics |
 | `count = count + constant` | `Update::AddInteger` | Performs checked addition directly on the slot |
-| `if enabled` | Prepared `Load` path for `JumpIfFalse` | Reads a boolean slot directly without copying a temporary `Value` or metrics |
 | `slot <op> integer literal` condition | `JumpIfIntegerCompare` | Reads the integer slot and decides the branch directly |
 | Self-targeting `push`, `put`, `remove`, or `+` | `Update` | Retains destination ownership and updates after preflight |
 
@@ -165,7 +164,7 @@ The VM recognizes an `Update` immediately followed by an unconditional `Jump`, t
 
 - limits on instructions, chunks, slots, and argument counts;
 - bounds for slot, constant, chunk, and jump-target indices;
-- operand-stack height along every expression path and a single final result;
+- register and argument-range bounds, definitions on every reachable expression path, and a defined result register;
 - constant value-tree and program text budgets;
 - update instruction and built-in argument validity.
 
@@ -177,7 +176,7 @@ The safety boundary remains explicit rather than depending on a calling conventi
 
 A validated program lazily constructs `ExecutionMetadata` through `OnceLock`. Compile-only and check-only users do not pay for runtime metadata. The first `Machine` initializes it, and later machines share it.
 
-Metadata records each expression's maximum stack depth, whether it mutates RNG state, whether it inherits slot metrics directly, constant result metrics, source lines, and directly addressable built-in call plans. These properties do not change during the program's lifetime and need not be rediscovered on each run.
+Metadata records each expression's register count, whether it mutates RNG state, whether it inherits slot metrics directly, constant result metrics, and source lines. These properties do not change during the program's lifetime and need not be rediscovered on each run.
 
 ### Artifacts use a bounded binary payload
 
@@ -201,34 +200,22 @@ append entry point that still enforces the final output limit without walking
 the entire value tree again. Copy-on-write for aliases and all error ordering
 remain unchanged.
 
-### The operand stack is reused across expressions
+### All expressions use register bytecode
 
-Each `Machine` owns an `expression_stack`. Evaluation clears its length and reserves against the maximum stack depth computed during execution preparation. `ExprOp` instructions and constants are borrowed from the program arenas rather than copied.
+Register operands are part of the serialized `ExprOp` format; execution does not derive a second plan. Constants and slot reads write named destinations, unary and binary operations name their inputs, and each chunk declares its register count and result register. `Machine` reuses parallel `Option<Value>` and `Option<DataMetrics>` register files across expressions.
 
-After machine construction, straight-line scalar expressions normally require only stack pushes and pops, without repeatedly creating an operand container.
+Short-circuit branches, built-ins, interpolation, and random operations use the same interpreter as scalar arithmetic. Conditional instructions read a condition register, while variable-arity operations consume a validated contiguous register range. There is no operand-stack execution path or fallback.
 
-### Long scalar expressions can use a register plan
-
-During execution preparation, a straight-line scalar expression with only constants, slot loads, unary operators, and ordinary binary operators is lowered to a non-serialized register plan. Each value is assigned a stable temporary register, so evaluation reads operands by index instead of maintaining a value stack for every intermediate. The plan is stored in execution metadata and rebuilt from the validated expression chunk; it is not part of the serialized bytecode format.
-
-The register path uses the same `apply_unary` and `apply_binary` functions as the stack evaluator and reports errors with the expression's source line. Short-circuit operators, built-ins, concatenation, random operations, and any shape that cannot be proven straight-line continue through the canonical `ExprOp` stack path. A reusable `Option<Value>` workspace keeps temporary allocations out of repeated evaluations, and the final value is measured before it enters the frame's normal resource accounting.
+Typed integer arithmetic and boolean negation still delegate failures and dynamic cases to the shared `velin-eval` semantics. Externally supplied values therefore retain the same overflow, type, and source-line diagnostics as the reference evaluator.
 
 The VM also exposes a bounded `ExecutionProfile` containing only validated,
 anonymous program-counter hit counts. `hot_ops` and `merge` provide an offline
 feedback input; profiles never contain values, strings, or Host payloads and do
 not alter default execution semantics.
 
-The plan carries a small inferred type tag for each operation. Integer arithmetic and boolean negation can use typed helpers when the runtime values agree; a mismatch immediately falls back to the shared dynamic operator so externally supplied values keep the same diagnostics. Logical values are represented in SSA order and mapped to reusable physical registers using a compact linear-lifetime strategy, without adding a second semantic representation.
+### Built-ins consume register ranges
 
-### Simple built-in calls are specialized during preparation
-
-When an expression consists only of `Const` or `Load` operands followed by one `Call`, execution metadata resolves the arguments to `QuickenedOperand::Constant` or `QuickenedOperand::Slot`. Runtime execution does not need to interpret those load instructions again.
-
-For read-only `len`, `get`, and `contains`, the VM borrows each `Value` directly from the constant pool or frame slot and passes a stack-allocated reference array to `velin-eval`. The source collection or string `Arc` is not cloned first.
-
-Ownership-consuming `list`, `record`, `push`, `put`, and `remove` calls continue through the reusable operand stack. Fixed-arity built-ins pop operands directly from its end. When `list` arguments occupy the whole stack, the resulting list can take ownership of that `Vec`. Complex argument expressions always use ordinary `ExprOp` evaluation.
-
-The borrowed path, owned path, and ordinary evaluator ultimately share one built-in implementation and one set of error rules.
+`Call` names a contiguous argument range. The VM collects owned arguments and their existing metrics from those registers, then invokes the shared built-in implementation. Collection constructors and edits preserve copy-on-write behavior, and all built-ins retain the reference evaluator's validation and error rules.
 
 ### Self-updates use copy-on-write
 
@@ -248,7 +235,7 @@ This reconciles value semantics with storage reuse. A value being in the destina
 
 Direct constants, variable copies, and ordinary expression results can carry existing metrics forward. A collection edit updates node and text counts by subtracting the removed item and adding the replacement. Depth uses a conservative incremental rule: the result tree is rescanned only when the edit removes a deepest child and the new child cannot preserve the previous depth.
 
-When `Update::AddInteger` has a proven scalar input and result, the VM reuses the unchanged scalar footprint and updates only the value and depth cache. Overflow, type errors, and resource limits retain their existing checks. The boolean-slot branch fast path is enabled only when execution preparation proves a single `Load`; all other conditions use the general expression evaluator.
+When `Update::AddInteger` has a proven scalar input and result, the VM reuses the unchanged scalar footprint and updates only the value and depth cache. Overflow, type errors, and resource limits retain their existing checks. Conditions that are not specialized integer comparisons execute through the register expression interpreter.
 
 Logical resource accounting is independent of `Arc` sharing. If multiple slots reference the same collection, each logical value counts against the budget, so execution does not depend on transient ownership state.
 

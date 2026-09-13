@@ -17,18 +17,17 @@ fn compact_source_position(position: usize) -> u32 {
     u32::try_from(position).unwrap_or(u32::MAX)
 }
 
-pub use bytecode::{ExprChunk, ExprChunkRef, ExprOp};
+pub use bytecode::{ExprChunk, ExprChunkRef, ExprOp, Register};
 pub use debug::{DebugLocation, DebugTable};
 pub use frame::{InitialFrame, InitialFrameError, InitialValue};
 pub use ir::{IrBlock, IrOp, IrTerminator, IrType, IrValue, TypedIr};
 pub use program::{
     ChunkExecutionMetadata, ChunkId, ExecutionImage, ExecutionMetadata, HostOp, Op,
-    OpExecutionMetadata, Pc, PreparedExpr, Program, ProgramArena, ProgramChunk, QuickenedCallRef,
-    QuickenedOperand, RegisterExpr, RegisterOp, RegisterType, UpdateOp,
+    OpExecutionMetadata, Pc, Program, ProgramArena, ProgramChunk, UpdateOp,
 };
 pub use slots::{RNG_STATE_SLOT, SlotTable};
 pub use validate::{
-    MAX_EXPR_OPS, MAX_EXPR_STACK, MAX_HOST_ARGUMENTS, MAX_PROGRAM_CHUNKS,
+    MAX_EXPR_OPS, MAX_EXPR_REGISTERS, MAX_HOST_ARGUMENTS, MAX_PROGRAM_CHUNKS,
     MAX_PROGRAM_CONSTANT_VALUES, MAX_PROGRAM_OPS, MAX_PROGRAM_SLOTS, MAX_PROGRAM_TEXT_BYTES,
     ProgramValidationError, ValidatedProgram,
 };

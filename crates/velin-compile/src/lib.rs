@@ -8,7 +8,7 @@
 //!
 //! The two IR layers are:
 //!
-//! * [`ExprChunk`] / [`ExprOp`] — a stack machine for one expression.
+//! * [`ExprChunk`] / [`ExprOp`] — explicit-register bytecode for one expression.
 //! * [`Program`] / [`Op`] — control flow over expression chunks, assembled with
 //!   [`ProgramBuilder`].
 //!
@@ -26,11 +26,11 @@ pub use builder::ProgramBuilder;
 pub use expr::compile_expression;
 pub use velin_bytecode::{
     ChunkExecutionMetadata, ChunkId, ExecutionMetadata, ExprChunk, ExprChunkRef, ExprOp, HostOp,
-    InitialFrame, InitialFrameError, InitialValue, MAX_EXPR_OPS, MAX_EXPR_STACK,
+    InitialFrame, InitialFrameError, InitialValue, MAX_EXPR_OPS, MAX_EXPR_REGISTERS,
     MAX_HOST_ARGUMENTS, MAX_PROGRAM_CHUNKS, MAX_PROGRAM_CONSTANT_VALUES, MAX_PROGRAM_OPS,
-    MAX_PROGRAM_SLOTS, MAX_PROGRAM_TEXT_BYTES, Op, OpExecutionMetadata, Pc, PreparedExpr, Program,
-    ProgramArena, ProgramChunk, ProgramValidationError, QuickenedCallRef, QuickenedOperand,
-    RNG_STATE_SLOT, RegisterExpr, RegisterOp, RegisterType, SlotTable, UpdateOp, ValidatedProgram,
+    MAX_PROGRAM_SLOTS, MAX_PROGRAM_TEXT_BYTES, Op, OpExecutionMetadata, Pc, Program, ProgramArena,
+    ProgramChunk, ProgramValidationError, RNG_STATE_SLOT, Register, SlotTable, UpdateOp,
+    ValidatedProgram,
 };
 
 #[cfg(test)]

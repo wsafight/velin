@@ -36,7 +36,7 @@ velin-lang          statements + embedded expressions
 velin-compile       源码降级与 ProgramBuilder
   |
   v
-velin-bytecode      Program + 校验 + 执行计划
+velin-bytecode      Program + 校验 + 执行元数据
   |
   v
 velin-vm            Machine state
@@ -60,9 +60,9 @@ Yield::Finished
 | `velin-syntax` | 公共数据模型：`Value`、`Expr`、运算符、`Span`、`Diagnostic` |
 | `velin-parse` | 表达式源码到 AST，不处理语句控制流 |
 | `velin-eval` | 树遍历参考求值器和内置函数语义 |
-| `velin-bytecode` | 稳定的表达式/程序字节码模型、槽位表、校验、wire 格式与派生执行计划 |
+| `velin-bytecode` | 寄存器/程序字节码模型、槽位表、校验、wire 格式与执行元数据 |
 | `velin-compile` | 源码表达式降级、常量传播与 `ProgramBuilder` |
-| `velin-vm` | 运行状态、表达式栈机、控制流循环、宿主挂起协议 |
+| `velin-vm` | 运行状态、寄存器表达式解释器、控制流循环、宿主挂起协议 |
 | `velin-check` | 类型推断、条件检查与确定赋值分析 |
 | `velin-lang` | 缩进敏感语句 AST、解析、降级、宿主名驻留 |
 | `velin` | 重导出稳定的嵌入 API，不实现新语义 |
@@ -138,7 +138,7 @@ Record
 
 ### 6.1 表达式字节码
 
-每个 `ExprChunk` 包含常量池、源码行号与扁平 `Vec<ExprOp>`。主要操作包括：
+每个 `ExprChunk` 包含常量池、源码行号、寄存器数量、结果寄存器与扁平 `Vec<ExprOp>`。每条产生值的指令都写明目标寄存器，运算直接写明源寄存器。主要操作包括：
 
 ```text
 Const / Load
@@ -149,7 +149,7 @@ JumpIfFalse / JumpIfTrue
 Concat
 ```
 
-变量在编译期解析成 `u32` 槽位，运行时不做字符串查表。`and` 和 `or` 编译为条件跳转，保持短路语义；字符串插值编译为求值各部分后统一 `Concat`。
+变量在编译期解析成 `u32` 槽位，运行时不做字符串查表。`and` 和 `or` 使用显式条件寄存器编译为条件跳转；built-in、随机操作与插值使用连续寄存器范围，插值最后执行一次 `Concat`。
 
 纯常量子树在编译期交给参考求值器计算。溢出、除零和类型错误等失败候选仍保留为字节码，因此运行时错误行为不变。字节码源码位置使用紧凑的 `u32`，完成后的 op 和常量向量会收缩到实际长度。
 
@@ -166,11 +166,11 @@ Host(HostOp { host_id, args, bind, line })
 Halt
 ```
 
-控制流操作只引用表达式 chunk、槽位和程序计数器。`items = push(items, value)`、`count = count + 1` 等所有权感知形式会生成 `Update`；VM 在取走目标值前预检类型、下标、单值预算和整机预算，失败时槽位保持不变。冷路径、可变长度的 `HostOp` 载荷被装箱，不再抬高每条热指令的尺寸。在 64 位目标上，`Op` 因此从 48 字节降到 32 字节，`ExprOp` 从 16 字节降到 12 字节，JSON 表示保持不变。`Program` 同时保存 `SlotTable`，用于初始化、调试和通过公共 API 按变量名读写状态。
+控制流操作只引用表达式 chunk、槽位和程序计数器。`items = push(items, value)`、`count = count + 1` 等所有权感知形式会生成 `Update`；VM 在取走目标值前预检类型、下标、单值预算和整机预算，失败时槽位保持不变。冷路径、可变长度的 `HostOp` 载荷被装箱，不再抬高每条热指令的尺寸。在 64 位目标上，`Op` 为 32 字节，`ExprOp` 为 12 字节，`ProgramChunk` 为 24 字节。`Program` 同时保存 `SlotTable`，用于初始化、调试和通过公共 API 按变量名读写状态。
 
 ### 6.3 校验边界
 
-`Program::validate` 检查控制流目标、chunk 和槽位索引、表达式前向跳转、所有路径的栈高度、内置函数参数数量以及字节码和常量预算。`ExprChunk::validate(slot_count)` 为独立使用表达式 VM 的调用方提供相同的局部保证。
+`Program::validate` 检查控制流目标、chunk 和槽位索引、寄存器及范围边界、表达式前向跳转、所有可达路径上的寄存器定义、结果寄存器、内置函数参数数量以及字节码和常量预算。`ExprChunk::validate(slot_count)` 为独立使用表达式 VM 的调用方提供相同的局部保证。
 
 `Program` 的 Serde 反序列化会自动运行校验，并拒绝重复槽位名。`Machine::new` 与 `Machine::with_seed` 仍会在构造时验证手工组装的程序并返回 `Result`。公开的 `eval_chunk` 会先验证独立 chunk；`Machine` 持有 `Arc<Program>`，构造成功后走内部已校验路径，不在每次表达式执行时重复扫描。
 
@@ -211,7 +211,7 @@ Integer / Boolean / String / List / Record / Unknown
 
 ## 9. 执行与资源限制
 
-`Machine` 通过 `Arc` 持有不可变 `Program`，并拥有独立的变量帧、程序计数器、挂起效果、完成标记和可复用表达式栈。构造函数是可失败的，只有验证后的程序才能进入执行状态。帧槽位保留已经测得的数据占用量，表达式和 built-in 求值同时返回值与指标，赋值及宿主载荷统计不再进行第二次递归扫描。
+`Machine` 通过 `Arc` 持有不可变 `Program`，并拥有独立的变量帧、程序计数器、挂起效果、完成标记和可复用寄存器值/指标数组。构造函数是可失败的，只有验证后的程序才能进入执行状态。帧槽位保留已经测得的数据占用量，表达式和 built-in 求值同时返回值与指标，赋值及宿主载荷统计不再进行第二次递归扫描。
 
 每次 `run` 或 `resume` 最多连续执行 `MAX_IMMEDIATE_STEPS` 条控制流操作。达到上限会返回可能存在无限循环的错误，使没有宿主让出点的脚本不能永久占用调用线程。
 
@@ -223,7 +223,7 @@ Integer / Boolean / String / List / Record / Unknown
 | 表达式 | 单次 64 KiB / 512 token / 32 层括号；插值最多 32 层并共享 256 KiB 工作量与 2,048 token 预算 |
 | 值 | 每棵值树 4,096 个节点、16 层集合、1 MiB 文本 |
 | 程序字节码 | 100,000 个控制流 op、100,000 个 chunk、65,536 个槽位、100,000 个常量值节点、16 MiB 常量及槽位文本 |
-| 表达式字节码 | 每个 chunk 4,096 个 op、最大栈高 1,024；每条宿主指令最多 128 个参数 |
+| 表达式字节码 | 每个 chunk 4,096 个 op、1,024 个寄存器；每条宿主指令最多 128 个参数 |
 | 工具层 | CLI / Playground 输出 1 MiB、宿主效果 1,000 次；Playground 回复 JSON 1 MiB、Worker 请求 5 秒；LSP JSON 正文 4 MiB、头部 64 KiB、单行头部 8 KiB |
 
 CLI、WebAssembly 或其他宿主仍应按自己的风险模型增加时间、效果权限和外部资源预算；这些限制属于宿主层，不能由语言核心统一决定。

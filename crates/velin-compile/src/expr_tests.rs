@@ -23,7 +23,13 @@ fn folds_successful_constant_subtrees_but_preserves_runtime_errors() {
     let mut slots = SlotTable::new();
     let constant = velin_parse::parse_expression("1 + 2 * 3", "test", 1, 1).unwrap();
     let chunk = compile_expression(&constant, &mut slots, 1);
-    assert_eq!(chunk.ops, vec![ExprOp::Const(0)]);
+    assert_eq!(
+        chunk.ops,
+        vec![ExprOp::Const {
+            dst: 0,
+            constant: 0
+        }]
+    );
     assert_eq!(chunk.constants, vec![Value::Integer(7)]);
 
     let dynamic = velin_parse::parse_expression("x + 2 * 3", "test", 1, 1).unwrap();
@@ -35,13 +41,22 @@ fn folds_successful_constant_subtrees_but_preserves_runtime_errors() {
     let chunk = compile_expression(&failing, &mut slots, 1);
     assert!(matches!(
         chunk.ops.last(),
-        Some(ExprOp::Binary(BinaryOp::Divide))
+        Some(ExprOp::Binary {
+            op: BinaryOp::Divide,
+            ..
+        })
     ));
 
     let short = velin_parse::parse_expression("false and missing", "test", 1, 1).unwrap();
     let chunk = compile_expression(&short, &mut slots, 1);
     assert_eq!(chunk.constants, vec![Value::Boolean(false)]);
-    assert_eq!(chunk.ops, vec![ExprOp::Const(0)]);
+    assert_eq!(
+        chunk.ops,
+        vec![ExprOp::Const {
+            dst: 0,
+            constant: 0
+        }]
+    );
 }
 
 #[test]
@@ -70,7 +85,13 @@ fn folds_constant_interpolation_without_building_an_ast_copy() {
     let mut slots = SlotTable::new();
     let interpolation = velin_parse::parse_expression("\"answer [1 + 2]\"", "test", 1, 1).unwrap();
     let chunk = compile_expression(&interpolation, &mut slots, 1);
-    assert_eq!(chunk.ops, vec![ExprOp::Const(0)]);
+    assert_eq!(
+        chunk.ops,
+        vec![ExprOp::Const {
+            dst: 0,
+            constant: 0
+        }]
+    );
     assert_eq!(chunk.constants, vec![Value::String("answer 3".into())]);
 }
 
@@ -99,7 +120,7 @@ fn and_emits_a_forward_guard_over_the_right_operand() {
     let chunk = compile_expression(&expr, &mut slots, 1);
     // Load a, JumpIfFalse END, Load b, Binary And -> END == 4
     match chunk.ops[1] {
-        ExprOp::JumpIfFalse(target) => assert_eq!(target as usize, chunk.ops.len()),
+        ExprOp::JumpIfFalse { target, .. } => assert_eq!(target as usize, chunk.ops.len()),
         ref other => panic!("expected JumpIfFalse guard, got {other:?}"),
     }
 }
@@ -114,7 +135,7 @@ fn or_emits_a_jump_if_true_guard() {
     };
     let chunk = compile_expression(&expr, &mut slots, 1);
     match chunk.ops[1] {
-        ExprOp::JumpIfTrue(target) => assert_eq!(target as usize, chunk.ops.len()),
+        ExprOp::JumpIfTrue { target, .. } => assert_eq!(target as usize, chunk.ops.len()),
         ref other => panic!("expected JumpIfTrue guard, got {other:?}"),
     }
 }
@@ -129,11 +150,11 @@ fn random_builtins_emit_dedicated_ops_with_one_shared_state_slot() {
     let state_slot = slots.rng_state().expect("RNG slot allocated");
     assert!(matches!(
         random_chunk.ops.last(),
-        Some(ExprOp::Random { state_slot: slot }) if *slot == state_slot
+        Some(ExprOp::Random { state_slot: slot, .. }) if *slot == state_slot
     ));
     assert!(matches!(
         chance_chunk.ops.last(),
-        Some(ExprOp::Chance { state_slot: slot }) if *slot == state_slot
+        Some(ExprOp::Chance { state_slot: slot, .. }) if *slot == state_slot
     ));
     assert_eq!(
         slots

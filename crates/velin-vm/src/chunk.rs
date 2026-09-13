@@ -1,21 +1,17 @@
-//! The expression stack machine.
+//! Register expression execution.
 //!
-//! Executes one [`ExprChunk`] against a frame of variable slots and returns the
-//! single [`Value`] it leaves on the operand stack. All the actual arithmetic,
-//! comparison, and built-in semantics are delegated to `velin-eval`, so the
-//! bytecode path and the tree-walker are guaranteed to agree operation for
-//! operation.
+//! Every instruction names its source and destination registers. Arithmetic,
+//! built-ins, interpolation, random operations, and short-circuit branches all
+//! execute through this one path; there is no operand-stack fallback.
 
 use velin_bytecode::{ExprChunk, ExprChunkRef, ExprOp};
 use velin_eval::{
-    EvalError, apply_binary, apply_unary, invoke_random, invoke_stack_measured_with_metrics,
-    unassigned,
+    EvalError, apply_binary, apply_boolean_not, apply_integer_binary, apply_integer_unary,
+    invoke_measured_with_metrics, invoke_random, invoke_readonly_measured, unassigned,
 };
 use velin_syntax::{BinaryOp, Builtin, DataFootprint, DataMetrics, MAX_DATA_TEXT_BYTES, Value};
 
-/// A variable frame: slot `i` holds `Some(value)` once assigned, `None`
-/// otherwise. Reading a `None` slot reproduces the tree-walker's
-/// "unassigned on this path" error.
+/// A variable frame: slot `i` is assigned when it contains a value.
 pub type Frame = [Option<Value>];
 
 pub(crate) enum FrameAccess<'a> {
@@ -39,16 +35,11 @@ impl FrameAccess<'_> {
     }
 }
 
-/// Evaluates `chunk` against `frame`, returning the resulting [`Value`].
-///
-/// The frame is mutable because dedicated random ops explicitly advance their
-/// state slot. Chunks without random ops leave it untouched.
+/// Evaluates a standalone, untrusted register chunk.
 ///
 /// # Errors
-/// Returns [`EvalError`] when the chunk is malformed or exceeds a bytecode
-/// budget, or for an unassigned slot, type mismatch, integer overflow,
-/// division by zero, or built-in failure. The chunk's recorded `line` is used
-/// for reporting.
+/// Returns an error for invalid bytecode, unassigned slots, type mismatches,
+/// arithmetic failures, invalid built-ins, or resource-limit violations.
 pub fn eval_chunk(
     chunk: &ExprChunk,
     frame: &mut Frame,
@@ -57,206 +48,320 @@ pub fn eval_chunk(
     chunk.validate(frame.len()).map_err(|error| {
         EvalError::new(chunk.line as usize, format!("invalid bytecode: {error}"))
     })?;
-    let mut stack = Vec::new();
+    let mut values = Vec::new();
     let mut metrics = Vec::new();
     eval_validated_chunk(
         chunk.as_chunk_ref(),
         FrameAccess::Mutable(frame),
         None,
         None,
-        &mut stack,
+        &mut values,
         &mut metrics,
-        chunk.ops.len(),
-        None,
         slot_name,
     )
     .map(|(value, _)| value)
 }
 
-/// Executes a chunk belonging to a `Program` already validated by `Machine`.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+/// Executes one already-validated register chunk with reusable workspaces.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn eval_validated_chunk(
     chunk: ExprChunkRef<'_>,
     mut frame: FrameAccess<'_>,
     frame_metrics: Option<(&[DataFootprint], &[u8])>,
     constant_metrics: Option<(&[DataMetrics], u32)>,
-    stack: &mut Vec<Value>,
-    metrics: &mut Vec<DataMetrics>,
-    max_stack: usize,
-    result_metrics: Option<DataMetrics>,
+    values: &mut Vec<Option<Value>>,
+    metrics: &mut Vec<Option<DataMetrics>>,
     slot_name: impl Fn(u32) -> String,
 ) -> Result<(Value, DataMetrics), EvalError> {
+    let register_count = usize::from(chunk.registers);
+    reset_workspace(values, register_count);
+    reset_workspace(metrics, register_count);
+    let result = execute_registers(
+        chunk,
+        &mut frame,
+        frame_metrics,
+        constant_metrics,
+        values,
+        metrics,
+        &slot_name,
+    );
+    clear_workspace(values, register_count);
+    clear_workspace(metrics, register_count);
+    result
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn execute_registers(
+    chunk: ExprChunkRef<'_>,
+    frame: &mut FrameAccess<'_>,
+    frame_metrics: Option<(&[DataFootprint], &[u8])>,
+    constant_metrics: Option<(&[DataMetrics], u32)>,
+    values: &mut [Option<Value>],
+    metrics: &mut [Option<DataMetrics>],
+    slot_name: &impl Fn(u32) -> String,
+) -> Result<(Value, DataMetrics), EvalError> {
     let line = chunk.line as usize;
-    stack.clear();
-    metrics.clear();
-    if stack.capacity() < max_stack {
-        stack.reserve(max_stack - stack.capacity());
-    }
-    if metrics.capacity() < max_stack {
-        metrics.reserve(max_stack - metrics.capacity());
-    }
     let mut pc = 0;
     while pc < chunk.ops.len() {
         match &chunk.ops[pc] {
-            ExprOp::Const(index) => {
-                let value = chunk.constants[*index as usize].clone();
+            ExprOp::Const { dst, constant } => {
+                let value = chunk.constants[*constant as usize].clone();
                 let value_metrics = constant_metrics
-                    .and_then(|(all, start)| {
-                        start
-                            .checked_add(*index)
-                            .and_then(|index| all.get(index as usize).copied())
-                    })
-                    .or_else(|| value.data_metrics().ok());
-                stack.push(value);
-                metrics.push(value_metrics.expect("validated constant metrics"));
+                    .and_then(|(all, start)| all.get((start + *constant) as usize).copied())
+                    .unwrap_or_else(|| {
+                        value
+                            .data_metrics()
+                            .expect("validated register constant metrics")
+                    });
+                write_register(values, metrics, *dst, value, value_metrics);
             }
-            ExprOp::Load { slot, .. } => {
-                let value = frame
-                    .values()
-                    .get(*slot as usize)
-                    .and_then(Option::as_ref)
-                    .cloned()
+            ExprOp::Load { dst, slot, .. } => {
+                let value = frame.values()[*slot as usize]
+                    .clone()
                     .ok_or_else(|| unassigned(line, &slot_name(*slot)))?;
-                let value_metrics = frame_metrics
-                    .and_then(|(footprints, depths)| {
-                        Some(DataMetrics {
-                            footprint: *footprints.get(*slot as usize)?,
-                            max_depth: usize::from(*depths.get(*slot as usize)?),
-                        })
-                    })
-                    .or_else(|| value.data_metrics().ok())
-                    .expect("validated frame metrics");
-                stack.push(value);
-                metrics.push(value_metrics);
+                let value_metrics = frame_metrics.map_or_else(
+                    || {
+                        value
+                            .data_metrics()
+                            .expect("validated register slot metrics")
+                    },
+                    |(footprints, depths)| DataMetrics {
+                        footprint: footprints[*slot as usize],
+                        max_depth: usize::from(depths[*slot as usize]),
+                    },
+                );
+                write_register(values, metrics, *dst, value, value_metrics);
             }
-            ExprOp::Unary(op) => {
-                let value = stack.pop().expect("unary operand present");
-                metrics.pop().expect("unary operand metrics present");
-                let result = apply_unary(*op, value, line)?;
+            ExprOp::Unary { dst, op, source } => {
+                let source = register_value(values, *source).clone();
+                let result = apply_unary_typed(*op, source, line)?;
                 let result_metrics = scalar_metrics(&result);
-                stack.push(result);
-                metrics.push(result_metrics);
+                write_register(values, metrics, *dst, result, result_metrics);
             }
-            ExprOp::Binary(op) => {
-                let right = stack.pop().expect("binary right operand present");
-                let left = stack.pop().expect("binary left operand present");
-                metrics.pop().expect("binary right metrics present");
-                metrics.pop().expect("binary left metrics present");
-                let result = apply_binary(left, *op, right, line)?;
+            ExprOp::Binary {
+                dst,
+                left,
+                op,
+                right,
+            } => {
+                let left = register_value(values, *left).clone();
+                let right = register_value(values, *right).clone();
+                let result = apply_binary_typed(left, *op, right, line)?;
                 let result_metrics = shallow_metrics(&result);
-                stack.push(result);
-                metrics.push(result_metrics);
+                write_register(values, metrics, *dst, result, result_metrics);
             }
-            ExprOp::Call { function, argc } => {
-                invoke_stack_measured_with_metrics(
-                    *function,
-                    stack,
-                    metrics,
-                    *argc as usize,
-                    line,
-                )?;
+            ExprOp::Call {
+                dst,
+                function,
+                args,
+            } => {
+                let (result, result_metrics) =
+                    if matches!(function, Builtin::Len | Builtin::Get | Builtin::Contains) {
+                        invoke_readonly_registers(*function, values, args.clone(), line)?
+                    } else {
+                        let (arguments, argument_metrics) =
+                            collect_registers(values, metrics, args.clone());
+                        invoke_measured_with_metrics(*function, arguments, &argument_metrics, line)?
+                    };
+                write_register(values, metrics, *dst, result, result_metrics);
             }
-            ExprOp::Random { state_slot } => {
-                let high = stack.pop().expect("random upper bound present");
-                let low = stack.pop().expect("random lower bound present");
-                metrics.pop().expect("random upper metrics present");
-                metrics.pop().expect("random lower metrics present");
+            ExprOp::Random {
+                dst,
+                args,
+                state_slot,
+            } => {
+                let arguments = collect_values(values, args.clone());
                 let result = invoke_random(
                     Builtin::Random,
-                    &[low, high],
+                    &arguments,
                     frame.rng_state(*state_slot, line)?,
                     line,
                 )?;
                 let result_metrics = scalar_metrics(&result);
-                stack.push(result);
-                metrics.push(result_metrics);
+                write_register(values, metrics, *dst, result, result_metrics);
             }
-            ExprOp::Chance { state_slot } => {
-                let argument = stack.pop().expect("chance percentage present");
-                metrics.pop().expect("chance argument metrics present");
+            ExprOp::Chance {
+                dst,
+                args,
+                state_slot,
+            } => {
+                let arguments = collect_values(values, args.clone());
                 let result = invoke_random(
                     Builtin::Chance,
-                    &[argument],
+                    &arguments,
                     frame.rng_state(*state_slot, line)?,
                     line,
                 )?;
                 let result_metrics = scalar_metrics(&result);
-                stack.push(result);
-                metrics.push(result_metrics);
+                write_register(values, metrics, *dst, result, result_metrics);
             }
-            ExprOp::Concat(count) => {
-                let at = stack.len() - *count as usize;
-                let rendered_bytes = stack[at..].iter().map(Value::display_len_known).try_fold(
-                    0usize,
-                    |total, length| {
-                        let length = length.map_err(|error| EvalError::new(line, error))?;
-                        total
-                            .checked_add(length)
-                            .ok_or_else(|| EvalError::new(line, "string size overflow"))
-                    },
-                )?;
+            ExprOp::JumpIfFalse { condition, target } => {
+                if register_value(values, *condition) == &Value::Boolean(false) {
+                    pc = *target as usize;
+                    continue;
+                }
+            }
+            ExprOp::JumpIfTrue { condition, target } => {
+                if register_value(values, *condition) == &Value::Boolean(true) {
+                    pc = *target as usize;
+                    continue;
+                }
+            }
+            ExprOp::Concat {
+                dst,
+                values: sources,
+            } => {
+                let rendered_bytes = sources.clone().try_fold(0usize, |total, register| {
+                    let length = register_value(values, register)
+                        .display_len_known()
+                        .map_err(|error| EvalError::new(line, error))?;
+                    total
+                        .checked_add(length)
+                        .ok_or_else(|| EvalError::new(line, "string size overflow"))
+                })?;
                 if rendered_bytes > MAX_DATA_TEXT_BYTES {
                     return Err(EvalError::new(line, "data text exceeds 1 MiB"));
                 }
                 let mut text = String::with_capacity(rendered_bytes);
-                for piece in &stack[at..] {
-                    piece
+                for register in sources.clone() {
+                    register_value(values, register)
                         .append_to_display_known(&mut text, MAX_DATA_TEXT_BYTES)
                         .map_err(|error| EvalError::new(line, error))?;
                 }
-                stack.truncate(at);
-                metrics.truncate(at);
                 let result_metrics = string_metrics(&text);
-                stack.push(Value::String(text.into()));
-                metrics.push(result_metrics);
-            }
-            ExprOp::JumpIfFalse(target) => {
-                if stack.last() == Some(&Value::Boolean(false)) {
-                    pc = *target as usize;
-                    continue;
-                }
-            }
-            ExprOp::JumpIfTrue(target) => {
-                if stack.last() == Some(&Value::Boolean(true)) {
-                    pc = *target as usize;
-                    continue;
-                }
-            }
-            ExprOp::AssertBoolean(op) => {
-                let value = stack.last().expect("boolean operand present");
-                if !matches!(value, Value::Boolean(_)) {
-                    let left = Value::Boolean(*op == BinaryOp::And);
-                    return apply_binary(left, *op, value.clone(), line)
-                        .map(|_| unreachable!("non-boolean operation cannot succeed"));
-                }
+                write_register(
+                    values,
+                    metrics,
+                    *dst,
+                    Value::String(text.into()),
+                    result_metrics,
+                );
             }
         }
         pc += 1;
     }
-    finish_chunk(stack, metrics, result_metrics, line)
-}
-
-fn finish_chunk(
-    stack: &mut Vec<Value>,
-    metrics: &mut Vec<DataMetrics>,
-    result_metrics: Option<DataMetrics>,
-    line: usize,
-) -> Result<(Value, DataMetrics), EvalError> {
-    let result = stack
-        .pop()
-        .ok_or_else(|| EvalError::new(line, "validated bytecode produced no value"))?;
-    let stack_metrics = metrics.pop();
-    let result_metrics = match result_metrics.or(stack_metrics) {
-        Some(metrics) => metrics,
-        None => result
-            .data_metrics()
-            .map_err(|error| EvalError::new(line, error))?,
-    };
+    let result = values[chunk.result as usize]
+        .take()
+        .expect("validated register result");
+    let result_metrics = metrics[chunk.result as usize]
+        .take()
+        .expect("validated register result metrics");
     Ok((result, result_metrics))
 }
 
-fn scalar_metrics(value: &Value) -> DataMetrics {
-    debug_assert!(matches!(value, Value::Integer(_) | Value::Boolean(_)));
+fn collect_values(values: &[Option<Value>], registers: std::ops::Range<u16>) -> Vec<Value> {
+    registers
+        .map(|register| register_value(values, register).clone())
+        .collect()
+}
+
+fn invoke_readonly_registers(
+    function: Builtin,
+    values: &[Option<Value>],
+    registers: std::ops::Range<u16>,
+    line: usize,
+) -> Result<(Value, DataMetrics), EvalError> {
+    let result = match registers.len() {
+        1 => {
+            let arguments = [register_value(values, registers.start)];
+            invoke_readonly_measured(function, &arguments, line)?
+        }
+        2 => {
+            let arguments = [
+                register_value(values, registers.start),
+                register_value(values, registers.start + 1),
+            ];
+            invoke_readonly_measured(function, &arguments, line)?
+        }
+        3 => {
+            let arguments = [
+                register_value(values, registers.start),
+                register_value(values, registers.start + 1),
+                register_value(values, registers.start + 2),
+            ];
+            invoke_readonly_measured(function, &arguments, line)?
+        }
+        _ => unreachable!("validated read-only built-in arity"),
+    };
+    Ok(result)
+}
+
+fn collect_registers(
+    values: &[Option<Value>],
+    metrics: &[Option<DataMetrics>],
+    registers: std::ops::Range<u16>,
+) -> (Vec<Value>, Vec<DataMetrics>) {
+    let mut arguments = Vec::with_capacity(registers.len());
+    let mut argument_metrics = Vec::with_capacity(registers.len());
+    for register in registers {
+        arguments.push(register_value(values, register).clone());
+        argument_metrics
+            .push(metrics[register as usize].expect("validated register argument metrics"));
+    }
+    (arguments, argument_metrics)
+}
+
+fn register_value(values: &[Option<Value>], register: u16) -> &Value {
+    values[register as usize]
+        .as_ref()
+        .expect("validated register source")
+}
+
+fn write_register(
+    values: &mut [Option<Value>],
+    metrics: &mut [Option<DataMetrics>],
+    dst: u16,
+    value: Value,
+    value_metrics: DataMetrics,
+) {
+    values[dst as usize] = Some(value);
+    metrics[dst as usize] = Some(value_metrics);
+}
+
+fn reset_workspace<T>(workspace: &mut Vec<Option<T>>, len: usize) {
+    if workspace.len() < len {
+        workspace.resize_with(len, || None);
+    }
+    clear_workspace(workspace, len);
+}
+
+fn clear_workspace<T>(workspace: &mut [Option<T>], len: usize) {
+    for value in &mut workspace[..len] {
+        *value = None;
+    }
+}
+
+#[inline]
+fn apply_unary_typed(
+    op: velin_syntax::UnaryOp,
+    value: Value,
+    line: usize,
+) -> Result<Value, EvalError> {
+    match (op, &value) {
+        (velin_syntax::UnaryOp::Negate, Value::Integer(value)) => apply_integer_unary(*value, line),
+        (velin_syntax::UnaryOp::Not, Value::Boolean(value)) => Ok(apply_boolean_not(*value)),
+        _ => velin_eval::apply_unary(op, value, line),
+    }
+}
+
+#[inline]
+fn apply_binary_typed(
+    left: Value,
+    op: BinaryOp,
+    right: Value,
+    line: usize,
+) -> Result<Value, EvalError> {
+    if matches!(
+        op,
+        BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
+    ) && let (Value::Integer(left), Value::Integer(right)) = (&left, &right)
+    {
+        return apply_integer_binary(*left, op, *right, line);
+    }
+    apply_binary(left, op, right, line)
+}
+
+fn scalar_metrics(_value: &Value) -> DataMetrics {
     DataMetrics {
         footprint: DataFootprint {
             values: 1,
@@ -283,7 +388,6 @@ pub(crate) fn shallow_metrics(value: &Value) -> DataMetrics {
     }
 }
 
-/// Resolves the serializable integer slot that owns RNG state.
 fn rng_state(frame: &mut Frame, slot: u32, line: usize) -> Result<&mut i64, EvalError> {
     let value = frame
         .get_mut(slot as usize)
@@ -401,8 +505,15 @@ mod tests {
     #[test]
     fn malformed_chunks_return_errors_instead_of_panicking() {
         let chunk = ExprChunk {
-            ops: vec![ExprOp::Binary(BinaryOp::Add)],
+            ops: vec![ExprOp::Binary {
+                dst: 0,
+                left: 1,
+                op: BinaryOp::Add,
+                right: 2,
+            }],
             constants: Vec::new(),
+            registers: 1,
+            result: 0,
             line: 7,
         };
         let error = eval_chunk(&chunk, &mut [], |_| "?".to_owned()).unwrap_err();

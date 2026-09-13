@@ -11,14 +11,13 @@ use self::support::{cache_metrics, checked_total};
 use crate::chunk::{FrameAccess, eval_validated_chunk};
 use std::sync::Arc;
 use velin_bytecode::{
-    ExecutionImage, ExecutionMetadata, HostOp, InitialFrame, Op, PreparedExpr, Program,
-    ProgramValidationError, QuickenedCallRef, QuickenedOperand, RegisterExpr, RegisterOp,
-    RegisterType, UpdateOp, ValidatedProgram,
+    ExecutionImage, ExecutionMetadata, HostOp, InitialFrame, Op, Program, ProgramValidationError,
+    UpdateOp, ValidatedProgram,
 };
-use velin_eval::{EvalError, invoke_readonly_measured};
+use velin_eval::EvalError;
 use velin_syntax::{
-    BinaryOp, Builtin, DataFootprint, DataMetrics, MAX_DATA_DEPTH, MAX_DATA_TEXT_BYTES,
-    MAX_DATA_VALUES, Value,
+    BinaryOp, DataFootprint, DataMetrics, MAX_DATA_DEPTH, MAX_DATA_TEXT_BYTES, MAX_DATA_VALUES,
+    Value,
 };
 
 /// The maximum number of control-flow ops executed between two yields.
@@ -147,9 +146,8 @@ pub struct Machine {
     metadata: Arc<ExecutionMetadata>,
     frame: FrameState,
     frame_total: DataFootprint,
-    expression_stack: Vec<Value>,
-    expression_metrics: Vec<DataMetrics>,
     register_values: Vec<Option<Value>>,
+    register_metrics: Vec<Option<DataMetrics>>,
     effect_buffer: Vec<HostEffect>,
     profile: ExecutionProfile,
     pc: usize,
@@ -286,9 +284,8 @@ impl Machine {
             metadata,
             frame,
             frame_total,
-            expression_stack: Vec::new(),
-            expression_metrics: Vec::new(),
             register_values: Vec::new(),
+            register_metrics: Vec::new(),
             effect_buffer: Vec::new(),
             profile,
             pc: 0,
@@ -321,9 +318,8 @@ impl Machine {
                 depths: frame_depths,
             },
             frame_total,
-            expression_stack: Vec::new(),
-            expression_metrics: Vec::new(),
             register_values: Vec::new(),
+            register_metrics: Vec::new(),
             effect_buffer: Vec::new(),
             profile,
             pc: 0,
@@ -400,7 +396,6 @@ impl Machine {
 
 mod batch;
 mod execution;
-mod register;
 mod support;
 mod updates;
 

@@ -6,6 +6,12 @@ change source and Rust APIs between minor releases.
 
 ## Unreleased
 
+### Changed
+
+- Expression bytecode now uses explicit registers for arithmetic, short-circuit control flow, built-ins, interpolation, and random operations; the VM no longer maintains an operand-stack fallback.
+- Built-in evaluation accepts owned argument arrays directly; the legacy `invoke_stack_*` entry points were removed.
+- Artifact version 3 stores the register bytecode format and rejects earlier artifacts at the version boundary.
+
 ## 0.1.2 - 2026-09-13
 
 ### Added

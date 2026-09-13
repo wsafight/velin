@@ -14,7 +14,7 @@ use crate::slots::SlotTable;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
-use velin_syntax::{BinaryOp, Builtin, DataMetrics, UnaryOp, Value};
+use velin_syntax::{BinaryOp, DataMetrics, Value};
 
 mod metadata;
 #[cfg(feature = "serde")]
@@ -31,6 +31,8 @@ pub type Pc = u32;
 pub struct ProgramChunk {
     pub ops: Range<u32>,
     pub constants: Range<u32>,
+    pub registers: u16,
+    pub result: u16,
     pub line: u32,
 }
 
@@ -247,6 +249,8 @@ impl ProgramArena {
         Some(ExprChunkRef {
             ops,
             constants,
+            registers: chunk.registers,
+            result: chunk.result,
             line: chunk.line,
         })
     }
@@ -275,116 +279,12 @@ pub struct ExecutionMetadata {
     ops: Box<[OpExecutionMetadata]>,
     metrics: Box<[DataMetrics]>,
     program_constant_metrics: Box<[DataMetrics]>,
-    quickened_calls: Box<[QuickenedCall]>,
-    quickened_operands: Box<[QuickenedOperand]>,
-    prepared: Box<[u32]>,
-    prepared_values: Box<[PreparedExpr]>,
-    registers: Box<[u32]>,
-    register_values: Box<[RegisterExpr]>,
-}
-
-#[derive(Debug)]
-struct QuickenedCall {
-    function: Builtin,
-    operands: Range<u32>,
-    line: u32,
-}
-
-/// One directly addressable operand of a quickened built-in call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QuickenedOperand {
-    Constant(u32),
-    Slot(u32),
-}
-
-/// A built-in call whose operands were resolved during execution preparation.
-#[derive(Debug, Clone, Copy)]
-pub struct QuickenedCallRef<'a> {
-    pub function: Builtin,
-    pub operands: &'a [QuickenedOperand],
-    pub line: u32,
-}
-
-/// A non-serialized execution plan for a small straight-line expression.
-///
-/// The canonical [`ExprOp`] sequence remains the compatibility format. This
-/// plan is rebuilt after validation and only removes stack bookkeeping for
-/// direct operands; it never contains alternate operator semantics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PreparedExpr {
-    Constant {
-        constant: u32,
-    },
-    Load {
-        slot: u32,
-    },
-    IntegerBinaryLiteral {
-        slot: u32,
-        operation: BinaryOp,
-        value: i64,
-    },
-}
-
-/// A non-serialized SSA-style value plan with compact physical registers for a
-/// long, straight-line expression.
-///
-/// The canonical [`ExprOp`] sequence remains the source of truth and is kept
-/// as the fallback for short or control-flow-heavy expressions.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RegisterExpr {
-    pub ops: Box<[RegisterOp]>,
-    pub result: u16,
-    pub registers: u16,
-}
-
-/// Type information inferred for a temporary in the scalar execution plan.
-///
-/// This is an execution hint, not a replacement for runtime checks. Unknown
-/// values and externally assembled programs always retain the general
-/// operator path when the hint cannot prove a narrower type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RegisterType {
-    Unknown,
-    Integer,
-    Boolean,
-    String,
-    Compound,
-}
-
-/// One typed operation in a [`RegisterExpr`] execution plan. The logical value
-/// flow is SSA-style; consumed source registers may be reused as destinations
-/// by the compact linear-scan allocation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RegisterOp {
-    LoadConstant {
-        dst: u16,
-        constant: u32,
-        result_type: RegisterType,
-    },
-    LoadSlot {
-        dst: u16,
-        slot: u32,
-        result_type: RegisterType,
-    },
-    Unary {
-        dst: u16,
-        op: UnaryOp,
-        source: u16,
-        result_type: RegisterType,
-    },
-    Binary {
-        dst: u16,
-        left: u16,
-        op: BinaryOp,
-        right: u16,
-        result_type: RegisterType,
-    },
 }
 
 /// Execution properties of one expression chunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChunkExecutionMetadata {
-    pub max_stack: u16,
+    pub registers: u16,
     pub mutates_frame: bool,
     pub inherits_slot_metrics: bool,
     metrics: u32,
@@ -398,8 +298,6 @@ pub struct OpExecutionMetadata {
 }
 
 const NO_METRICS: u32 = u32::MAX;
-const QUICKENED_CALL_TAG: u32 = 1 << 31;
-const NO_PLAN: u32 = u32::MAX;
 
 impl Program {
     /// Packs independently allocated expression chunks into contiguous arenas.
@@ -427,6 +325,8 @@ impl Program {
         Some(ExprChunkRef {
             ops,
             constants,
+            registers: chunk.registers,
+            result: chunk.result,
             line: chunk.line,
         })
     }
@@ -440,8 +340,8 @@ impl Program {
     /// Removes expression and direct-operation columns from the execution
     /// image while returning them in a sidecar debug table.
     ///
-    /// Artifact version 1 remains unchanged because the transformation is
-    /// explicit and the normal serializer still emits the canonical fields.
+    /// The transformation is explicit and the normal serializer still emits
+    /// the canonical fields.
     /// Runtime hosts that do not display source columns can retain only the
     /// returned program; tools can keep the table alongside it.
     #[must_use]
@@ -498,6 +398,8 @@ fn append_reusable_chunk(
     chunks.push(ProgramChunk {
         ops: op_start..op_end,
         constants: constant_start..constant_end,
+        registers: chunk.registers,
+        result: chunk.result,
         line: chunk.line,
     });
 }

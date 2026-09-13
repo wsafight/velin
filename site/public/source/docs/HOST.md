@@ -32,6 +32,19 @@ VM:      resume(Some(value)) -> store in `answer` -> continue
 
 The program counter moves **before** the effect. Resuming cannot repeat the external action. Calling `run` while an effect is pending, or `resume` with no pending effect, is an error.
 
+## Batching side-effect-only events
+
+Consecutive unbound `perform` commands can be collected with
+`Machine::run_effect_batch_reusable` or `ScriptRunner::run_effect_batch`. The
+VM preserves source order and stops at a bound effect, an error, completion, or
+the batch limit; it never crosses a host barrier that needs `resume`.
+
+The batch API only bounds VM work. The embedder owns the persistent queue and
+consumer pacing; `HostEventQueue` can enforce event-count, value-count, and text
+byte limits. When the queue is full or its payload budget is exhausted, pause
+the VM driver until the host consumes events. This prevents dropped or
+duplicated effects.
+
 ## Bound and unbound commands
 
 ```velin

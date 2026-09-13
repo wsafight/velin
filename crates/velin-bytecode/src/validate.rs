@@ -1,9 +1,10 @@
-//! Validation for serialized or manually assembled bytecode programs.
+//! Validation for serialized or manually assembled register bytecode.
 
 use crate::{ExecutionMetadata, ExprChunk, ExprChunkRef, ExprOp, Op, Program, UpdateOp};
 use std::fmt;
+use std::ops::Range;
 use std::sync::{Arc, OnceLock};
-use velin_syntax::{BinaryOp, DataFootprint};
+use velin_syntax::{BinaryOp, Builtin, DataFootprint};
 
 mod program_validation;
 mod proof;
@@ -18,8 +19,8 @@ pub const MAX_PROGRAM_CHUNKS: usize = 100_000;
 pub const MAX_PROGRAM_SLOTS: usize = 65_536;
 /// Maximum number of instructions in one expression chunk.
 pub const MAX_EXPR_OPS: usize = 4_096;
-/// Maximum operand-stack height reached by one expression chunk.
-pub const MAX_EXPR_STACK: usize = 1_024;
+/// Maximum number of physical registers in one expression chunk.
+pub const MAX_EXPR_REGISTERS: usize = 1_024;
 /// Maximum aggregate number of values stored in all constant pools.
 pub const MAX_PROGRAM_CONSTANT_VALUES: usize = 100_000;
 /// Maximum aggregate UTF-8 bytes stored in constant pools and slot names.
@@ -50,14 +51,13 @@ impl std::fmt::Display for ProgramValidationError {
 impl std::error::Error for ProgramValidationError {}
 
 impl ExprChunk {
-    /// Verifies this chunk's indices, stack paths, jumps and data budgets.
+    /// Verifies register indices, definitions, jumps and data budgets.
     ///
-    /// `slot_count` is the width of the frame that will be supplied during
-    /// evaluation.
+    /// `slot_count` is the width of the frame supplied during evaluation.
     ///
     /// # Errors
-    /// Returns a descriptive error when the chunk is malformed, refers to a
-    /// missing frame slot, or exceeds a bytecode/data budget.
+    /// Returns an error when the chunk is malformed, refers to unavailable
+    /// data, reads an undefined register, or exceeds a resource limit.
     pub fn validate(&self, slot_count: usize) -> Result<(), ProgramValidationError> {
         check_limit("variable slots", slot_count, MAX_PROGRAM_SLOTS)?;
         let (values, bytes) = validate_chunk(self.as_chunk_ref(), slot_count, 0, &mut Vec::new())?;
@@ -70,59 +70,30 @@ fn validate_chunk(
     chunk: ExprChunkRef<'_>,
     slot_count: usize,
     id: usize,
-    heights: &mut Vec<Option<usize>>,
+    states: &mut Vec<Option<Vec<bool>>>,
 ) -> Result<(usize, usize), ProgramValidationError> {
-    if chunk.ops.len() > MAX_EXPR_OPS {
+    check_limit(
+        &format!("ops in expression chunk {id}"),
+        chunk.ops.len(),
+        MAX_EXPR_OPS,
+    )?;
+    let register_count = usize::from(chunk.registers);
+    if register_count == 0 {
         return Err(ProgramValidationError::new(format!(
-            "ops in expression chunk {id} exceeds limit {MAX_EXPR_OPS} (found {})",
-            chunk.ops.len()
+            "expression chunk {id} has no registers"
         )));
     }
+    check_limit(
+        &format!("registers in expression chunk {id}"),
+        register_count,
+        MAX_EXPR_REGISTERS,
+    )?;
+    validate_register(chunk.result, register_count, id, "result")?;
 
-    let mut has_branches = false;
-    let mut linear_height = 0;
-    let mut linear_error = None;
     for (pc, op) in chunk.ops.iter().enumerate() {
-        match op {
-            ExprOp::Const(index) if *index as usize >= chunk.constants.len() => {
-                return Err(ProgramValidationError::new(format!(
-                    "expression chunk {id} op {pc} references missing constant {index}"
-                )));
-            }
-            ExprOp::Load { slot, .. }
-            | ExprOp::Random { state_slot: slot }
-            | ExprOp::Chance { state_slot: slot } => {
-                validate_slot(
-                    *slot,
-                    slot_count,
-                    ValidationContext::ExpressionOp { chunk: id, pc },
-                )?;
-            }
-            ExprOp::Call { function, argc } if !function.accepts(*argc as usize) => {
-                return Err(ProgramValidationError::new(format!(
-                    "expression chunk {id} op {pc} has invalid builtin argument count {argc}"
-                )));
-            }
-            ExprOp::JumpIfFalse(target) | ExprOp::JumpIfTrue(target) => {
-                has_branches = true;
-                let target = *target as usize;
-                if target <= pc || target > chunk.ops.len() {
-                    return Err(ProgramValidationError::new(format!(
-                        "expression chunk {id} op {pc} has invalid non-forward jump target {target}"
-                    )));
-                }
-            }
-            ExprOp::AssertBoolean(op) if !matches!(op, BinaryOp::And | BinaryOp::Or) => {
-                return Err(ProgramValidationError::new(format!(
-                    "expression chunk {id} op {pc} has invalid boolean assertion"
-                )));
-            }
-            _ => {}
-        }
-        if !has_branches {
-            advance_linear_stack(&mut linear_height, &mut linear_error, op, pc);
-        }
+        validate_instruction(op, chunk, slot_count, id, pc)?;
     }
+    validate_register_flow(chunk, id, states)?;
 
     let mut constant_values = 0usize;
     let mut text_bytes = 0usize;
@@ -139,149 +110,221 @@ fn validate_chunk(
             .checked_add(footprint.text_bytes)
             .ok_or_else(|| ProgramValidationError::new("program text budget overflow"))?;
     }
-
-    if !has_branches {
-        finish_linear_stack(linear_height, linear_error, id)?;
-        return Ok((constant_values, text_bytes));
-    }
-
-    validate_branched_stack(chunk, id, heights)?;
     Ok((constant_values, text_bytes))
 }
 
-fn validate_branched_stack(
+fn validate_instruction(
+    op: &ExprOp,
+    chunk: ExprChunkRef<'_>,
+    slot_count: usize,
+    id: usize,
+    pc: usize,
+) -> Result<(), ProgramValidationError> {
+    let registers = usize::from(chunk.registers);
+    let context = ValidationContext::ExpressionOp { chunk: id, pc };
+    match op {
+        ExprOp::Const { dst, constant } => {
+            validate_register(*dst, registers, id, "destination")?;
+            if *constant as usize >= chunk.constants.len() {
+                return Err(ProgramValidationError::new(format!(
+                    "expression chunk {id} op {pc} references missing constant {constant}"
+                )));
+            }
+        }
+        ExprOp::Load { dst, slot, .. } => {
+            validate_register(*dst, registers, id, "destination")?;
+            validate_slot(*slot, slot_count, context)?;
+        }
+        ExprOp::Unary { dst, source, .. } => {
+            validate_register(*dst, registers, id, "destination")?;
+            validate_register(*source, registers, id, "source")?;
+        }
+        ExprOp::Binary {
+            dst, left, right, ..
+        } => {
+            validate_register(*dst, registers, id, "destination")?;
+            validate_register(*left, registers, id, "left source")?;
+            validate_register(*right, registers, id, "right source")?;
+        }
+        ExprOp::Call {
+            dst,
+            function,
+            args,
+        } => {
+            validate_register(*dst, registers, id, "destination")?;
+            validate_range(args, registers, id, pc)?;
+            if !function.accepts(args.len()) {
+                return Err(ProgramValidationError::new(format!(
+                    "expression chunk {id} op {pc} has invalid builtin argument count {}",
+                    args.len()
+                )));
+            }
+        }
+        ExprOp::Random {
+            dst,
+            args,
+            state_slot,
+        } => {
+            validate_register(*dst, registers, id, "destination")?;
+            validate_range(args, registers, id, pc)?;
+            validate_slot(*state_slot, slot_count, context)?;
+            validate_random_arity(Builtin::Random, args, id, pc)?;
+        }
+        ExprOp::Chance {
+            dst,
+            args,
+            state_slot,
+        } => {
+            validate_register(*dst, registers, id, "destination")?;
+            validate_range(args, registers, id, pc)?;
+            validate_slot(*state_slot, slot_count, context)?;
+            validate_random_arity(Builtin::Chance, args, id, pc)?;
+        }
+        ExprOp::JumpIfFalse { condition, target } | ExprOp::JumpIfTrue { condition, target } => {
+            validate_register(*condition, registers, id, "condition")?;
+            let target = *target as usize;
+            if target <= pc || target > chunk.ops.len() {
+                return Err(ProgramValidationError::new(format!(
+                    "expression chunk {id} op {pc} has invalid non-forward jump target {target}"
+                )));
+            }
+        }
+        ExprOp::Concat { dst, values } => {
+            validate_register(*dst, registers, id, "destination")?;
+            validate_range(values, registers, id, pc)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_random_arity(
+    function: Builtin,
+    args: &Range<u16>,
+    id: usize,
+    pc: usize,
+) -> Result<(), ProgramValidationError> {
+    if function.accepts(args.len()) {
+        return Ok(());
+    }
+    Err(ProgramValidationError::new(format!(
+        "expression chunk {id} op {pc} has invalid random argument count {}",
+        args.len()
+    )))
+}
+
+fn validate_register_flow(
     chunk: ExprChunkRef<'_>,
     id: usize,
-    heights: &mut Vec<Option<usize>>,
+    states: &mut Vec<Option<Vec<bool>>>,
 ) -> Result<(), ProgramValidationError> {
-    heights.clear();
-    heights.resize(chunk.ops.len() + 1, None);
-    heights[0] = Some(0);
+    states.clear();
+    states.resize_with(chunk.ops.len() + 1, || None);
+    states[0] = Some(vec![false; usize::from(chunk.registers)]);
+
     for (pc, op) in chunk.ops.iter().enumerate() {
-        let Some(height) = heights[pc] else {
+        let Some(state) = states[pc].take() else {
             continue;
         };
-        if height > MAX_EXPR_STACK {
-            return Err(ProgramValidationError::new(format!(
-                "expression chunk {id} exceeds operand stack limit {MAX_EXPR_STACK}"
-            )));
+        for source in instruction_sources(op) {
+            if !state[usize::from(source)] {
+                return Err(ProgramValidationError::new(format!(
+                    "expression chunk {id} op {pc} reads undefined register {source}"
+                )));
+            }
         }
-        let required = required_operands(op);
-        if height < required {
-            return Err(ProgramValidationError::new(format!(
-                "expression chunk {id} op {pc} needs {required} stack values but has {height}"
-            )));
+        let mut outgoing = state;
+        if let Some(dst) = instruction_destination(op) {
+            outgoing[usize::from(dst)] = true;
         }
         match op {
-            ExprOp::JumpIfFalse(target) | ExprOp::JumpIfTrue(target) => {
-                set_validated_height(&mut heights[*target as usize], height, id, *target as usize)?;
-                set_validated_height(&mut heights[pc + 1], height, id, pc + 1)?;
+            ExprOp::JumpIfFalse { target, .. } | ExprOp::JumpIfTrue { target, .. } => {
+                merge_register_state(&mut states[*target as usize], &outgoing);
+                merge_register_state(&mut states[pc + 1], &outgoing);
             }
-            _ => set_validated_height(&mut heights[pc + 1], next_height(op, height), id, pc + 1)?,
+            _ => merge_register_state(&mut states[pc + 1], &outgoing),
         }
     }
-    let height = heights[chunk.ops.len()].unwrap_or(0);
-    if height > MAX_EXPR_STACK {
+
+    let Some(final_state) = &states[chunk.ops.len()] else {
         return Err(ProgramValidationError::new(format!(
-            "expression chunk {id} exceeds operand stack limit {MAX_EXPR_STACK}"
+            "expression chunk {id} cannot reach its result"
         )));
-    }
-    if height != 1 {
+    };
+    if !final_state[usize::from(chunk.result)] {
         return Err(ProgramValidationError::new(format!(
-            "expression chunk {id} finishes with {height} values instead of one"
+            "expression chunk {id} leaves result register {} undefined",
+            chunk.result
         )));
     }
     Ok(())
 }
 
-fn set_validated_height(
-    slot: &mut Option<usize>,
-    height: usize,
-    id: usize,
-    pc: usize,
-) -> Result<(), ProgramValidationError> {
-    if slot.is_some_and(|previous| previous != height) {
-        return Err(ProgramValidationError::new(format!(
-            "expression chunk {id} reaches op {pc} with inconsistent stack heights"
-        )));
+fn instruction_sources(op: &ExprOp) -> Vec<u16> {
+    match op {
+        ExprOp::Const { .. } | ExprOp::Load { .. } => Vec::new(),
+        ExprOp::Unary { source, .. } => vec![*source],
+        ExprOp::Binary { left, right, .. } => vec![*left, *right],
+        ExprOp::Call { args, .. } | ExprOp::Random { args, .. } | ExprOp::Chance { args, .. } => {
+            args.clone().collect()
+        }
+        ExprOp::JumpIfFalse { condition, .. } | ExprOp::JumpIfTrue { condition, .. } => {
+            vec![*condition]
+        }
+        ExprOp::Concat { values, .. } => values.clone().collect(),
     }
-    *slot = Some(height);
-    Ok(())
 }
 
-#[derive(Clone, Copy)]
-struct LinearStackError {
-    pc: usize,
-    required: usize,
-    available: usize,
+fn instruction_destination(op: &ExprOp) -> Option<u16> {
+    match op {
+        ExprOp::Const { dst, .. }
+        | ExprOp::Load { dst, .. }
+        | ExprOp::Unary { dst, .. }
+        | ExprOp::Binary { dst, .. }
+        | ExprOp::Call { dst, .. }
+        | ExprOp::Random { dst, .. }
+        | ExprOp::Chance { dst, .. }
+        | ExprOp::Concat { dst, .. } => Some(*dst),
+        ExprOp::JumpIfFalse { .. } | ExprOp::JumpIfTrue { .. } => None,
+    }
 }
 
-fn advance_linear_stack(
-    height: &mut usize,
-    error: &mut Option<LinearStackError>,
-    op: &ExprOp,
-    pc: usize,
-) {
-    if error.is_some() || *height > MAX_EXPR_STACK {
-        return;
-    }
-    let required = required_operands(op);
-    if *height < required {
-        *error = Some(LinearStackError {
-            pc,
-            required,
-            available: *height,
-        });
+fn merge_register_state(slot: &mut Option<Vec<bool>>, incoming: &[bool]) {
+    if let Some(current) = slot {
+        for (defined, incoming) in current.iter_mut().zip(incoming) {
+            *defined &= *incoming;
+        }
     } else {
-        *height = next_height(op, *height);
+        *slot = Some(incoming.to_vec());
     }
 }
 
-fn finish_linear_stack(
-    height: usize,
-    error: Option<LinearStackError>,
+fn validate_range(
+    range: &Range<u16>,
+    registers: usize,
     id: usize,
+    pc: usize,
 ) -> Result<(), ProgramValidationError> {
-    if let Some(error) = error {
+    if range.start > range.end || usize::from(range.end) > registers {
         return Err(ProgramValidationError::new(format!(
-            "expression chunk {id} op {} needs {} stack values but has {}",
-            error.pc, error.required, error.available
-        )));
-    }
-    if height > MAX_EXPR_STACK {
-        return Err(ProgramValidationError::new(format!(
-            "expression chunk {id} exceeds operand stack limit {MAX_EXPR_STACK}"
-        )));
-    }
-    if height != 1 {
-        return Err(ProgramValidationError::new(format!(
-            "expression chunk {id} finishes with {height} values instead of one"
+            "expression chunk {id} op {pc} has invalid register range {}..{}",
+            range.start, range.end
         )));
     }
     Ok(())
 }
 
-fn required_operands(op: &ExprOp) -> usize {
-    match op {
-        ExprOp::Const(_) | ExprOp::Load { .. } => 0,
-        ExprOp::Unary(_)
-        | ExprOp::Chance { .. }
-        | ExprOp::AssertBoolean(_)
-        | ExprOp::JumpIfFalse(_)
-        | ExprOp::JumpIfTrue(_) => 1,
-        ExprOp::Binary(_) | ExprOp::Random { .. } => 2,
-        ExprOp::Call { argc, .. } | ExprOp::Concat(argc) => *argc as usize,
+fn validate_register(
+    register: u16,
+    register_count: usize,
+    id: usize,
+    role: &str,
+) -> Result<(), ProgramValidationError> {
+    if usize::from(register) >= register_count {
+        return Err(ProgramValidationError::new(format!(
+            "expression chunk {id} references missing {role} register {register}"
+        )));
     }
-}
-
-fn next_height(op: &ExprOp, height: usize) -> usize {
-    match op {
-        ExprOp::Const(_) | ExprOp::Load { .. } => height + 1,
-        ExprOp::Unary(_) | ExprOp::Chance { .. } | ExprOp::AssertBoolean(_) => height,
-        ExprOp::Binary(_) | ExprOp::Random { .. } => height - 1,
-        ExprOp::Call { argc, .. } | ExprOp::Concat(argc) => height - *argc as usize + 1,
-        ExprOp::JumpIfFalse(_) | ExprOp::JumpIfTrue(_) => unreachable!("handled as branches"),
-    }
+    Ok(())
 }
 
 fn validate_program_target(

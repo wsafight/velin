@@ -3,7 +3,7 @@ use velin_compile::ProgramBuilder;
 use velin_syntax::Expr;
 
 #[test]
-fn register_plan_evaluates_long_scalar_expression() {
+fn register_bytecode_evaluates_long_scalar_expression() {
     let mut builder = ProgramBuilder::new();
     let _left = builder.slot("left");
     let _right = builder.slot("right");
@@ -29,7 +29,7 @@ fn register_plan_evaluates_long_scalar_expression() {
 }
 
 #[test]
-fn register_plan_preserves_operator_errors() {
+fn register_bytecode_preserves_operator_errors() {
     let mut builder = ProgramBuilder::new();
     let _left = builder.slot("left");
     let _right = builder.slot("right");

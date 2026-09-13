@@ -70,17 +70,18 @@ impl ProgramBuilder {
             };
         }
         match self.scratch.ops.as_slice() {
-            [ExprOp::Const(index)] => Op::SetConst {
+            [ExprOp::Const { dst, constant }] if *dst == self.scratch.result => Op::SetConst {
                 slot,
-                value: self.scratch.constants[*index as usize].clone(),
+                value: self.scratch.constants[*constant as usize].clone(),
                 line: self.scratch.line,
             },
             [
                 ExprOp::Load {
+                    dst,
                     slot: source,
                     column,
                 },
-            ] => Op::CopySlot {
+            ] if *dst == self.scratch.result => Op::CopySlot {
                 slot,
                 source: *source,
                 line: self.scratch.line,
@@ -231,10 +232,13 @@ impl ProgramBuilder {
 
     fn constant_boolean(&self, id: ChunkId) -> Option<bool> {
         let chunk = self.chunks.chunk(id)?;
-        let [ExprOp::Const(index)] = chunk.ops else {
+        let [ExprOp::Const { dst, constant }] = chunk.ops else {
             return None;
         };
-        match chunk.constants.get(*index as usize)? {
+        if *dst != chunk.result {
+            return None;
+        }
+        match chunk.constants.get(*constant as usize)? {
             Value::Boolean(value) => Some(*value),
             _ => None,
         }
@@ -309,9 +313,19 @@ fn resolve_jump_target(ops: &[Op], original: Pc) -> Option<Pc> {
 
 fn integer_comparison(chunk: &ExprChunk) -> Option<(u32, BinaryOp, i64)> {
     let [
-        ExprOp::Load { slot, .. },
-        ExprOp::Const(index),
-        ExprOp::Binary(comparison),
+        ExprOp::Load {
+            dst: left, slot, ..
+        },
+        ExprOp::Const {
+            dst: right,
+            constant,
+        },
+        ExprOp::Binary {
+            dst,
+            left: binary_left,
+            op: comparison,
+            right: binary_right,
+        },
     ] = chunk.ops.as_slice()
     else {
         return None;
@@ -327,7 +341,10 @@ fn integer_comparison(chunk: &ExprChunk) -> Option<(u32, BinaryOp, i64)> {
     ) {
         return None;
     }
-    let Value::Integer(value) = chunk.constants.get(*index as usize)? else {
+    if *dst != chunk.result || left != binary_left || right != binary_right {
+        return None;
+    }
+    let Value::Integer(value) = chunk.constants.get(*constant as usize)? else {
         return None;
     };
     Some((*slot, *comparison, *value))

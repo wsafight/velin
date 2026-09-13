@@ -1,4 +1,4 @@
-use super::{BinaryOp, Builtin, ExprChunkRef, ExprOp, UnaryOp, Value, VecDeque};
+use super::{BinaryOp, Builtin, ExprChunkRef, ExprOp, Value, VecDeque};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AbstractValue {
@@ -7,196 +7,48 @@ pub(super) enum AbstractValue {
     Unknown,
 }
 
-pub(super) const INLINE_ABSTRACT_VALUES: usize = 8;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum AbstractStack {
-    Inline {
-        values: [AbstractValue; INLINE_ABSTRACT_VALUES],
-        len: u8,
-    },
-    Overflow(Vec<AbstractValue>),
-}
-
-impl Default for AbstractStack {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl AbstractStack {
-    pub(super) const fn new() -> Self {
-        Self::Inline {
-            values: [AbstractValue::Unknown; INLINE_ABSTRACT_VALUES],
-            len: 0,
-        }
-    }
-
-    pub(super) fn push(&mut self, value: AbstractValue) {
-        match self {
-            Self::Inline { values, len } if usize::from(*len) < values.len() => {
-                values[usize::from(*len)] = value;
-                *len += 1;
-            }
-            Self::Inline { values, len } => {
-                let len = usize::from(*len);
-                let mut overflow = Vec::with_capacity(INLINE_ABSTRACT_VALUES * 2);
-                overflow.extend_from_slice(&values[..len]);
-                overflow.push(value);
-                *self = Self::Overflow(overflow);
-            }
-            Self::Overflow(values) => values.push(value),
-        }
-    }
-
-    pub(super) fn pop(&mut self) -> Option<AbstractValue> {
-        match self {
-            Self::Inline { values, len } if *len > 0 => {
-                *len -= 1;
-                Some(values[usize::from(*len)])
-            }
-            Self::Inline { .. } => None,
-            Self::Overflow(values) => values.pop(),
-        }
-    }
-
-    fn last(&self) -> Option<AbstractValue> {
-        self.as_slice().last().copied()
-    }
-
-    fn len(&self) -> usize {
-        self.as_slice().len()
-    }
-
-    fn truncate(&mut self, len: usize) {
-        match self {
-            Self::Inline {
-                len: current_len, ..
-            } => {
-                *current_len = (*current_len).min(u8::try_from(len).unwrap_or(u8::MAX));
-            }
-            Self::Overflow(values) => values.truncate(len),
-        }
-    }
-
-    pub(super) fn as_slice(&self) -> &[AbstractValue] {
-        match self {
-            Self::Inline { values, len } => &values[..usize::from(*len)],
-            Self::Overflow(values) => values,
-        }
-    }
-
-    fn as_mut_slice(&mut self) -> &mut [AbstractValue] {
-        match self {
-            Self::Inline { values, len } => &mut values[..usize::from(*len)],
-            Self::Overflow(values) => values,
-        }
-    }
-}
-
 #[derive(Default)]
 pub(super) struct ExpressionWorkspace {
-    states: Vec<Option<AbstractStack>>,
+    states: Vec<Option<Vec<AbstractValue>>>,
     pending: VecDeque<usize>,
+    queued: Vec<bool>,
 }
 
 impl ExpressionWorkspace {
-    fn reset_states(&mut self, len: usize) {
+    fn reset(&mut self, op_count: usize) {
         self.states.clear();
-        self.states.resize_with(len, || None);
+        self.states.resize_with(op_count + 1, || None);
+        self.pending.clear();
+        self.queued.clear();
+        self.queued.resize(op_count + 1, false);
     }
 }
 
-/// Returns the slots whose `Load` instructions can execute. Expression chunks
-/// contain forward jumps for `and`/`or`; a flat scan would report reads hidden
-/// behind a constant short-circuit guard.
+/// Returns slot loads reachable through register-level short-circuit branches.
 pub(super) fn reachable_loads(
     chunk: ExprChunkRef<'_>,
     workspace: &mut ExpressionWorkspace,
 ) -> LoadSet {
     let mut loads = LoadSet::new();
-    let mut has_branches = false;
-    let mut branches_are_forward = true;
-    for (pc, op) in chunk.ops.iter().enumerate() {
-        if let ExprOp::JumpIfFalse(target) | ExprOp::JumpIfTrue(target) = op {
-            has_branches = true;
-            let target = *target as usize;
-            branches_are_forward &= target > pc && target <= chunk.ops.len();
-        }
-    }
-    if !has_branches {
-        let mut stack = AbstractStack::new();
-        for pc in 0..chunk.ops.len() {
-            match abstract_step(chunk, pc, stack, &mut loads) {
-                AbstractStep::Stop => break,
-                AbstractStep::Next {
-                    pc: next_pc,
-                    stack: next_stack,
-                } => {
-                    debug_assert_eq!(next_pc, pc + 1);
-                    stack = next_stack;
-                }
-                AbstractStep::Fork { .. } => {
-                    unreachable!("a linear expression cannot fork")
-                }
-            }
-        }
-        loads.sort_and_deduplicate();
-        return loads;
-    }
-
-    if branches_are_forward {
-        workspace.reset_states(chunk.ops.len() + 1);
-        let states = &mut workspace.states;
-        states[0] = Some(AbstractStack::new());
-        for pc in 0..chunk.ops.len() {
-            let Some(stack) = states[pc].take() else {
-                continue;
-            };
-            match abstract_step(chunk, pc, stack, &mut loads) {
-                AbstractStep::Stop => {}
-                AbstractStep::Next { pc, stack } => merge_state(&mut states[pc], stack),
-                AbstractStep::Fork {
-                    first_pc,
-                    first_stack,
-                    second_pc,
-                    second_stack,
-                } => {
-                    merge_state(&mut states[first_pc], first_stack);
-                    merge_state(&mut states[second_pc], second_stack);
-                }
-            }
-        }
-        loads.sort_and_deduplicate();
-        return loads;
-    }
-
-    workspace.reset_states(chunk.ops.len() + 1);
-    workspace.pending.clear();
+    workspace.reset(chunk.ops.len());
+    workspace.states[0] = Some(vec![AbstractValue::Unknown; usize::from(chunk.registers)]);
     workspace.pending.push_back(0);
-    let states = &mut workspace.states;
-    let pending = &mut workspace.pending;
-    states[0] = Some(AbstractStack::new());
+    workspace.queued[0] = true;
 
-    while let Some(pc) = pending.pop_front() {
+    while let Some(pc) = workspace.pending.pop_front() {
+        workspace.queued[pc] = false;
         if pc >= chunk.ops.len() {
             continue;
         }
-        let stack = states[pc].clone().unwrap_or_default();
-        match abstract_step(chunk, pc, stack, &mut loads) {
-            AbstractStep::Stop => {}
-            AbstractStep::Next { pc, stack } => {
-                enqueue_state(states, pending, pc, stack);
-            }
-            AbstractStep::Fork {
-                first_pc,
-                first_stack,
-                second_pc,
-                second_stack,
-            } => {
-                enqueue_state(states, pending, first_pc, first_stack);
-                enqueue_state(states, pending, second_pc, second_stack);
-            }
+        let state = workspace.states[pc].clone().unwrap_or_default();
+        for (next, outgoing) in abstract_step(chunk, pc, state, &mut loads) {
+            enqueue_state(
+                &mut workspace.states,
+                &mut workspace.pending,
+                &mut workspace.queued,
+                next,
+                outgoing,
+            );
         }
     }
     loads.sort_and_deduplicate();
@@ -245,147 +97,138 @@ impl LoadSet {
     }
 }
 
-enum AbstractStep {
-    Stop,
-    Next {
-        pc: usize,
-        stack: AbstractStack,
-    },
-    Fork {
-        first_pc: usize,
-        first_stack: AbstractStack,
-        second_pc: usize,
-        second_stack: AbstractStack,
-    },
-}
-
 fn abstract_step(
     chunk: ExprChunkRef<'_>,
     pc: usize,
-    mut stack: AbstractStack,
+    mut registers: Vec<AbstractValue>,
     loads: &mut LoadSet,
-) -> AbstractStep {
-    let mut next_pc = pc + 1;
+) -> Vec<(usize, Vec<AbstractValue>)> {
+    let next = pc + 1;
     match &chunk.ops[pc] {
-        ExprOp::Const(index) => {
-            stack.push(match chunk.constants.get(*index as usize) {
+        ExprOp::Const { dst, constant } => {
+            let value = match chunk.constants.get(*constant as usize) {
                 Some(Value::Boolean(value)) => AbstractValue::Boolean(Some(*value)),
                 Some(_) => AbstractValue::NonBoolean,
                 None => AbstractValue::Unknown,
-            });
+            };
+            write_register(&mut registers, *dst, value);
         }
-        ExprOp::Load { slot, column } => {
+        ExprOp::Load { dst, slot, column } => {
             loads.insert((*slot, *column as usize));
-            stack.push(AbstractValue::Unknown);
+            write_register(&mut registers, *dst, AbstractValue::Unknown);
         }
-        ExprOp::Unary(op) => {
-            let value = stack.pop().unwrap_or(AbstractValue::Unknown);
-            let result = match (op, value) {
-                (UnaryOp::Not, AbstractValue::Boolean(Some(value))) => {
+        ExprOp::Unary { dst, op, source } => {
+            let source = read_register(&registers, *source);
+            let result = match (op, source) {
+                (velin_syntax::UnaryOp::Not, AbstractValue::Boolean(Some(value))) => {
                     Some(AbstractValue::Boolean(Some(!value)))
                 }
-                (UnaryOp::Not, AbstractValue::NonBoolean)
-                | (UnaryOp::Negate, AbstractValue::Boolean(_)) => None,
-                (UnaryOp::Not, _) => Some(AbstractValue::Boolean(None)),
-                (UnaryOp::Negate, _) => Some(AbstractValue::NonBoolean),
+                (velin_syntax::UnaryOp::Not, AbstractValue::NonBoolean)
+                | (velin_syntax::UnaryOp::Negate, AbstractValue::Boolean(_)) => None,
+                (velin_syntax::UnaryOp::Not, _) => Some(AbstractValue::Boolean(None)),
+                (velin_syntax::UnaryOp::Negate, _) => Some(AbstractValue::NonBoolean),
             };
-            if let Some(result) = result {
-                stack.push(result);
-            } else {
-                return AbstractStep::Stop;
-            }
+            let Some(result) = result else {
+                return Vec::new();
+            };
+            write_register(&mut registers, *dst, result);
         }
-        ExprOp::Binary(op) => {
-            pop_values(&mut stack, 2);
-            stack.push(match op {
-                BinaryOp::Equal
-                | BinaryOp::NotEqual
-                | BinaryOp::Less
-                | BinaryOp::LessEqual
-                | BinaryOp::Greater
-                | BinaryOp::GreaterEqual
-                | BinaryOp::And
-                | BinaryOp::Or => AbstractValue::Boolean(None),
-                BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
-                    AbstractValue::NonBoolean
-                }
-            });
+        ExprOp::Binary { dst, op, .. } => {
+            write_register(
+                &mut registers,
+                *dst,
+                match op {
+                    BinaryOp::Equal
+                    | BinaryOp::NotEqual
+                    | BinaryOp::Less
+                    | BinaryOp::LessEqual
+                    | BinaryOp::Greater
+                    | BinaryOp::GreaterEqual
+                    | BinaryOp::And
+                    | BinaryOp::Or => AbstractValue::Boolean(None),
+                    BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
+                        AbstractValue::NonBoolean
+                    }
+                },
+            );
         }
-        ExprOp::Call { function, argc } => {
-            pop_values(&mut stack, *argc as usize);
-            stack.push(match function {
-                Builtin::Contains | Builtin::Chance => AbstractValue::Boolean(None),
-                Builtin::Get => AbstractValue::Unknown,
-                _ => AbstractValue::NonBoolean,
-            });
+        ExprOp::Call { dst, function, .. } => {
+            write_register(
+                &mut registers,
+                *dst,
+                match function {
+                    Builtin::Contains | Builtin::Chance => AbstractValue::Boolean(None),
+                    Builtin::Get => AbstractValue::Unknown,
+                    _ => AbstractValue::NonBoolean,
+                },
+            );
         }
-        ExprOp::Random { .. } => {
-            pop_values(&mut stack, 2);
-            stack.push(AbstractValue::NonBoolean);
+        ExprOp::Random { dst, .. } | ExprOp::Concat { dst, .. } => {
+            write_register(&mut registers, *dst, AbstractValue::NonBoolean);
         }
-        ExprOp::Chance { .. } => {
-            pop_values(&mut stack, 1);
-            stack.push(AbstractValue::Boolean(None));
+        ExprOp::Chance { dst, .. } => {
+            write_register(&mut registers, *dst, AbstractValue::Boolean(None));
         }
-        ExprOp::Concat(count) => {
-            pop_values(&mut stack, *count as usize);
-            stack.push(AbstractValue::NonBoolean);
-        }
-        ExprOp::JumpIfFalse(target) | ExprOp::JumpIfTrue(target) => {
-            let jump_on = matches!(&chunk.ops[pc], ExprOp::JumpIfTrue(_));
-            match stack.last().unwrap_or(AbstractValue::Unknown) {
+        ExprOp::JumpIfFalse { condition, target } | ExprOp::JumpIfTrue { condition, target } => {
+            let jump_on = matches!(&chunk.ops[pc], ExprOp::JumpIfTrue { .. });
+            return match read_register(&registers, *condition) {
                 AbstractValue::Boolean(Some(value)) if value == jump_on => {
-                    next_pc = *target as usize;
+                    vec![(*target as usize, registers)]
                 }
-                AbstractValue::Boolean(Some(_)) | AbstractValue::NonBoolean => {}
+                AbstractValue::Boolean(Some(_)) | AbstractValue::NonBoolean => {
+                    vec![(next, registers)]
+                }
                 AbstractValue::Boolean(None) | AbstractValue::Unknown => {
-                    return AbstractStep::Fork {
-                        first_pc: *target as usize,
-                        first_stack: stack.clone(),
-                        second_pc: pc + 1,
-                        second_stack: stack,
-                    };
+                    vec![(*target as usize, registers.clone()), (next, registers)]
                 }
-            }
+            };
         }
-        ExprOp::AssertBoolean(_) => match stack.last() {
-            Some(AbstractValue::NonBoolean) | None => return AbstractStep::Stop,
-            Some(AbstractValue::Boolean(_) | AbstractValue::Unknown) => {}
-        },
     }
-    AbstractStep::Next { pc: next_pc, stack }
+    vec![(next, registers)]
 }
 
-fn pop_values(stack: &mut AbstractStack, count: usize) {
-    stack.truncate(stack.len().saturating_sub(count));
+fn read_register(registers: &[AbstractValue], register: u16) -> AbstractValue {
+    registers
+        .get(register as usize)
+        .copied()
+        .unwrap_or(AbstractValue::Unknown)
+}
+
+fn write_register(registers: &mut [AbstractValue], register: u16, value: AbstractValue) {
+    if let Some(destination) = registers.get_mut(register as usize) {
+        *destination = value;
+    }
 }
 
 fn enqueue_state(
-    states: &mut [Option<AbstractStack>],
+    states: &mut [Option<Vec<AbstractValue>>],
     pending: &mut VecDeque<usize>,
+    queued: &mut [bool],
     pc: usize,
-    incoming: AbstractStack,
+    incoming: Vec<AbstractValue>,
 ) {
     let Some(state) = states.get_mut(pc) else {
         return;
     };
-    let mut merged = state.clone();
-    merge_state(&mut merged, incoming);
-    if *state != merged {
-        *state = merged;
+    let changed = merge_state(state, incoming);
+    if changed && !queued[pc] {
+        queued[pc] = true;
         pending.push_back(pc);
     }
 }
 
-fn merge_state(state: &mut Option<AbstractStack>, incoming: AbstractStack) {
+fn merge_state(state: &mut Option<Vec<AbstractValue>>, incoming: Vec<AbstractValue>) -> bool {
     let Some(current) = state else {
         *state = Some(incoming);
-        return;
+        return true;
     };
-    current.truncate(incoming.len());
-    for (left, right) in current.as_mut_slice().iter_mut().zip(incoming.as_slice()) {
-        *left = merge_value(*left, *right);
+    let mut changed = false;
+    for (left, right) in current.iter_mut().zip(incoming) {
+        let merged = merge_value(*left, right);
+        changed |= *left != merged;
+        *left = merged;
     }
+    changed
 }
 
 const fn merge_value(left: AbstractValue, right: AbstractValue) -> AbstractValue {

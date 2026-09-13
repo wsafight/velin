@@ -36,7 +36,7 @@ velin-lang          statements + embedded expressions
 velin-compile       source lowering and ProgramBuilder
   |
   v
-velin-bytecode      Program + validation + execution plans
+velin-bytecode      Program + validation + execution metadata
   |
   v
 velin-vm            Machine state
@@ -60,9 +60,9 @@ Expressions also have a reference path: `velin-parse -> velin-eval`. It shares v
 | `velin-syntax` | Shared data model: `Value`, `Expr`, operators, `Span`, and `Diagnostic` |
 | `velin-parse` | Expression source to AST; does not handle statement control flow |
 | `velin-eval` | Tree-walking reference evaluator and built-in semantics |
-| `velin-bytecode` | Stable expression/program bytecode model, slot table, validation, wire format, and derived execution plans |
+| `velin-bytecode` | Register/program bytecode model, slot table, validation, wire format, and execution metadata |
 | `velin-compile` | Source expression lowering, constant propagation, and `ProgramBuilder` |
-| `velin-vm` | Runtime state, expression stack machine, control-flow loop, and host suspension protocol |
+| `velin-vm` | Runtime state, register expression interpreter, control-flow loop, and host suspension protocol |
 | `velin-check` | Type inference, condition checking, and definite-assignment analysis |
 | `velin-lang` | Indentation-sensitive statement AST, parsing, lowering, and host-name interning |
 | `velin` | Re-exports the stable embedding API without implementing new semantics |
@@ -138,7 +138,7 @@ Invalid random arguments fail before advancing state.
 
 ### 6.1 Expression bytecode
 
-Each `ExprChunk` contains a constant pool, source line numbers, and a flat `Vec<ExprOp>`. The main operations are:
+Each `ExprChunk` contains a constant pool, source line, register count, result register, and a flat `Vec<ExprOp>`. Every value-producing instruction names its destination; operations name source registers directly. The main operations are:
 
 ```text
 Const / Load
@@ -149,7 +149,7 @@ JumpIfFalse / JumpIfTrue
 Concat
 ```
 
-Variables resolve to `u32` slots during compilation, so runtime performs no string lookup. `and` and `or` compile to conditional jumps to preserve short-circuit semantics; string interpolation evaluates each part and finishes with one `Concat`.
+Variables resolve to `u32` slots during compilation, so runtime performs no string lookup. `and` and `or` compile to conditional jumps over explicit condition registers. Built-ins, random operations, and interpolation consume contiguous register ranges; interpolation finishes with one `Concat`.
 
 Pure constant subtrees are evaluated by the reference evaluator during compilation. Failed candidates, including overflow, division by zero, and type errors, remain as bytecode so runtime error behavior is unchanged. Bytecode source coordinates use compact `u32` values, and completed op and constant vectors are trimmed to their actual length.
 
@@ -166,11 +166,11 @@ Host(HostOp { host_id, args, bind, line })
 Halt
 ```
 
-Control-flow operations reference only expression chunks, slots, and program counters. `Update` is emitted for ownership-aware forms such as `items = push(items, value)` and `count = count + 1`; it preflights type, index, per-value, and machine budgets before taking the destination value, so failure leaves the slot unchanged. The cold, variable-sized `HostOp` payload is boxed so it does not widen every hot instruction. On 64-bit targets this keeps `Op` at 32 bytes instead of 48 and `ExprOp` at 12 bytes instead of 16 without changing the JSON representation. `Program` also owns the `SlotTable`, used for initialization, debugging, and name-based state access through the public API.
+Control-flow operations reference only expression chunks, slots, and program counters. `Update` is emitted for ownership-aware forms such as `items = push(items, value)` and `count = count + 1`; it preflights type, index, per-value, and machine budgets before taking the destination value, so failure leaves the slot unchanged. The cold, variable-sized `HostOp` payload is boxed so it does not widen every hot instruction. On 64-bit targets `Op` is 32 bytes, `ExprOp` is 12 bytes, and `ProgramChunk` is 24 bytes. `Program` also owns the `SlotTable`, used for initialization, debugging, and name-based state access through the public API.
 
 ### 6.3 Validation boundary
 
-`Program::validate` checks control-flow targets, chunk and slot indexes, forward expression jumps, stack height along every path, built-in arity, and bytecode/constant budgets. `ExprChunk::validate(slot_count)` gives direct expression-VM users the same local guarantee.
+`Program::validate` checks control-flow targets, chunk and slot indexes, register and range bounds, forward expression jumps, definitions on every reachable path, the result register, built-in arity, and bytecode/constant budgets. `ExprChunk::validate(slot_count)` gives direct expression-VM users the same local guarantee.
 
 `Program` deserialization through Serde validates automatically and rejects duplicate slot names. `Machine::new` and `Machine::with_seed` still validate hand-built programs and return `Result`. Public `eval_chunk` validates standalone chunks; a constructed `Machine` owns an `Arc<Program>` and takes an internal prevalidated path instead of scanning bytecode before every expression.
 
@@ -211,7 +211,7 @@ Static checking never changes bytecode or runtime behavior. The CLI and other ho
 
 ## 9. Execution and resource limits
 
-`Machine` holds an immutable `Program` through `Arc` and owns an independent variable frame, program counter, suspended effect, completion flag, and reusable expression stack. Construction is fallible; only a validated program can enter runtime state. Frame slots retain their measured data footprints, and expression/built-in evaluation returns metrics with its value, avoiding a second recursive resource scan during assignment or host-payload accounting.
+`Machine` holds an immutable `Program` through `Arc` and owns an independent variable frame, program counter, suspended effect, completion flag, and reusable register value/metric files. Construction is fallible; only a validated program can enter runtime state. Frame slots retain their measured data footprints, and expression/built-in evaluation returns metrics with its value, avoiding a second recursive resource scan during assignment or host-payload accounting.
 
 Each `run` or `resume` call executes at most `MAX_IMMEDIATE_STEPS` consecutive control-flow operations. Reaching that budget returns a possible-infinite-loop error so a script with no host yield point cannot occupy its caller forever.
 
@@ -223,7 +223,7 @@ Current built-in limits:
 | Expression | 64 KiB / 512 tokens / 32 parenthesis levels per expression; interpolation is limited to 32 levels and shares 256 KiB work and 2,048-token budgets |
 | Value | 4,096 nodes, 16 collection levels, and 1 MiB of text per value tree |
 | Program bytecode | 100,000 control-flow ops, 100,000 chunks, 65,536 slots, 100,000 constant-value nodes, and 16 MiB of constant/slot text |
-| Expression bytecode | 4,096 ops and stack height 1,024 per chunk; 128 arguments per host instruction |
+| Expression bytecode | 4,096 ops and 1,024 registers per chunk; 128 arguments per host instruction |
 | Tooling | 1 MiB CLI/Playground output; 1,000 CLI/Playground host effects; 1 MiB Playground reply JSON and 5-second Worker request; 4 MiB LSP JSON body, 64 KiB headers, and 8 KiB per header line |
 
 CLI, WebAssembly, and other hosts should add time, effect permission, and external resource limits appropriate to their own risk models. Those are host-layer concerns and cannot be unified by the language core.

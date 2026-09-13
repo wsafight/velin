@@ -1,13 +1,14 @@
 use super::support::{cache_metrics, checked_total, eval_chunk_for, eval_host_args};
 use super::{
     BinaryOp, DataFootprint, DataMetrics, EvalError, InitialFrame, MAX_IMMEDIATE_STEPS,
-    MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES, Machine, Op, PendingHost, PreparedExpr,
-    UpdateOp, Value, Yield,
+    MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES, Machine, Op, PendingHost, UpdateOp, Value,
+    Yield,
 };
+use velin_bytecode::ExprOp;
 
 impl Machine {
     /// Restarts execution from a prevalidated initial frame while reusing the
-    /// machine's frame and expression-stack allocations.
+    /// machine's frame and register-file allocations.
     ///
     /// The frame width and aggregate budget are checked before any state is
     /// changed, so a failed restart leaves the current machine untouched.
@@ -63,9 +64,8 @@ impl Machine {
                 },
             );
         }
-        self.expression_stack.clear();
-        self.expression_metrics.clear();
         self.register_values.clear();
+        self.register_metrics.clear();
         self.effect_buffer.clear();
         self.pc = 0;
         self.pending_host = None;
@@ -89,9 +89,8 @@ impl Machine {
                     &self.program,
                     &self.metadata,
                     &mut self.frame,
-                    &mut self.expression_stack,
-                    &mut self.expression_metrics,
                     &mut self.register_values,
+                    &mut self.register_metrics,
                     rhs,
                 )?;
                 self.update_add(slot, rhs, line)
@@ -102,9 +101,8 @@ impl Machine {
                     &self.program,
                     &self.metadata,
                     &mut self.frame,
-                    &mut self.expression_stack,
-                    &mut self.expression_metrics,
                     &mut self.register_values,
+                    &mut self.register_metrics,
                     value,
                 )?;
                 self.update_push(slot, value, metrics, line)
@@ -114,18 +112,16 @@ impl Machine {
                     &self.program,
                     &self.metadata,
                     &mut self.frame,
-                    &mut self.expression_stack,
-                    &mut self.expression_metrics,
                     &mut self.register_values,
+                    &mut self.register_metrics,
                     key,
                 )?;
                 let (value, metrics) = eval_chunk_for(
                     &self.program,
                     &self.metadata,
                     &mut self.frame,
-                    &mut self.expression_stack,
-                    &mut self.expression_metrics,
                     &mut self.register_values,
+                    &mut self.register_metrics,
                     value,
                 )?;
                 self.update_put(slot, key, value, metrics, line)
@@ -135,9 +131,8 @@ impl Machine {
                     &self.program,
                     &self.metadata,
                     &mut self.frame,
-                    &mut self.expression_stack,
-                    &mut self.expression_metrics,
                     &mut self.register_values,
+                    &mut self.register_metrics,
                     key,
                 )?;
                 self.update_remove(slot, key, line)
@@ -314,9 +309,8 @@ impl Machine {
                     &self.program,
                     &self.metadata,
                     &mut self.frame,
-                    &mut self.expression_stack,
-                    &mut self.expression_metrics,
                     &mut self.register_values,
+                    &mut self.register_metrics,
                     value,
                 )?;
                 let line = self.program.chunks[value as usize].line as usize;
@@ -395,9 +389,8 @@ impl Machine {
                     &self.program,
                     &self.metadata,
                     &mut self.frame,
-                    &mut self.expression_stack,
-                    &mut self.expression_metrics,
                     &mut self.register_values,
+                    &mut self.register_metrics,
                     host,
                 )?;
                 self.pc += 1; // resume past the effect, never re-run it
@@ -418,9 +411,18 @@ impl Machine {
 
     fn step_jump_if_false(&mut self, condition: u32, target: u32) -> Result<(), EvalError> {
         let condition_line = self.program.chunks[condition as usize].line as usize;
-        if let Some(PreparedExpr::Load { slot }) = self.metadata.prepared_expr(condition) {
-            let value = self.frame.values[slot as usize].as_ref().ok_or_else(|| {
-                velin_eval::unassigned(condition_line, self.program.slots.name(slot).unwrap_or("?"))
+        let chunk = self
+            .program
+            .chunk(condition)
+            .expect("validated condition chunk");
+        if let [ExprOp::Load { dst, slot, .. }] = chunk.ops
+            && *dst == chunk.result
+        {
+            let value = self.frame.values[*slot as usize].as_ref().ok_or_else(|| {
+                velin_eval::unassigned(
+                    condition_line,
+                    self.program.slots.name(*slot).unwrap_or("?"),
+                )
             })?;
             return match value {
                 Value::Boolean(false) => {
@@ -437,14 +439,12 @@ impl Machine {
                 )),
             };
         }
-
         let condition_value = eval_chunk_for(
             &self.program,
             &self.metadata,
             &mut self.frame,
-            &mut self.expression_stack,
-            &mut self.expression_metrics,
             &mut self.register_values,
+            &mut self.register_metrics,
             condition,
         )?
         .0;

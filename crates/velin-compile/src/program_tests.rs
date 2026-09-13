@@ -166,7 +166,7 @@ fn validation_precomputes_execution_metadata() {
     let validated = crate::ValidatedProgram::new(builder.build()).unwrap();
     let metadata = validated.shared_execution_metadata();
 
-    assert_eq!(metadata.chunk(chunk).unwrap().max_stack, 2);
+    assert_eq!(metadata.chunk(chunk).unwrap().registers, 2);
     assert!(!metadata.chunk(chunk).unwrap().mutates_frame);
     assert_eq!(metadata.op(0).unwrap().line, 6);
     assert_eq!(metadata.op(1).unwrap().line, 7);
@@ -179,11 +179,10 @@ fn validation_precomputes_execution_metadata() {
         3
     );
     assert_eq!(metadata.program_constant_metrics().len(), 1);
-    assert!(metadata.prepared_expr(chunk).is_some());
 }
 
 #[test]
-fn validation_prepares_long_scalar_register_plan() {
+fn compiler_emits_register_bytecode_for_long_scalar_expressions() {
     let mut builder = ProgramBuilder::new();
     let _left = builder.slot("left");
     let _right = builder.slot("right");
@@ -201,22 +200,20 @@ fn validation_prepares_long_scalar_register_plan() {
         slot: target,
         value: chunk,
     });
-    let validated = crate::ValidatedProgram::new(builder.build()).unwrap();
-    let metadata = validated.shared_execution_metadata();
-    let plan = metadata
-        .register_expr(chunk)
-        .expect("long scalar expression should use registers");
-    assert_eq!(plan.result, 0);
-    assert!(plan.registers >= 9);
+    let program = builder.build();
+    let bytecode = program.chunk(chunk).unwrap();
+    assert_eq!(bytecode.result, 0);
+    assert!(bytecode.registers >= 9);
     assert!(
-        plan.ops
+        bytecode
+            .ops
             .iter()
-            .any(|op| matches!(op, RegisterOp::Binary { .. }))
+            .any(|op| matches!(op, ExprOp::Binary { .. }))
     );
 }
 
 #[test]
-fn scalar_register_plan_carries_operator_type_hints() {
+fn register_bytecode_names_every_scalar_operand() {
     let mut builder = ProgramBuilder::new();
     let _source = builder.slot("source");
     let target = builder.slot("target");
@@ -233,24 +230,21 @@ fn scalar_register_plan_carries_operator_type_hints() {
         slot: target,
         value: chunk,
     });
-    let validated = crate::ValidatedProgram::new(builder.build()).unwrap();
-    let metadata = validated.shared_execution_metadata();
-    let plan = metadata
-        .register_expr(chunk)
-        .expect("long scalar expression should use registers");
-    assert!(plan.ops.iter().any(|operation| {
-        matches!(
-            operation,
-            RegisterOp::Binary {
-                result_type: RegisterType::Integer,
-                ..
-            }
-        )
-    }));
+    let program = builder.build();
+    let bytecode = program.chunk(chunk).unwrap();
+    assert!(bytecode.ops.iter().any(|operation| matches!(
+        operation,
+        ExprOp::Binary {
+            dst: 0,
+            left: 0,
+            op: BinaryOp::Subtract,
+            ..
+        }
+    )));
 }
 
 #[test]
-fn validation_quickens_builtins_with_direct_operands() {
+fn builtins_use_contiguous_register_arguments() {
     let mut builder = ProgramBuilder::new();
     let items = builder.slot("items");
     let target = builder.slot("target");
@@ -266,17 +260,23 @@ fn validation_quickens_builtins_with_direct_operands() {
         slot: target,
         value: chunk,
     });
-    let validated = crate::ValidatedProgram::new(builder.build()).unwrap();
-    let metadata = validated.shared_execution_metadata();
-    let (_, _, call) = metadata.chunk_plan(chunk).unwrap();
-    let call = call.expect("simple built-in should be quickened");
-
-    assert_eq!(call.function, Builtin::Contains);
-    assert_eq!(
-        call.operands,
-        [QuickenedOperand::Slot(items), QuickenedOperand::Constant(0)]
-    );
-    assert_eq!(call.line, 4);
+    let program = builder.build();
+    let bytecode = program.chunk(chunk).unwrap();
+    assert!(matches!(
+        bytecode.ops,
+        [
+            ExprOp::Load { dst: 1, slot, .. },
+            ExprOp::Const {
+                dst: 2,
+                constant: 0
+            },
+            ExprOp::Call {
+                dst: 0,
+                function: Builtin::Contains,
+                args
+            }
+        ] if *slot == items && args == &(1..3)
+    ));
 }
 
 #[test]
@@ -284,7 +284,7 @@ fn validation_quickens_builtins_with_direct_operands() {
 fn bytecode_layout_stays_compact() {
     assert_eq!(std::mem::size_of::<crate::ExprOp>(), 12);
     assert_eq!(std::mem::size_of::<Op>(), 32);
-    assert_eq!(std::mem::size_of::<ProgramChunk>(), 20);
+    assert_eq!(std::mem::size_of::<ProgramChunk>(), 24);
     assert_eq!(std::mem::size_of::<ExprChunk>(), 56);
 }
 
@@ -334,7 +334,7 @@ fn random_programs_round_trip_with_their_state_slot() {
     assert_eq!(restored.slots.rng_state(), Some(rng_slot));
     assert!(matches!(
         restored.chunk(0).unwrap().ops.last(),
-        Some(crate::ExprOp::Random { state_slot }) if *state_slot == rng_slot
+        Some(crate::ExprOp::Random { state_slot, .. }) if *state_slot == rng_slot
     ));
 }
 

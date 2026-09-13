@@ -298,8 +298,13 @@ mod tests {
                 Op::Halt,
             ],
             vec![ExprChunk {
-                ops: vec![ExprOp::Const(0)],
+                ops: vec![ExprOp::Const {
+                    dst: 0,
+                    constant: 0,
+                }],
                 constants: vec![Value::Integer(0)],
+                registers: 1,
+                result: 0,
                 line: 1,
             }],
             slots,

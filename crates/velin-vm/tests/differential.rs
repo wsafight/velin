@@ -143,8 +143,11 @@ fn builtins_match() {
         "len(bag)",
         "contains(bag, \"map\")",
         "get(bag, 0)",
+        "get(list(1, 2, 3), 1)",
         "get(push(bag, \"gem\"), 2)",
         "len(record(\"a\", 1, \"b\", 2))",
+        "get(put(record(\"a\", 1), \"b\", 2), \"b\")",
+        "len(remove(list(1, 2, 3), 1))",
     ] {
         agree(source, &vars);
     }
@@ -159,7 +162,9 @@ fn errors_match_value_for_value() {
         "not hp",       // not on integer
         "missing + 1",  // unassigned variable
         "get(bag, 99)", // list index out of bounds -> missing
-        "\"a\" < 1",    // comparison type mismatch
+        "put(bag, 99, \"gem\")",
+        "remove(record(\"a\", 1), \"missing\")",
+        "\"a\" < 1", // comparison type mismatch
     ] {
         agree(source, &vars);
     }
@@ -226,9 +231,9 @@ fn invalid_random_calls_match_without_consuming_state() {
 }
 
 #[test]
-fn prepared_expression_plan_matches_stack_fallback() {
+fn machine_and_standalone_register_execution_match() {
     for source in ["x", "x + 3", "(x + 3) * 2", "x + \"!\""] {
-        let expr = parse_expression(source, "prepared", 6, 1).expect("parses");
+        let expr = parse_expression(source, "register", 6, 1).expect("parses");
 
         let mut builder = ProgramBuilder::new();
         let result = builder.slot("result");
@@ -247,17 +252,19 @@ fn prepared_expression_plan_matches_stack_fallback() {
         let chunk = compile_expression(&expr, &mut slots, 6);
         let mut frame: Vec<Option<Value>> = vec![None; slots.len()];
         frame[slots.get("x").expect("x slot") as usize] = Some(Value::Integer(4));
-        let stack_result = eval_chunk(&chunk, &mut frame, |slot| {
+        let standalone_result = eval_chunk(&chunk, &mut frame, |slot| {
             slots.name(slot).unwrap_or("?").to_owned()
         });
 
-        match (machine_result, stack_result) {
+        match (machine_result, standalone_result) {
             (Ok(_), Ok(value)) => assert_eq!(machine.variable("result"), Some(&value)),
-            (Err(machine_error), Err(stack_error)) => {
-                assert_eq!(machine_error.line, stack_error.line);
-                assert_eq!(machine_error.message, stack_error.message);
+            (Err(machine_error), Err(standalone_error)) => {
+                assert_eq!(machine_error.line, standalone_error.line);
+                assert_eq!(machine_error.message, standalone_error.message);
             }
-            (machine, stack) => panic!("outcome mismatch for `{source}`: {machine:?} vs {stack:?}"),
+            (machine, standalone) => {
+                panic!("outcome mismatch for `{source}`: {machine:?} vs {standalone:?}")
+            }
         }
     }
 }

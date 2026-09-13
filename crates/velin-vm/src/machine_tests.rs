@@ -1,4 +1,5 @@
 use super::*;
+use velin_bytecode::ExprOp;
 use velin_compile::ProgramBuilder;
 use velin_syntax::{BinaryOp, Expr};
 
@@ -87,8 +88,8 @@ fn direct_boolean_guard_preserves_assignment_and_type_errors() {
 
     let mut unassigned = Machine::new(program.clone()).unwrap();
     assert!(matches!(
-        unassigned.metadata.prepared_expr(condition),
-        Some(PreparedExpr::Load { slot }) if slot == enabled
+        unassigned.program.chunk(condition).unwrap().ops,
+        [ExprOp::Load { dst: 0, slot, .. }] if *slot == enabled
     ));
     let error = unassigned.run().unwrap_err();
     assert_eq!(error.line, 6);
@@ -102,7 +103,7 @@ fn direct_boolean_guard_preserves_assignment_and_type_errors() {
 }
 
 #[test]
-fn quickened_readonly_builtins_preserve_results_and_errors() {
+fn register_builtins_preserve_results_and_errors() {
     let mut builder = ProgramBuilder::new();
     builder.slot("bag");
     for (target, source) in [
@@ -112,7 +113,7 @@ fn quickened_readonly_builtins_preserve_results_and_errors() {
         ("fallback", "get(bag, 9, \"missing\")"),
     ] {
         let target = builder.slot(target);
-        let expression = velin_parse::parse_expression(source, "quickened", 4, 1).unwrap();
+        let expression = velin_parse::parse_expression(source, "register", 4, 1).unwrap();
         let operation = builder.set_op(target, &expression, 4);
         builder.push(operation);
     }

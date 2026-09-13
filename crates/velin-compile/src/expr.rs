@@ -1,10 +1,9 @@
 //! Lowering from the `Expr` tree to a flat [`ExprChunk`].
 //!
-//! The compiler is a straightforward post-order walk: operands are emitted
-//! before the op that consumes them, which is exactly the order a stack machine
-//! needs. The only subtlety is `and`/`or`, which must short-circuit: they are
-//! lowered to conditional jumps rather than a `Binary` op, so the right operand
-//! is skipped (and never fails on an unassigned variable) when the result is
+//! The compiler assigns an explicit destination register to every expression.
+//! Operands are emitted before the instruction that consumes them. The only
+//! subtlety is `and`/`or`, which must short-circuit: they are lowered to
+//! conditional jumps so the right operand is skipped when the result is
 //! already determined by the left operand.
 
 use velin_bytecode::{ExprChunk, ExprOp, SlotTable};
@@ -31,11 +30,15 @@ pub(crate) fn compile_expression_into(
     line: usize,
     chunk: &mut ExprChunk,
 ) {
-    chunk.ops.clear();
-    chunk.constants.clear();
-    chunk.line = crate::compact_source_position(line);
+    chunk.reset(line);
     let plan = fold_plan(expression, line);
-    lower(expression, chunk, slots, 1, &mut FoldCursor::new(&plan));
+    let result = chunk.result;
+    let mut context = LoweringContext {
+        chunk,
+        slots,
+        folds: FoldCursor::new(&plan),
+    };
+    lower_into(expression, result, 1, &mut context);
 }
 
 #[derive(Clone, Copy)]
@@ -248,100 +251,130 @@ impl<'a> FoldCursor<'a> {
     }
 }
 
-fn lower(
-    expression: &Expr,
-    chunk: &mut ExprChunk,
-    slots: &mut SlotTable,
-    column: usize,
-    folds: &mut FoldCursor<'_>,
-) {
+struct LoweringContext<'a, 'b> {
+    chunk: &'a mut ExprChunk,
+    slots: &'a mut SlotTable,
+    folds: FoldCursor<'b>,
+}
+
+fn lower_into(expression: &Expr, dst: u16, column: usize, context: &mut LoweringContext<'_, '_>) {
     if let Expr::Spanned { span, expression } = expression {
-        lower(expression, chunk, slots, span.column, folds);
+        lower_into(expression, dst, span.column, context);
         return;
     }
-    if let Some(value) = folds.enter() {
-        let index = chunk.constant(value);
-        chunk.push(ExprOp::Const(index));
+    if let Some(value) = context.folds.enter() {
+        let constant = context.chunk.constant(value);
+        context.chunk.push(ExprOp::Const { dst, constant });
         return;
     }
 
     match expression {
         Expr::Spanned { .. } => unreachable!("spans are removed above"),
         Expr::Value(value) => {
-            let index = chunk.constant(value.clone());
-            chunk.push(ExprOp::Const(index));
+            let constant = context.chunk.constant(value.clone());
+            context.chunk.push(ExprOp::Const { dst, constant });
         }
         Expr::Variable(name) => {
-            let slot = slots.intern(name);
-            chunk.push(ExprOp::Load {
+            let slot = context.slots.intern(name);
+            context.chunk.push(ExprOp::Load {
+                dst,
                 slot,
                 column: crate::compact_source_position(column),
             });
         }
         Expr::Unary { op, value } => {
-            lower(value, chunk, slots, column, folds);
-            chunk.push(ExprOp::Unary(*op));
+            lower_into(value, dst, column, context);
+            context.chunk.push(ExprOp::Unary {
+                dst,
+                op: *op,
+                source: dst,
+            });
         }
         Expr::Binary { left, op, right } if matches!(op, BinaryOp::And | BinaryOp::Or) => {
-            lower_short_circuit(left, *op, right, chunk, slots, column, folds);
+            lower_short_circuit(left, *op, right, dst, column, context);
         }
         Expr::Binary { left, op, right } => {
-            lower(left, chunk, slots, column, folds);
-            lower(right, chunk, slots, column, folds);
-            chunk.push(ExprOp::Binary(*op));
+            lower_into(left, dst, column, context);
+            let right_register = context.chunk.register();
+            lower_into(right, right_register, column, context);
+            context.chunk.push(ExprOp::Binary {
+                dst,
+                left: dst,
+                op: *op,
+                right: right_register,
+            });
         }
         Expr::Invoke {
             function,
             arguments,
         } => {
-            for argument in arguments {
-                lower(argument, chunk, slots, column, folds);
+            let argument_registers = context.chunk.register_range(arguments.len());
+            for (argument, register) in arguments.iter().zip(argument_registers.clone()) {
+                lower_into(argument, register, column, context);
             }
             match function {
                 Builtin::Random => {
-                    let state_slot = slots.intern_rng_state();
-                    chunk.push(ExprOp::Random { state_slot });
+                    let state_slot = context.slots.intern_rng_state();
+                    context.chunk.push(ExprOp::Random {
+                        dst,
+                        args: argument_registers,
+                        state_slot,
+                    });
                 }
                 Builtin::Chance => {
-                    let state_slot = slots.intern_rng_state();
-                    chunk.push(ExprOp::Chance { state_slot });
+                    let state_slot = context.slots.intern_rng_state();
+                    context.chunk.push(ExprOp::Chance {
+                        dst,
+                        args: argument_registers,
+                        state_slot,
+                    });
                 }
                 _ => {
-                    let argc = u32::try_from(arguments.len()).expect("argument count fits in u32");
-                    chunk.push(ExprOp::Call {
+                    context.chunk.push(ExprOp::Call {
+                        dst,
                         function: *function,
-                        argc,
+                        args: argument_registers,
                     });
                 }
             }
         }
-        Expr::Interpolate { parts } => {
-            // Push every piece (literal segments as string constants, holes as
-            // their evaluated value) then fold them into one string. This keeps
-            // the display/concat semantics identical to the tree-walker.
-            for part in parts {
-                match part {
-                    StrPart::Literal(text) => {
-                        let index = chunk.constant(Value::String(text.clone().into()));
-                        chunk.push(ExprOp::Const(index));
-                    }
-                    StrPart::Hole(expr) => lower(expr, chunk, slots, column, folds),
-                }
+        Expr::Interpolate { parts } => lower_interpolation(parts, dst, column, context),
+    }
+}
+
+fn lower_interpolation(
+    parts: &[StrPart],
+    dst: u16,
+    column: usize,
+    context: &mut LoweringContext<'_, '_>,
+) {
+    let value_registers = context.chunk.register_range(parts.len());
+    for (part, register) in parts.iter().zip(value_registers.clone()) {
+        match part {
+            StrPart::Literal(text) => {
+                let constant = context.chunk.constant(Value::String(text.clone().into()));
+                context.chunk.push(ExprOp::Const {
+                    dst: register,
+                    constant,
+                });
             }
-            let count = u32::try_from(parts.len()).expect("interpolation part count fits in u32");
-            chunk.push(ExprOp::Concat(count));
+            StrPart::Hole(expr) => lower_into(expr, register, column, context),
         }
     }
+    context.chunk.push(ExprOp::Concat {
+        dst,
+        values: value_registers,
+    });
 }
 
 /// Lowers `left and right` / `left or right` with short-circuit semantics.
 ///
-/// Layout:
+/// Register layout:
 /// ```text
-///   <left>                 ; leaves the left boolean on the stack
-///   JumpIfFalse END        ; (for `and`) if false, keep it and skip the right
-///   <right>                ; leaves the right value above the left
-///   Binary And             ; validates and combines both operands
+///   <left -> dst>
+///   JumpIfFalse dst, END
+///   <right -> rhs>
+///   Binary dst, dst, And, rhs
 /// END:
 /// ```
 /// For `or` the guard is `JumpIfTrue`. When the jump is taken the left operand
@@ -351,23 +384,40 @@ fn lower_short_circuit(
     left: &Expr,
     op: BinaryOp,
     right: &Expr,
-    chunk: &mut ExprChunk,
-    slots: &mut SlotTable,
+    dst: u16,
     column: usize,
-    folds: &mut FoldCursor<'_>,
+    context: &mut LoweringContext<'_, '_>,
 ) {
-    lower(left, chunk, slots, column, folds);
-    let guard = chunk.push(match op {
-        BinaryOp::And => ExprOp::JumpIfFalse(u32::MAX),
-        BinaryOp::Or => ExprOp::JumpIfTrue(u32::MAX),
+    lower_into(left, dst, column, context);
+    let guard = context.chunk.push(match op {
+        BinaryOp::And => ExprOp::JumpIfFalse {
+            condition: dst,
+            target: u32::MAX,
+        },
+        BinaryOp::Or => ExprOp::JumpIfTrue {
+            condition: dst,
+            target: u32::MAX,
+        },
         _ => unreachable!("only and/or reach short-circuit lowering"),
     });
-    lower(right, chunk, slots, column, folds);
-    chunk.push(ExprOp::Binary(op));
-    let end = u32::try_from(chunk.ops.len()).expect("op index fits in u32");
-    chunk.ops[guard] = match op {
-        BinaryOp::And => ExprOp::JumpIfFalse(end),
-        BinaryOp::Or => ExprOp::JumpIfTrue(end),
+    let right_register = context.chunk.register();
+    lower_into(right, right_register, column, context);
+    context.chunk.push(ExprOp::Binary {
+        dst,
+        left: dst,
+        op,
+        right: right_register,
+    });
+    let end = u32::try_from(context.chunk.ops.len()).expect("op index fits in u32");
+    context.chunk.ops[guard] = match op {
+        BinaryOp::And => ExprOp::JumpIfFalse {
+            condition: dst,
+            target: end,
+        },
+        BinaryOp::Or => ExprOp::JumpIfTrue {
+            condition: dst,
+            target: end,
+        },
         _ => unreachable!(),
     };
 }

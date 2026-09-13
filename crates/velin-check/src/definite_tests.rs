@@ -3,23 +3,6 @@ use velin_compile::{Program, ProgramBuilder, SlotTable};
 use velin_syntax::{BinaryOp, Expr, UnaryOp, Value};
 
 #[test]
-fn abstract_stack_preserves_values_after_spilling() {
-    let mut stack = AbstractStack::new();
-    for index in 0..=INLINE_ABSTRACT_VALUES {
-        stack.push(AbstractValue::Boolean(Some(index % 2 == 0)));
-    }
-
-    assert!(matches!(stack, AbstractStack::Overflow(_)));
-    for index in (0..=INLINE_ABSTRACT_VALUES).rev() {
-        assert_eq!(
-            stack.pop(),
-            Some(AbstractValue::Boolean(Some(index % 2 == 0)))
-        );
-    }
-    assert_eq!(stack.pop(), None);
-}
-
-#[test]
 fn read_after_assignment_is_clean() {
     // set hp = 30; set hp = hp - 1
     let mut b = ProgramBuilder::new();
@@ -281,13 +264,28 @@ fn malformed_chunks_exercise_abstract_fallbacks() {
         vec![Op::Set { slot: 0, value: 0 }],
         vec![ExprChunk {
             ops: vec![
-                ExprOp::Const(99),
-                ExprOp::Unary(UnaryOp::Not),
-                ExprOp::AssertBoolean(BinaryOp::And),
-                ExprOp::JumpIfTrue(0),
-                ExprOp::Load { slot: 0, column: 1 },
+                ExprOp::Const {
+                    dst: 0,
+                    constant: 99,
+                },
+                ExprOp::Unary {
+                    dst: 1,
+                    op: UnaryOp::Not,
+                    source: 0,
+                },
+                ExprOp::JumpIfTrue {
+                    condition: 1,
+                    target: 0,
+                },
+                ExprOp::Load {
+                    dst: 0,
+                    slot: 0,
+                    column: 1,
+                },
             ],
             constants: Vec::new(),
+            registers: 2,
+            result: 0,
             line: 1,
         }],
         slots,

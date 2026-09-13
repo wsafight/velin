@@ -1,86 +1,93 @@
-//! The flat bytecode the compiler emits and the VM executes.
+//! Register bytecode emitted by the compiler and executed by the VM.
 //!
-//! There are two layers, mirroring the two layers of the source language:
-//!
-//! * [`ExprChunk`] — a stack machine for a single expression. It replaces the
-//!   recursive `Expr` walk with a flat `Vec<ExprOp>`, so evaluation is a tight
-//!   loop over a slice with no pointer chasing.
-//! * [`Op`] — program-level control flow (see [`crate::program`]). Each control
-//!   op refers to expression chunks by index.
-//!
-//! Neither layer contains host-domain concepts. Host effects are represented
-//! by the opaque [`Op::Host`] opcode, which the VM hands back to the embedder
-//! without interpreting.
+//! Expressions use explicit source and destination registers. Short-circuit
+//! branches retain their condition register, while built-ins and interpolation
+//! consume contiguous register ranges. Program-level control flow remains in
+//! [`crate::Op`] and refers to expression chunks by index.
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use std::ops::Range;
 use velin_syntax::{BinaryOp, Builtin, UnaryOp, Value};
 
-/// A single stack-machine instruction for evaluating one expression.
-///
-/// Operands are pushed onto an operand stack; each op consumes its inputs from
-/// the top of the stack and pushes its result. A well-formed chunk always
-/// leaves exactly one value on the stack.
+/// A physical register within one expression chunk.
+pub type Register = u16;
+
+/// One register instruction in an expression chunk.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprOp {
-    /// Push a constant from the chunk's constant pool.
-    Const(u32),
-    /// Push the current value of a frame slot, retaining its source column for
-    /// definite-assignment diagnostics.
-    Load { slot: u32, column: u32 },
-    /// Apply a unary operator to the top of the stack.
-    Unary(UnaryOp),
-    /// Apply a binary operator to the top two stack values.
-    ///
-    /// `and`/`or` are *not* emitted as `Binary`; they compile to
-    /// short-circuiting [`ExprOp::JumpIfFalse`] / [`ExprOp::JumpIfTrue`] so an
-    /// unassigned right-hand operand is never evaluated (matching the
-    /// tree-walker).
-    Binary(BinaryOp),
-    /// Call a built-in with `argc` values taken from the stack.
-    Call { function: Builtin, argc: u32 },
-    /// Draw an integer from the inclusive bounds on the stack, reading and
-    /// writing the deterministic RNG state in `state_slot`.
-    Random { state_slot: u32 },
-    /// Draw a boolean using the integer percentage on the stack, reading and
-    /// writing the deterministic RNG state in `state_slot`.
-    Chance { state_slot: u32 },
-    /// If the top of the stack is boolean `false`, leave it and jump to the
-    /// target op index; otherwise leave it and continue. Used for `and`; the
-    /// fallthrough path evaluates the right operand and combines both values.
-    JumpIfFalse(u32),
-    /// If the top of the stack is boolean `true`, leave it and jump to the
-    /// target op index; otherwise leave it and continue. Used for `or`.
-    JumpIfTrue(u32),
-    /// Require the top stack value to be boolean without consuming it.
-    /// Emitted after the right operand of `and`/`or`, whose value becomes the
-    /// expression result when the left operand does not short-circuit.
-    AssertBoolean(BinaryOp),
-    /// Concatenate the top `count` stack values into one string, rendering each
-    /// with [`Value::to_display`]. Emitted for string interpolation; literal
-    /// segments are pushed as string constants and holes as arbitrary values,
-    /// so a uniform display-then-join produces the interpolated text.
-    Concat(u32),
+    /// Copy a value from the chunk constant pool into `dst`.
+    Const { dst: Register, constant: u32 },
+    /// Copy the current value of a frame slot into `dst`.
+    Load {
+        dst: Register,
+        slot: u32,
+        column: u32,
+    },
+    /// Apply a unary operator to `source` and write `dst`.
+    Unary {
+        dst: Register,
+        op: UnaryOp,
+        source: Register,
+    },
+    /// Apply a binary operator and write `dst`.
+    Binary {
+        dst: Register,
+        left: Register,
+        op: BinaryOp,
+        right: Register,
+    },
+    /// Invoke a deterministic built-in using a contiguous register range.
+    Call {
+        dst: Register,
+        function: Builtin,
+        args: Range<Register>,
+    },
+    /// Draw an integer using explicit lower and upper bound registers.
+    Random {
+        dst: Register,
+        args: Range<Register>,
+        state_slot: u32,
+    },
+    /// Draw a boolean using an explicit percentage register.
+    Chance {
+        dst: Register,
+        args: Range<Register>,
+        state_slot: u32,
+    },
+    /// Jump when `condition` is boolean false. Other values fall through so
+    /// the following binary operation preserves the original error order.
+    JumpIfFalse { condition: Register, target: u32 },
+    /// Jump when `condition` is boolean true. Other values fall through.
+    JumpIfTrue { condition: Register, target: u32 },
+    /// Render and concatenate a contiguous register range into `dst`.
+    Concat {
+        dst: Register,
+        values: Range<Register>,
+    },
 }
 
-/// A compiled expression: a constant pool plus a flat op stream.
+/// A compiled expression with an explicit register file and result register.
 ///
-/// `line` is the 1-based source line, carried for error reporting only.
+/// `line` is the 1-based source line used for runtime diagnostics.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExprChunk {
     pub ops: Vec<ExprOp>,
     pub constants: Vec<Value>,
+    pub registers: Register,
+    pub result: Register,
     pub line: u32,
 }
 
-/// Borrowed expression bytecode, either from a standalone [`ExprChunk`] or a
-/// packed program arena.
+/// Borrowed register bytecode from a standalone chunk or packed program arena.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExprChunkRef<'a> {
     pub ops: &'a [ExprOp],
     pub constants: &'a [Value],
+    pub registers: Register,
+    pub result: Register,
     pub line: u32,
 }
 
@@ -90,16 +97,53 @@ impl ExprChunk {
         Self {
             ops: Vec::new(),
             constants: Vec::new(),
+            registers: 1,
+            result: 0,
             line: crate::compact_source_position(line),
         }
     }
 
-    /// Interns a constant, returning its pool index (deduplicating equal
-    /// values so repeated literals share one slot).
+    /// Resets a reusable chunk while retaining its arena allocations.
+    pub fn reset(&mut self, line: usize) {
+        self.ops.clear();
+        self.constants.clear();
+        self.registers = 1;
+        self.result = 0;
+        self.line = crate::compact_source_position(line);
+    }
+
+    /// Allocates one register after the fixed result register.
     ///
     /// # Panics
-    /// Panics only if more than `u32::MAX` constants are interned, which the
-    /// data budget makes unreachable.
+    /// Panics if the chunk exceeds the `u16` register namespace. Validation
+    /// limits make this unreachable for accepted programs.
+    pub fn register(&mut self) -> Register {
+        let register = self.registers;
+        self.registers = self
+            .registers
+            .checked_add(1)
+            .expect("expression register count fits in u16");
+        register
+    }
+
+    /// Allocates `count` consecutive registers.
+    ///
+    /// # Panics
+    /// Panics if `count` or the resulting register count exceeds `u16`.
+    pub fn register_range(&mut self, count: usize) -> Range<Register> {
+        let count = Register::try_from(count).expect("argument count fits in u16");
+        let start = self.registers;
+        self.registers = self
+            .registers
+            .checked_add(count)
+            .expect("expression register count fits in u16");
+        start..self.registers
+    }
+
+    /// Interns a constant and returns its deduplicated pool index.
+    ///
+    /// # Panics
+    /// Panics only if more than `u32::MAX` constants are interned.
     pub fn constant(&mut self, value: Value) -> u32 {
         if let Some(index) = self
             .constants
@@ -113,18 +157,20 @@ impl ExprChunk {
         index
     }
 
-    /// Appends an op and returns its index (useful for patching jumps).
+    /// Appends an instruction and returns its index for jump patching.
     pub fn push(&mut self, op: ExprOp) -> usize {
         self.ops.push(op);
         self.ops.len() - 1
     }
 
-    /// Borrows this standalone chunk in the same form used by packed programs.
+    /// Borrows this standalone chunk in packed-program form.
     #[must_use]
     pub fn as_chunk_ref(&self) -> ExprChunkRef<'_> {
         ExprChunkRef {
             ops: &self.ops,
             constants: &self.constants,
+            registers: self.registers,
+            result: self.result,
             line: self.line,
         }
     }

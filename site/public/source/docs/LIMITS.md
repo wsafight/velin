@@ -42,7 +42,7 @@ Every value passed into `set_variable` or `resume` is checked against the same p
 | Constant-value nodes | 100,000 |
 | Constant and slot text | 16 MiB |
 | Operations per expression chunk | 4,096 |
-| Expression stack height | 1,024 |
+| Registers per expression chunk | 1,024 |
 | Arguments per host instruction | 128 |
 | Immediate VM steps per `run` / `resume` | 10,000 |
 

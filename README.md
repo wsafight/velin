@@ -40,7 +40,7 @@ The name comes from the French *velin* (vellum): scripts write down the rules; t
 | `velin-syntax` | Values, expressions, built-ins, source locations, and diagnostics |
 | `velin-parse` | Expression tokenization and Pratt parsing |
 | `velin-eval` | Reference expression evaluator and deterministic built-ins |
-| `velin-bytecode` | Shared bytecode model, validation, wire format, and execution plans |
+| `velin-bytecode` | Shared bytecode model, validation, wire format, and execution metadata |
 | `velin-compile` | Compilation of expressions and control flow to bytecode |
 | `velin-vm` | Bytecode execution, state frames, and host-effect yielding |
 | `velin-check` | Conservative type inference and definite-assignment analysis |
@@ -125,7 +125,7 @@ match machine.run().unwrap() {
 
 Host commands use one protocol: the VM returns an opaque `host_id` and evaluated arguments; after performing the action, the host calls `resume`, passing `Some(Value)` when the command returns a value.
 
-`CompiledScript` shares immutable bytecode through `Arc<Program>`, so cloning a script or machine snapshot does not copy the whole program. `Machine::new` and `Machine::with_seed` validate chunks, slots, jumps, stack paths, and bytecode budgets before returning a `Result`. Serde deserialization of `Program` runs the same validation, preventing malformed data from reaching execution.
+`CompiledScript` shares immutable bytecode through `Arc<Program>`, so cloning a script or machine snapshot does not copy the whole program. `Machine::new` and `Machine::with_seed` validate chunks, slots, jumps, register definitions, and bytecode budgets before returning a `Result`. Serde deserialization of `Program` runs the same validation, preventing malformed data from reaching execution.
 
 You can also bypass the statement frontend and use `Expr`, `ProgramBuilder`, and `Machine` directly to construct a smaller language subset.
 
@@ -150,7 +150,7 @@ Built-ins are `list`, `record`, `get`, `put`, `push`, `remove`, `len`, `contains
 
 - A source file is limited to 1 MiB, 10,000 physical lines, and 64 nested statement blocks.
 - An expression is limited to 64 KiB, 512 tokens, 32 parenthesis levels, and 32 interpolation levels; nested interpolation shares cumulative work and token budgets.
-- A value is limited to 4,096 nodes, 16 collection levels, and 1 MiB of text. `Program` has additional budgets for operations, chunks, slots, constants, text, stack height, and host arguments.
+- A value is limited to 4,096 nodes, 16 collection levels, and 1 MiB of text. `Program` has additional budgets for operations, chunks, slots, constants, text, expression registers, and host arguments.
 - The VM executes at most 10,000 immediate steps before yielding. CLI and Playground runs accept at most 1,000 host effects and 1 MiB of output; the Playground additionally limits reply JSON to 1 MiB and worker execution to 5 seconds.
 - The LSP limits one JSON-RPC message to 4 MiB, the entire header to 64 KiB, and one header line to 8 KiB.
 

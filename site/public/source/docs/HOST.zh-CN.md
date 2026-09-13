@@ -32,6 +32,13 @@ VM:      resume(Some(value)) -> 写入 `answer` -> 继续
 
 程序计数器在效果发生**之前**前进。恢复执行时不会重复外部动作。效果挂起时再调用 `run`，或没有挂起效果时调用 `resume`，都是错误。
 
+## 批量无返回值效果
+
+连续的无绑定 `perform` 可以通过 `Machine::run_effect_batch_reusable` 或
+`ScriptRunner::run_effect_batch` 一次取出。VM 按源码顺序执行，并在遇到绑定效果、错误、完成或批次上限时停止；不会越过需要 `resume` 的 Host 屏障。
+
+批量 API 只负责有界 VM 批次。持久队列和宿主消费速度由嵌入方控制，可使用 `HostEventQueue` 设置事件数量、值数量和文本字节上限。队列满或 payload 超限时应暂停继续驱动 VM，待宿主消费后再取下一批；这样不会丢失或重复事件。
+
 ## 绑定与未绑定命令
 
 ```velin

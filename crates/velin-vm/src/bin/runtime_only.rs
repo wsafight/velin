@@ -13,9 +13,21 @@ fn main() {
     let mut expression = ExprChunk::new(1);
     let left = expression.constant(Value::Integer(40));
     let right = expression.constant(Value::Integer(2));
-    expression.push(ExprOp::Const(left));
-    expression.push(ExprOp::Const(right));
-    expression.push(ExprOp::Binary(BinaryOp::Add));
+    let right_register = expression.register();
+    expression.push(ExprOp::Const {
+        dst: expression.result,
+        constant: left,
+    });
+    expression.push(ExprOp::Const {
+        dst: right_register,
+        constant: right,
+    });
+    expression.push(ExprOp::Binary {
+        dst: expression.result,
+        left: expression.result,
+        op: BinaryOp::Add,
+        right: right_register,
+    });
 
     let program = Program::from_chunks(
         vec![

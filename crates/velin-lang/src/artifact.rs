@@ -12,7 +12,7 @@ use velin_syntax::{DataFootprint, Value};
 /// Fixed marker at the start of every `.velinc` file.
 pub const ARTIFACT_MAGIC: &[u8; 8] = b"VELINBC\0";
 /// Current artifact payload version.
-pub const ARTIFACT_VERSION: u16 = 2;
+pub const ARTIFACT_VERSION: u16 = 3;
 /// Maximum complete artifact size accepted by the decoder.
 pub const MAX_ARTIFACT_BYTES: usize = 16 * 1024 * 1024;
 const HEADER_BYTES: usize = ARTIFACT_MAGIC.len() + 2 + 8;
@@ -566,8 +566,17 @@ mod tests {
         let bytes = encode_artifact("test.velin", &script).unwrap();
         assert!(decode_artifact(&bytes[..HEADER_BYTES - 1]).is_err());
 
+        let mut previous_version = bytes.clone();
+        previous_version[ARTIFACT_MAGIC.len()..ARTIFACT_MAGIC.len() + 2]
+            .copy_from_slice(&2_u16.to_le_bytes());
+        assert_eq!(
+            decode_artifact(&previous_version).unwrap_err().to_string(),
+            "unsupported artifact version 2"
+        );
+
         let mut unknown_version = bytes.clone();
-        unknown_version[ARTIFACT_MAGIC.len()] = 3;
+        unknown_version[ARTIFACT_MAGIC.len()..ARTIFACT_MAGIC.len() + 2]
+            .copy_from_slice(&(ARTIFACT_VERSION + 1).to_le_bytes());
         assert!(
             decode_artifact(&unknown_version)
                 .unwrap_err()

@@ -342,7 +342,7 @@ impl<'a> ScriptRunner<'a> {
     }
 
     /// Restarts this runner from the script's current defaults while reusing
-    /// the machine's frame and expression-stack allocations.
+    /// the machine's frame and register-workspace allocations.
     ///
     /// Defaults are rebuilt when the public map was changed after compilation;
     /// the machine is only modified after that frame and its budget pass.

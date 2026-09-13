@@ -34,73 +34,38 @@ pub fn invoke_measured(
     mut arguments: Vec<Value>,
     line: usize,
 ) -> Result<(Value, DataMetrics), EvalError> {
-    let argc = arguments.len();
-    let metrics = invoke_stack_measured(function, &mut arguments, argc, line)?;
-    let result = arguments
-        .pop()
-        .ok_or_else(|| execution(line, "built-in produced no result"))?;
-    debug_assert!(arguments.is_empty());
-    Ok((result, metrics))
-}
-
-/// Consumes `argc` values from the end of `stack`, pushes one result, and
-/// returns its validated metrics.
-///
-/// Fixed-arity built-ins pop their operands directly, avoiding a temporary
-/// argument vector in the bytecode VM. `list` reuses or creates exactly the
-/// vector needed for the resulting collection.
-///
-/// # Errors
-/// Returns the same failures as [`invoke`], plus an invalid argument-count
-/// error if `stack` does not contain all declared operands.
-pub fn invoke_stack_measured(
-    function: Builtin,
-    stack: &mut Vec<Value>,
-    argc: usize,
-    line: usize,
-) -> Result<DataMetrics, EvalError> {
-    if !function.accepts(argc) || stack.len() < argc {
-        return Err(execution(line, "invalid built-in argument count"));
-    }
-    let result = invoke_stack(function, stack, argc, line)?;
+    validate_argument_count(function, arguments.len(), line)?;
+    let result = invoke_owned(function, &mut arguments, line)?;
     let metrics = result
         .data_metrics()
         .map_err(|error| execution(line, error))?;
-    stack.push(result);
-    Ok(metrics)
+    Ok((result, metrics))
 }
 
-/// Invokes a built-in while reusing metrics that already belong to its
-/// operands. The value stack and metrics stack must contain the same number of
-/// entries before the call. Collection constructors and `push` can therefore
-/// avoid walking their freshly-created result a second time.
-///
-/// Operations whose result shape depends on searching or replacing an
-/// arbitrary child use the regular measurement fallback. This keeps the
-/// optimization local and leaves all value semantics in [`invoke_stack`].
+/// Invokes a built-in with owned arguments and their previously computed
+/// metrics, returning the value and metrics for the result.
 ///
 /// # Errors
-/// Returns the same failures as [`invoke_stack_measured`].
-pub fn invoke_stack_measured_with_metrics(
+/// Returns the same failures as [`invoke_measured`], plus an invalid argument
+/// error when the value and metric arrays have different lengths.
+pub fn invoke_measured_with_metrics(
     function: Builtin,
-    stack: &mut Vec<Value>,
-    metrics: &mut Vec<DataMetrics>,
-    argc: usize,
+    mut arguments: Vec<Value>,
+    argument_metrics: &[DataMetrics],
     line: usize,
-) -> Result<DataMetrics, EvalError> {
-    if !function.accepts(argc) || stack.len() < argc || metrics.len() < argc {
-        return Err(execution(line, "invalid built-in argument count"));
+) -> Result<(Value, DataMetrics), EvalError> {
+    if arguments.len() != argument_metrics.len() {
+        return Err(execution(line, "invalid built-in argument metrics"));
     }
-    let at = stack.len() - argc;
+    validate_argument_count(function, arguments.len(), line)?;
     let known_metrics = match function {
-        Builtin::List => Some(collection_metrics(&metrics[at..], line)),
-        Builtin::Record => record_metrics(&stack[at..], &metrics[at..], line),
-        Builtin::Push => push_metrics(&stack[at..], &metrics[at..], line),
+        Builtin::List => Some(collection_metrics(argument_metrics, line)),
+        Builtin::Record => record_metrics(&arguments, argument_metrics, line),
+        Builtin::Push => push_metrics(&arguments, argument_metrics, line),
         Builtin::Len | Builtin::Contains => Some(Ok(scalar_metrics())),
         Builtin::Get | Builtin::Put | Builtin::Remove | Builtin::Random | Builtin::Chance => None,
     };
-    let result = invoke_stack(function, stack, argc, line)?;
-    metrics.truncate(at);
+    let result = invoke_owned(function, &mut arguments, line)?;
     let result_metrics = if let Some(known) = known_metrics.transpose()? {
         known
     } else {
@@ -108,29 +73,31 @@ pub fn invoke_stack_measured_with_metrics(
             .data_metrics()
             .map_err(|error| execution(line, error))?
     };
-    stack.push(result);
-    metrics.push(result_metrics);
-    Ok(result_metrics)
+    Ok((result, result_metrics))
 }
 
-fn invoke_stack(
+fn validate_argument_count(function: Builtin, count: usize, line: usize) -> Result<(), EvalError> {
+    if !function.accepts(count) {
+        return Err(execution(line, "invalid built-in argument count"));
+    }
+    Ok(())
+}
+
+fn invoke_owned(
     function: Builtin,
-    stack: &mut Vec<Value>,
-    argc: usize,
+    arguments: &mut Vec<Value>,
     line: usize,
 ) -> Result<Value, EvalError> {
+    let argc = arguments.len();
     let result = match function {
-        Builtin::List => construct_list(stack, argc),
-        Builtin::Record => construct_record(stack, argc, line)?,
+        Builtin::List => Value::List(Arc::new(std::mem::take(arguments))),
+        Builtin::Record => construct_record(arguments, argc, line)?,
         Builtin::Len | Builtin::Get | Builtin::Contains => {
-            let at = stack.len() - argc;
-            let result = invoke_readonly(function, argc, |index| &stack[at + index], line);
-            stack.truncate(at);
-            result?
+            invoke_readonly(function, argc, |index| &arguments[index], line)?
         }
         Builtin::Push => {
-            let value = pop_argument(stack, line)?;
-            let source = pop_argument(stack, line)?;
+            let value = pop_argument(arguments, line)?;
+            let source = pop_argument(arguments, line)?;
             let Value::List(mut values) = source else {
                 return Err(execution(line, "push expects a list"));
             };
@@ -138,14 +105,14 @@ fn invoke_stack(
             Value::List(values)
         }
         Builtin::Put => {
-            let replacement = pop_argument(stack, line)?;
-            let key = pop_argument(stack, line)?;
-            let source = pop_argument(stack, line)?;
+            let replacement = pop_argument(arguments, line)?;
+            let key = pop_argument(arguments, line)?;
+            let source = pop_argument(arguments, line)?;
             edit(source, key, Some(replacement), line)?
         }
         Builtin::Remove => {
-            let key = pop_argument(stack, line)?;
-            let source = pop_argument(stack, line)?;
+            let key = pop_argument(arguments, line)?;
+            let source = pop_argument(arguments, line)?;
             edit(source, key, None, line)?
         }
         Builtin::Random | Builtin::Chance => {
@@ -161,7 +128,7 @@ fn invoke_stack(
 /// Invokes a built-in that only reads its arguments without cloning them.
 ///
 /// This accepts `len`, `get`, and `contains`; collection constructors and
-/// mutations require owned operands and remain on [`invoke_stack_measured`].
+/// mutations require owned operands and use [`invoke_measured_with_metrics`].
 ///
 /// # Errors
 /// Returns the same failures as [`invoke`] and rejects non-read-only built-ins.
@@ -231,21 +198,15 @@ fn invoke_readonly<'a>(
     Ok(result)
 }
 
-fn construct_list(stack: &mut Vec<Value>, argc: usize) -> Value {
-    let at = stack.len() - argc;
-    let values = if at == 0 {
-        std::mem::take(stack)
-    } else {
-        stack.drain(at..).collect()
-    };
-    Value::List(Arc::new(values))
-}
-
-fn construct_record(stack: &mut Vec<Value>, argc: usize, line: usize) -> Result<Value, EvalError> {
+fn construct_record(
+    arguments: &mut Vec<Value>,
+    argc: usize,
+    line: usize,
+) -> Result<Value, EvalError> {
     let mut record = BTreeMap::new();
     for _ in 0..argc / 2 {
-        let value = pop_argument(stack, line)?;
-        let key = pop_argument(stack, line)?;
+        let value = pop_argument(arguments, line)?;
+        let key = pop_argument(arguments, line)?;
         let Value::String(key) = key else {
             return Err(execution(line, "record keys must be strings"));
         };
@@ -256,8 +217,8 @@ fn construct_record(stack: &mut Vec<Value>, argc: usize, line: usize) -> Result<
     Ok(Value::Record(Arc::new(record)))
 }
 
-fn pop_argument(stack: &mut Vec<Value>, line: usize) -> Result<Value, EvalError> {
-    stack
+fn pop_argument(arguments: &mut Vec<Value>, line: usize) -> Result<Value, EvalError> {
+    arguments
         .pop()
         .ok_or_else(|| execution(line, "invalid built-in argument count"))
 }

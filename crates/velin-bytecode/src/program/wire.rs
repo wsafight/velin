@@ -33,9 +33,11 @@ struct SerializedChunk<'a>(ExprChunkRef<'a>);
 
 impl Serialize for SerializedChunk<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct("ExprChunk", 3)?;
+        let mut state = serializer.serialize_struct("ExprChunk", 5)?;
         state.serialize_field("ops", self.0.ops)?;
         state.serialize_field("constants", self.0.constants)?;
+        state.serialize_field("registers", &self.0.registers)?;
+        state.serialize_field("result", &self.0.result)?;
         state.serialize_field("line", &self.0.line)?;
         state.end()
     }

@@ -6,7 +6,7 @@ use super::{
 };
 
 impl Program {
-    /// Verifies every index, expression stack path, jump and bytecode budget.
+    /// Verifies every index, register definition, jump and bytecode budget.
     ///
     /// Compiler output is valid by construction. Call this before executing a
     /// program obtained from serialization or a low-level bytecode producer.
@@ -20,7 +20,7 @@ impl Program {
         check_limit("variable slots", self.slots.len(), MAX_PROGRAM_SLOTS)?;
 
         let mut constant_values = 0usize;
-        let mut expression_heights = Vec::new();
+        let mut register_states = Vec::new();
         let mut text_bytes = self
             .slots
             .names()
@@ -37,7 +37,7 @@ impl Program {
                 ))
             })?;
             let (values, bytes) =
-                validate_chunk(chunk, self.slots.len(), id, &mut expression_heights)?;
+                validate_chunk(chunk, self.slots.len(), id, &mut register_states)?;
             constant_values = constant_values
                 .checked_add(values)
                 .ok_or_else(|| ProgramValidationError::new("constant value budget overflow"))?;

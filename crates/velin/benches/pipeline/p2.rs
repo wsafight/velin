@@ -1,11 +1,11 @@
-//! P2-specific VM benchmarks for prepared expressions and interpolation.
+//! P2-specific VM benchmarks for small register expressions and interpolation.
 
 use criterion::Criterion;
 use std::fmt::Write as _;
 use std::hint::black_box;
 use velin::{ScriptRunner, compile};
 
-pub(crate) fn bench_prepared_expression_loop(c: &mut Criterion) {
+pub(crate) fn bench_small_register_expression_loop(c: &mut Criterion) {
     let script = compile(
         "bench.velin",
         concat!(
@@ -17,7 +17,7 @@ pub(crate) fn bench_prepared_expression_loop(c: &mut Criterion) {
         ),
     )
     .unwrap();
-    c.bench_function("vm/prepared_expression_loop", |b| {
+    c.bench_function("vm/small_register_expression_loop", |b| {
         b.iter(|| {
             let mut runner = ScriptRunner::new(&script).unwrap();
             black_box(runner.run().unwrap())

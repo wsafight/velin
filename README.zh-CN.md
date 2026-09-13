@@ -40,7 +40,7 @@ Velin 是一门**可嵌入、可复现的字节码脚本语言**。它负责表�
 | `velin-syntax` | 值、表达式、内置函数、源码位置和诊断 |
 | `velin-parse` | 表达式词法分析与 Pratt 解析 |
 | `velin-eval` | 参考表达式求值器与确定性内置函数 |
-| `velin-bytecode` | 共享字节码模型、校验、线格式与执行计划 |
+| `velin-bytecode` | 共享字节码模型、校验、线格式与执行元数据 |
 | `velin-compile` | 表达式及控制流到字节码的编译 |
 | `velin-vm` | 字节码执行、状态帧和宿主效果让出 |
 | `velin-check` | 保守类型推断与确定赋值分析 |
@@ -125,7 +125,7 @@ match machine.run().unwrap() {
 
 宿主命令只有一个协议：VM 返回不透明的 `host_id` 与已求值参数；宿主完成行为后调用 `resume`，需要返回值的命令则传入 `Some(Value)`。
 
-`CompiledScript` 以 `Arc<Program>` 共享不可变字节码，克隆脚本或机器快照不会复制整份程序。`Machine::new` 和 `Machine::with_seed` 会先验证所有 chunk、槽位、跳转、栈路径和字节码预算，因此返回 `Result`。通过 Serde 读取 `Program` 时也会执行同一校验，坏数据不会进入执行阶段。
+`CompiledScript` 以 `Arc<Program>` 共享不可变字节码，克隆脚本或机器快照不会复制整份程序。`Machine::new` 和 `Machine::with_seed` 会先验证所有 chunk、槽位、跳转、寄存器定义和字节码预算，因此返回 `Result`。通过 Serde 读取 `Program` 时也会执行同一校验，坏数据不会进入执行阶段。
 
 也可以绕过语句前端，直接使用 `Expr`、`ProgramBuilder` 和 `Machine` 构建更小的语言子集。
 
@@ -150,7 +150,7 @@ match machine.run().unwrap() {
 
 - 每份源码最多 1 MiB、10,000 个物理行，语句块最多嵌套 64 层。
 - 单个表达式最多 64 KiB、512 个 token、32 层括号和 32 层插值；嵌套插值共享累计工作量与 token 预算。
-- 单个值最多包含 4,096 个节点、16 层集合和 1 MiB 文本；`Program` 另有操作数、chunk、槽位、常量、文本、栈高和宿主参数预算。
+- 单个值最多包含 4,096 个节点、16 层集合和 1 MiB 文本；`Program` 另有操作数、chunk、槽位、常量、文本、表达式寄存器和宿主参数预算。
 - VM 每次让出宿主前最多立即执行 10,000 步；CLI 与 Playground 每次运行最多处理 1,000 次宿主效果和 1 MiB 输出；Playground 还会把回复 JSON 限制为 1 MiB，并把 Worker 执行限制为 5 秒。
 - LSP 限制单条 JSON-RPC 消息为 4 MiB、整个头部为 64 KiB、单行头部为 8 KiB。
 

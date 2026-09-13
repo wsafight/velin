@@ -14,12 +14,10 @@
 use crate::cfg::{ControlFlow, is_straight_line};
 use std::collections::{BTreeSet, VecDeque};
 use velin_bytecode::{ExprChunkRef, ExprOp, Op, Program, UpdateOp};
-use velin_syntax::{BinaryOp, Builtin, UnaryOp, Value};
+use velin_syntax::{BinaryOp, Builtin, Value};
 
 mod expression;
 
-#[cfg(test)]
-use expression::{AbstractStack, AbstractValue, INLINE_ABSTRACT_VALUES};
 use expression::{ExpressionWorkspace, LoadSet, reachable_loads};
 
 /// A use of a slot the analysis proved is unassigned on some path.
