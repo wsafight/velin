@@ -5,8 +5,7 @@ use super::{
 
 impl ExecutionMetadata {
     pub(crate) fn new(program: &Program) -> Self {
-        let mut typed_ir = TypedIr::from_program(program);
-        typed_ir.optimize();
+        let typed_ir = TypedIr::from_program(program);
         let mut metrics = Vec::new();
         let program_constant_metrics = program
             .constants

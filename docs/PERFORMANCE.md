@@ -129,10 +129,24 @@ Short-circuit logic follows the same rule. If a constant left operand determines
 The known-value environment also maintains an incremental slot-to-name map. Wide straight-line scripts no longer rebuild a `BTreeMap` from every slot on each assignment; jumps, host effects, and unknown writes still clear the environment.
 
 Validated programs also construct `TypedIr`: it splits control-flow boundaries
-into basic blocks, assigns monotonic SSA value IDs to assignments, and retains
-Host, random, and potentially failing operations as barriers. `TypedIr::optimize`
-only propagates reachability; it never reorders side effects or replaces the
-canonical bytecode.
+into basic blocks, converts slot writes to SSA values, and creates explicit
+phis at path joins. The IR carries integer, boolean, string, compound, and
+unknown types; Host, random, and potentially failing operations remain barriers.
+
+`TypedIr::optimize` performs conservative sparse constant propagation without
+changing the canonical register bytecode. It propagates known constants, slot
+copies, and constant expression results, folds provably constant boolean
+branches, and refreshes predecessor edges after folding. It then recognizes
+natural loops from back edges. When a loop header has one outside predecessor,
+it records a preheader, hoists only pure constants and slot loads whose
+definitions are outside the loop, and marks checked `Update::AddInteger`
+operations as induction updates.
+
+These transformations produce execution-preparation analysis and optimization
+records only. They do not move code across side effects, random state,
+potential failures, or external writes; they do not apply general algebraic
+rewrites; and they preserve source locations, error order, and Host order. The
+canonical register-bytecode interpreter remains the sole execution authority.
 
 ### Direct instructions cover exact shapes
 
