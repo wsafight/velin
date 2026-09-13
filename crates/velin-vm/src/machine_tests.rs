@@ -67,6 +67,41 @@ fn direct_assignment_and_integer_guard_ops_preserve_semantics() {
 }
 
 #[test]
+fn direct_boolean_guard_preserves_assignment_and_type_errors() {
+    let mut builder = ProgramBuilder::new();
+    let enabled = builder.slot("enabled");
+    let condition = builder.expr(&Expr::Variable("enabled".into()), 6);
+    let jump = builder.push(Op::JumpIfFalse {
+        condition,
+        target: u32::MAX,
+    });
+    builder.push(Op::Halt);
+    builder.patch(
+        jump,
+        Op::JumpIfFalse {
+            condition,
+            target: 1,
+        },
+    );
+    let program = builder.build();
+
+    let mut unassigned = Machine::new(program.clone()).unwrap();
+    assert!(matches!(
+        unassigned.metadata.prepared_expr(condition),
+        Some(PreparedExpr::Load { slot }) if slot == enabled
+    ));
+    let error = unassigned.run().unwrap_err();
+    assert_eq!(error.line, 6);
+    assert!(error.message.contains("has not been assigned"));
+
+    let mut wrong_type = Machine::new(program).unwrap();
+    wrong_type.set_variable("enabled", Value::Integer(1));
+    let error = wrong_type.run().unwrap_err();
+    assert_eq!(error.line, 6);
+    assert!(error.message.contains("condition expects boolean"));
+}
+
+#[test]
 fn quickened_readonly_builtins_preserve_results_and_errors() {
     let mut builder = ProgramBuilder::new();
     builder.slot("bag");

@@ -1,8 +1,8 @@
 use super::support::{cache_metrics, checked_total, eval_chunk_for, eval_host_args};
 use super::{
     BinaryOp, DataFootprint, DataMetrics, EvalError, InitialFrame, MAX_IMMEDIATE_STEPS,
-    MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES, Machine, Op, PendingHost, UpdateOp, Value,
-    Yield,
+    MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES, Machine, Op, PendingHost, PreparedExpr,
+    UpdateOp, Value, Yield,
 };
 
 impl Machine {
@@ -166,6 +166,18 @@ impl Machine {
             text_bytes: 0,
         };
         let old = frame.footprints[index];
+        if old == footprint {
+            frame.values[index] = Some(Value::Integer(result));
+            cache_metrics(
+                frame,
+                index,
+                DataMetrics {
+                    footprint,
+                    max_depth: 0,
+                },
+            );
+            return Ok(());
+        }
         let retained = DataFootprint {
             values: self.frame_total.values - old.values,
             text_bytes: self.frame_total.text_bytes - old.text_bytes,
@@ -354,27 +366,7 @@ impl Machine {
             }
             Op::Jump(target) => self.pc = *target as usize,
             Op::JumpIfFalse { condition, target } => {
-                let condition_line = self.program.chunks[*condition as usize].line as usize;
-                let condition_value = eval_chunk_for(
-                    &self.program,
-                    &self.metadata,
-                    &mut self.frame,
-                    &mut self.expression_stack,
-                    &mut self.expression_metrics,
-                    &mut self.register_values,
-                    *condition,
-                )?
-                .0;
-                match condition_value {
-                    Value::Boolean(false) => self.pc = *target as usize,
-                    Value::Boolean(true) => self.pc += 1,
-                    value => {
-                        return Err(EvalError::new(
-                            condition_line,
-                            format!("condition expects boolean, found {}", value.type_name()),
-                        ));
-                    }
-                }
+                self.step_jump_if_false(*condition, *target)?;
             }
             Op::JumpIfIntegerCompare {
                 condition,
@@ -422,6 +414,51 @@ impl Machine {
             .data_metrics()
             .map_err(|error| EvalError::new(line, error))?;
         self.assign_measured(slot, value, metrics, line)
+    }
+
+    fn step_jump_if_false(&mut self, condition: u32, target: u32) -> Result<(), EvalError> {
+        let condition_line = self.program.chunks[condition as usize].line as usize;
+        if let Some(PreparedExpr::Load { slot }) = self.metadata.prepared_expr(condition) {
+            let value = self.frame.values[slot as usize].as_ref().ok_or_else(|| {
+                velin_eval::unassigned(condition_line, self.program.slots.name(slot).unwrap_or("?"))
+            })?;
+            return match value {
+                Value::Boolean(false) => {
+                    self.pc = target as usize;
+                    Ok(())
+                }
+                Value::Boolean(true) => {
+                    self.pc += 1;
+                    Ok(())
+                }
+                value => Err(EvalError::new(
+                    condition_line,
+                    format!("condition expects boolean, found {}", value.type_name()),
+                )),
+            };
+        }
+
+        let condition_value = eval_chunk_for(
+            &self.program,
+            &self.metadata,
+            &mut self.frame,
+            &mut self.expression_stack,
+            &mut self.expression_metrics,
+            &mut self.register_values,
+            condition,
+        )?
+        .0;
+        match condition_value {
+            Value::Boolean(false) => self.pc = target as usize,
+            Value::Boolean(true) => self.pc += 1,
+            value => {
+                return Err(EvalError::new(
+                    condition_line,
+                    format!("condition expects boolean, found {}", value.type_name()),
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn assign_measured(
