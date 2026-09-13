@@ -24,6 +24,12 @@ repository = "https://github.com/wsafight/velin"
 homepage = "https://github.com/wsafight/velin"
 documentation = "https://docs.rs/velin"
 
+[profile.release]
+# ThinLTO enables cross-crate optimization while retaining parallel codegen.
+# This keeps release builds practical for workspace development and embedding.
+lto = "thin"
+strip = "symbols"
+
 [workspace.dependencies]
 velin-syntax = { version = "0.1.1", path = "crates/velin-syntax" }
 velin-parse = { version = "0.1.1", path = "crates/velin-parse" }
