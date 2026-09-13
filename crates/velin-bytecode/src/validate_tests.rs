@@ -145,3 +145,45 @@ fn validated_program_requires_a_valid_program_and_keeps_it_shared() {
     };
     assert!(ValidatedProgram::new(invalid).is_err());
 }
+
+#[test]
+fn execution_image_can_move_columns_to_a_debug_sidecar() {
+    let mut slots = SlotTable::new();
+    let source = slots.intern("source");
+    let target = slots.intern("target");
+    let program = Program::from_chunks(
+        vec![
+            Op::Set {
+                slot: target,
+                value: 0,
+            },
+            Op::CopySlot {
+                slot: target,
+                source,
+                line: 4,
+                column: 12,
+            },
+            Op::Halt,
+        ],
+        vec![ExprChunk {
+            ops: vec![ExprOp::Load {
+                slot: source,
+                column: 9,
+            }],
+            constants: Vec::new(),
+            line: 3,
+        }],
+        slots,
+    );
+    let (image, debug) = program.without_debug_columns();
+    assert_eq!(debug.chunk(0).unwrap().line, 3);
+    assert_eq!(debug.op(0).unwrap().line, 3);
+    assert_eq!(debug.op(1).unwrap().column, 12);
+    assert_eq!(debug.expression_column(0), Some(9));
+    assert!(matches!(
+        image.chunk(0).unwrap().ops[0],
+        ExprOp::Load { column: 0, .. }
+    ));
+    assert!(matches!(image.ops[1], Op::CopySlot { column: 0, .. }));
+    assert!(image.validate().is_ok());
+}

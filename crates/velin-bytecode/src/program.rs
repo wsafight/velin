@@ -8,6 +8,7 @@
 //! is [`Op::Host`], an opaque effect the VM yields to the embedder.
 
 use crate::bytecode::{ExprChunk, ExprChunkRef, ExprOp};
+use crate::debug::DebugTable;
 use crate::slots::SlotTable;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -397,6 +398,36 @@ impl Program {
             constants,
             line: chunk.line,
         })
+    }
+
+    /// Builds a sidecar source-location table for tools and diagnostics.
+    #[must_use]
+    pub fn debug_table(&self) -> DebugTable {
+        DebugTable::from_program(self)
+    }
+
+    /// Removes expression and direct-operation columns from the execution
+    /// image while returning them in a sidecar debug table.
+    ///
+    /// Artifact version 1 remains unchanged because the transformation is
+    /// explicit and the normal serializer still emits the canonical fields.
+    /// Runtime hosts that do not display source columns can retain only the
+    /// returned program; tools can keep the table alongside it.
+    #[must_use]
+    pub fn without_debug_columns(mut self) -> (Self, DebugTable) {
+        let debug = self.debug_table();
+        for op in &mut self.expr_ops {
+            if let ExprOp::Load { column, .. } = op {
+                *column = 0;
+            }
+        }
+        for op in &mut self.ops {
+            match op {
+                Op::CopySlot { column, .. } | Op::Update { column, .. } => *column = 0,
+                _ => {}
+            }
+        }
+        (self, debug)
     }
 
     /// Removes slot names and reverse lookup for numeric-slot-only hosts.

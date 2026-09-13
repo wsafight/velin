@@ -6,6 +6,7 @@
 //! here.
 
 mod bytecode;
+mod debug;
 mod frame;
 mod program;
 mod slots;
@@ -16,6 +17,7 @@ fn compact_source_position(position: usize) -> u32 {
 }
 
 pub use bytecode::{ExprChunk, ExprChunkRef, ExprOp};
+pub use debug::{DebugLocation, DebugTable};
 pub use frame::{InitialFrame, InitialFrameError, InitialValue};
 pub use program::{
     ChunkExecutionMetadata, ChunkId, ExecutionMetadata, HostOp, Op, OpExecutionMetadata, Pc,
