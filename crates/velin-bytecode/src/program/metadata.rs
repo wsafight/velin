@@ -2,11 +2,13 @@ use super::{
     BinaryOp, ChunkExecutionMetadata, ChunkId, DataMetrics, ExecutionMetadata, ExprChunkRef,
     ExprOp, NO_METRICS, NO_PLAN, Op, OpExecutionMetadata, PreparedExpr, Program,
     QUICKENED_CALL_TAG, QuickenedCall, QuickenedCallRef, QuickenedOperand, RegisterExpr,
-    RegisterOp, RegisterType, UpdateOp, Value,
+    RegisterOp, RegisterType, TypedIr, UpdateOp, Value,
 };
 
 impl ExecutionMetadata {
     pub(crate) fn new(program: &Program) -> Self {
+        let mut typed_ir = TypedIr::from_program(program);
+        typed_ir.optimize();
         let mut metrics = Vec::new();
         let program_constant_metrics = program
             .constants
@@ -86,6 +88,7 @@ impl ExecutionMetadata {
             .collect::<Vec<_>>()
             .into_boxed_slice();
         Self {
+            typed_ir,
             chunks,
             ops,
             metrics: metrics.into_boxed_slice(),
@@ -153,6 +156,13 @@ impl ExecutionMetadata {
         (index != NO_PLAN)
             .then(|| self.register_values.get(index as usize))
             .flatten()
+    }
+
+    /// Returns the conservative typed basic-block/SSA view built once for the
+    /// validated program.
+    #[must_use]
+    pub fn typed_ir(&self) -> &TypedIr {
+        &self.typed_ir
     }
 
     /// Returns metrics for constants in the program-wide constant arena.

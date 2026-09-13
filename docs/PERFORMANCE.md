@@ -128,6 +128,12 @@ Short-circuit logic follows the same rule. If a constant left operand determines
 
 The known-value environment also maintains an incremental slot-to-name map. Wide straight-line scripts no longer rebuild a `BTreeMap` from every slot on each assignment; jumps, host effects, and unknown writes still clear the environment.
 
+Validated programs also construct `TypedIr`: it splits control-flow boundaries
+into basic blocks, assigns monotonic SSA value IDs to assignments, and retains
+Host, random, and potentially failing operations as barriers. `TypedIr::optimize`
+only propagates reachability; it never reorders side effects or replaces the
+canonical bytecode.
+
 ### Direct instructions cover exact shapes
 
 Lowering represents these common forms with direct instructions:

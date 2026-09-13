@@ -8,6 +8,7 @@
 mod bytecode;
 mod debug;
 mod frame;
+mod ir;
 mod program;
 mod slots;
 mod validate;
@@ -19,6 +20,7 @@ fn compact_source_position(position: usize) -> u32 {
 pub use bytecode::{ExprChunk, ExprChunkRef, ExprOp};
 pub use debug::{DebugLocation, DebugTable};
 pub use frame::{InitialFrame, InitialFrameError, InitialValue};
+pub use ir::{IrBlock, IrOp, IrTerminator, IrType, IrValue, TypedIr};
 pub use program::{
     ChunkExecutionMetadata, ChunkId, ExecutionImage, ExecutionMetadata, HostOp, Op,
     OpExecutionMetadata, Pc, PreparedExpr, Program, ProgramArena, ProgramChunk, QuickenedCallRef,

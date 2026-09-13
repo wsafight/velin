@@ -9,6 +9,7 @@
 
 use crate::bytecode::{ExprChunk, ExprChunkRef, ExprOp};
 use crate::debug::DebugTable;
+use crate::ir::TypedIr;
 use crate::slots::SlotTable;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -269,6 +270,7 @@ impl ProgramArena {
 /// Precomputed properties used by the VM after a program is validated.
 #[derive(Debug)]
 pub struct ExecutionMetadata {
+    typed_ir: TypedIr,
     chunks: Box<[ChunkExecutionMetadata]>,
     ops: Box<[OpExecutionMetadata]>,
     metrics: Box<[DataMetrics]>,
