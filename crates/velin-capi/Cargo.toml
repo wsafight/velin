@@ -1,0 +1,19 @@
+[package]
+name = "velin-capi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Stable C ABI for the Velin bytecode runtime"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+serde_json.workspace = true
+velin-bytecode = { workspace = true, features = ["serde"] }
+velin-vm = { workspace = true, default-features = false }
+velin-syntax = { workspace = true, default-features = false }

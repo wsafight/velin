@@ -12,6 +12,7 @@ members = [
     "crates/velin-cli",
     "crates/velin-lsp",
     "crates/velin-wasm",
+    "crates/velin-capi",
 ]
 resolver = "3"
 

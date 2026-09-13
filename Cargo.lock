@@ -570,6 +570,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "velin-capi"
+version = "0.1.2"
+dependencies = [
+ "serde_json",
+ "velin-bytecode",
+ "velin-syntax",
+ "velin-vm",
+]
+
+[[package]]
 name = "velin-check"
 version = "0.1.2"
 dependencies = [
