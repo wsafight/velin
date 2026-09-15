@@ -34,6 +34,22 @@ fn valid_expressions_have_no_errors() {
 }
 
 #[test]
+fn constant_short_circuit_skips_unreachable_type_errors() {
+    let env = Environment::new();
+    assert!(errors_for("false and (1 + \"x\")", &env).is_empty());
+    assert!(errors_for("true or (1 + \"x\")", &env).is_empty());
+    assert!(!errors_for("flag and (1 + \"x\")", &env).is_empty());
+}
+
+#[test]
+fn contains_checks_record_and_string_keys() {
+    let env = Environment::new();
+    assert!(!errors_for("contains(\"abc\", 1)", &env).is_empty());
+    assert!(!errors_for("contains(record(\"a\", 1), 1)", &env).is_empty());
+    assert!(errors_for("contains(list(1), 1)", &env).is_empty());
+}
+
+#[test]
 fn unknown_variables_never_false_positive() {
     let env = Environment::new(); // everything is Unknown
     assert!(errors_for("mystery + 1", &env).is_empty());

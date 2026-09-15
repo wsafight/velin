@@ -120,6 +120,7 @@ pub(super) fn successors(terminator: &IrTerminator) -> Vec<u32> {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub(super) fn run_ssa_pass(
     program: &Program,
     ranges: &[(u32, u32)],
@@ -134,10 +135,29 @@ pub(super) fn run_ssa_pass(
             phi_values[block].insert(*slot, new_value(&mut next_value));
         }
     }
+    let phi_count = next_value;
+    let mut block_bases = Vec::with_capacity(ranges.len());
+    for (start, end) in ranges.iter().copied() {
+        block_bases.push(next_value);
+        for pc in start..end {
+            if let Some(op) = program.ops.get(pc as usize)
+                && op_produces_value(op)
+            {
+                next_value = next_value.saturating_add(1);
+            }
+        }
+    }
+    let total_values = next_value;
     let mut out_states = vec![BTreeMap::new(); ranges.len()];
-    let mut blocks = Vec::with_capacity(ranges.len());
+    let mut blocks: Vec<Option<IrBlock>> = vec![None; ranges.len()];
     let mut condition_values = vec![None; ranges.len()];
-    for (block_id, (start, end)) in ranges.iter().copied().enumerate() {
+    let mut pending = std::collections::VecDeque::from([0usize]);
+    let mut queued = vec![false; ranges.len()];
+    queued[0] = true;
+    while let Some(block_id) = pending.pop_front() {
+        queued[block_id] = false;
+        let first_visit = blocks[block_id].is_none();
+        let (start, end) = ranges[block_id];
         let block_id_u32 = u32::try_from(block_id).expect("block id fits");
         let mut state = merge_entry_state(block_id_u32, predecessors, &out_states, &phi_values);
         let mut operations = Vec::new();
@@ -150,20 +170,22 @@ pub(super) fn run_ssa_pass(
             });
             state.insert(*slot, *value);
         }
+        let mut block_next = block_bases[block_id];
         for pc in start..end {
             if let Some(op) = program.ops.get(pc as usize)
                 && let Some(condition) =
-                    lower_ssa_op(program, op, &mut state, &mut operations, &mut next_value)
+                    lower_ssa_op(program, op, &mut state, &mut operations, &mut block_next)
             {
                 condition_values[block_id] = Some(condition);
             }
         }
+        let changed = out_states[block_id] != state;
         out_states[block_id] = state;
         let mut terminator = skeletons[block_id].clone();
         if let IrTerminator::Branch { condition, .. } = &mut terminator {
             *condition = condition_values[block_id].unwrap_or(IrValue(u32::MAX));
         }
-        blocks.push(IrBlock {
+        blocks[block_id] = Some(IrBlock {
             id: block_id_u32,
             start_pc: start,
             operations,
@@ -172,7 +194,52 @@ pub(super) fn run_ssa_pass(
             loop_depth: 0,
             reachable: false,
         });
+        if changed || first_visit {
+            for successor in successors(&skeletons[block_id]) {
+                let successor = successor as usize;
+                if !queued[successor] {
+                    queued[successor] = true;
+                    pending.push_back(successor);
+                }
+            }
+        }
     }
+    // Keep unreachable blocks represented in the IR for stable block IDs.
+    for block_id in 0..ranges.len() {
+        if blocks[block_id].is_some() {
+            continue;
+        }
+        let (start, end) = ranges[block_id];
+        let block_id_u32 = u32::try_from(block_id).expect("block id fits");
+        let mut state = BTreeMap::new();
+        let mut operations = Vec::new();
+        for (slot, value) in &phi_values[block_id] {
+            operations.push(IrOp::Phi {
+                dst: *value,
+                slot: *slot,
+                inputs: Vec::new(),
+                value_type: IrType::Unknown,
+            });
+            state.insert(*slot, *value);
+        }
+        let mut block_next = block_bases[block_id];
+        for pc in start..end {
+            if let Some(op) = program.ops.get(pc as usize) {
+                let _ = lower_ssa_op(program, op, &mut state, &mut operations, &mut block_next);
+            }
+        }
+        blocks[block_id] = Some(IrBlock {
+            id: block_id_u32,
+            start_pc: start,
+            operations,
+            terminator: skeletons[block_id].clone(),
+            predecessors: predecessors[block_id].clone(),
+            loop_depth: 0,
+            reachable: false,
+        });
+    }
+    let blocks = blocks.into_iter().map(Option::unwrap).collect();
+    next_value = total_values.max(phi_count);
 
     let mut needed_phis = Vec::new();
     for (block, incoming) in predecessors.iter().enumerate() {
@@ -361,6 +428,19 @@ fn new_value(next: &mut u32) -> IrValue {
     let value = IrValue(*next);
     *next = next.saturating_add(1);
     value
+}
+
+fn op_produces_value(op: &Op) -> bool {
+    match op {
+        Op::SetConst { .. }
+        | Op::CopySlot { .. }
+        | Op::Set { .. }
+        | Op::Update { .. }
+        | Op::JumpIfFalse { .. }
+        | Op::JumpIfIntegerCompare { .. } => true,
+        Op::Host(host) => host.bind.is_some(),
+        Op::Jump(_) | Op::Halt => false,
+    }
 }
 
 fn chunk_constant(program: &Program, chunk: ChunkId) -> Option<Value> {

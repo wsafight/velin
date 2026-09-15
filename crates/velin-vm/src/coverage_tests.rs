@@ -244,6 +244,33 @@ fn restart_rejects_mismatched_frames_and_images_round_trip() {
 }
 
 #[test]
+fn prevalidated_machine_rejects_same_width_different_slot_layout() {
+    let mut first_slots = velin_bytecode::SlotTable::new();
+    first_slots.intern("hp");
+    first_slots.intern("name");
+    let first = Program {
+        ops: Vec::new(),
+        chunks: Vec::new(),
+        expr_ops: Vec::new(),
+        constants: Vec::new(),
+        slots: first_slots,
+    };
+    let mut second_slots = velin_bytecode::SlotTable::new();
+    second_slots.intern("name");
+    second_slots.intern("hp");
+    let second = Program {
+        ops: Vec::new(),
+        chunks: Vec::new(),
+        expr_ops: Vec::new(),
+        constants: Vec::new(),
+        slots: second_slots,
+    };
+    let frame = InitialFrame::from_named_values(&first.slots, []).unwrap();
+    let validated = ValidatedProgram::new(second).unwrap();
+    assert!(Machine::from_validated_with_seed_and_frame(&validated, 0, &frame).is_none());
+}
+
+#[test]
 fn batch_steps_non_host_ops_and_reports_runaway_loops() {
     let mut machine = run(|builder| {
         builder.push(Op::Jump(0));

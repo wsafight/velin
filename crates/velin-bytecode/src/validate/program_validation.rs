@@ -1,7 +1,7 @@
 use super::{
-    BinaryOp, DataFootprint, MAX_HOST_ARGUMENTS, MAX_PROGRAM_CHUNKS, MAX_PROGRAM_CONSTANT_VALUES,
-    MAX_PROGRAM_OPS, MAX_PROGRAM_SLOTS, MAX_PROGRAM_TEXT_BYTES, Op, Program,
-    ProgramValidationError, UpdateOp, ValidationContext, check_limit, validate_chunk,
+    BinaryOp, DataFootprint, ExprOp, MAX_HOST_ARGUMENTS, MAX_PROGRAM_CHUNKS,
+    MAX_PROGRAM_CONSTANT_VALUES, MAX_PROGRAM_OPS, MAX_PROGRAM_SLOTS, MAX_PROGRAM_TEXT_BYTES, Op,
+    Program, ProgramValidationError, UpdateOp, ValidationContext, check_limit, validate_chunk,
     validate_chunk_id, validate_program_target, validate_slot,
 };
 
@@ -38,6 +38,26 @@ impl Program {
             })?;
             let (values, bytes) =
                 validate_chunk(chunk, self.slots.len(), id, &mut register_states)?;
+            for (chunk_pc, expr_op) in chunk.ops.iter().enumerate() {
+                let state_slot = match expr_op {
+                    ExprOp::Random { state_slot, .. } | ExprOp::Chance { state_slot, .. } => {
+                        Some(*state_slot)
+                    }
+                    _ => None,
+                };
+                if let Some(state_slot) = state_slot {
+                    let Some(rng_slot) = self.slots.rng_state() else {
+                        return Err(ProgramValidationError::new(format!(
+                            "expression chunk {id} op {chunk_pc} uses random state without a reserved RNG slot"
+                        )));
+                    };
+                    if state_slot != rng_slot {
+                        return Err(ProgramValidationError::new(format!(
+                            "expression chunk {id} op {chunk_pc} random state slot {state_slot} does not match reserved RNG slot {rng_slot}"
+                        )));
+                    }
+                }
+            }
             constant_values = constant_values
                 .checked_add(values)
                 .ok_or_else(|| ProgramValidationError::new("constant value budget overflow"))?;

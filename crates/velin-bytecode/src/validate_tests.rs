@@ -234,6 +234,64 @@ fn standalone_chunk_validation_checks_frame_width_and_constants() {
 }
 
 #[test]
+fn random_ops_require_the_reserved_rng_slot_and_dedicated_encoding() {
+    let random_chunk = ExprChunk {
+        ops: vec![
+            ExprOp::Const {
+                dst: 1,
+                constant: 0,
+            },
+            ExprOp::Const {
+                dst: 2,
+                constant: 1,
+            },
+            ExprOp::Random {
+                dst: 0,
+                args: 1..3,
+                state_slot: 0,
+            },
+        ],
+        constants: vec![Value::Integer(1), Value::Integer(6)],
+        registers: 3,
+        result: 0,
+        line: 1,
+    };
+    let mut slots = SlotTable::new();
+    slots.intern("user");
+    slots.intern_rng_state();
+    let program = Program::from_chunks(vec![Op::Halt], vec![random_chunk], slots);
+    let error = program.validate().unwrap_err();
+    assert!(error.message.contains("does not match reserved RNG slot"));
+
+    let call_chunk = ExprChunk {
+        ops: vec![
+            ExprOp::Const {
+                dst: 1,
+                constant: 0,
+            },
+            ExprOp::Const {
+                dst: 2,
+                constant: 1,
+            },
+            ExprOp::Call {
+                dst: 0,
+                function: Builtin::Random,
+                args: 1..3,
+            },
+        ],
+        constants: vec![Value::Integer(1), Value::Integer(6)],
+        registers: 3,
+        result: 0,
+        line: 1,
+    };
+    let mut slots = SlotTable::new();
+    slots.intern_rng_state();
+    let program = Program::from_chunks(vec![Op::Halt], vec![call_chunk], slots);
+    let error = program.validate().unwrap_err();
+    assert!(error.message.contains("dedicated random opcode"));
+}
+
+#[test]
 fn rejects_invalid_register_ranges_before_execution() {
     let invalid_range = ExprChunk {
         ops: vec![ExprOp::Concat {

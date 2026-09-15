@@ -25,7 +25,7 @@ pub struct Branch {
 
 /// A statement in the surface language.
 ///
-/// The variants map one-to-one onto the lowering in [`crate::lower`]:
+/// The variants map one-to-one onto the lowering implementation:
 /// `Label`/`Jump` become program-counter targets and `Op::Jump`; `Default`
 /// seeds initial state; `Set` becomes `Op::Set`; `Perform` becomes `Op::Host`
 /// with an optional bind destination; `If`/`While` become conditional jumps.

@@ -226,7 +226,7 @@ impl Machine {
 
     /// Creates a seeded machine by cloning a prevalidated initial frame.
     ///
-    /// Returns `None` if the frame width differs from the program or the
+    /// Returns `None` if the frame layout differs from the program or the
     /// aggregate machine-state budget would be exceeded after seeding RNG.
     #[must_use]
     pub fn from_validated_with_seed_and_frame(
@@ -237,7 +237,7 @@ impl Machine {
         let metadata = program.shared_execution_metadata();
         let program = program.shared();
         let profile = ExecutionProfile::new(program.ops.len());
-        if initial.values().len() != program.slots.len() {
+        if !initial.matches_layout(&program.slots) {
             return None;
         }
         let mut frame = FrameState {

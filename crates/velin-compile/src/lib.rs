@@ -1,7 +1,7 @@
 //! Bytecode compiler for Velin.
 //!
 //! This crate turns the `Expr` tree (and program-level control flow) into a
-//! flat, slot-addressed intermediate representation that [`velin-vm`] executes.
+//! flat, slot-addressed intermediate representation that `velin-vm` executes.
 //! It has no host, I/O, or foreign-code capability, and it introduces no
 //! host-domain concepts: outside effects are represented only by the opaque
 //! [`Op::Host`] opcode.

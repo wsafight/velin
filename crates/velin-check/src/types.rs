@@ -126,7 +126,16 @@ pub(crate) fn infer_with(
         }
         Expr::Binary { left, op, right } => {
             let l = infer_with(left, variable_type, errors);
-            let r = infer_with(right, variable_type, errors);
+            // Match runtime short-circuiting when the left operand is a
+            // literal. Unknown/variable operands remain fully checked.
+            let short_circuited = (matches!(op, BinaryOp::And)
+                && constant_boolean(left) == Some(false))
+                || (matches!(op, BinaryOp::Or) && constant_boolean(left) == Some(true));
+            let r = if short_circuited {
+                Type::Boolean
+            } else {
+                infer_with(right, variable_type, errors)
+            };
             infer_binary(*op, l, r, errors)
         }
         Expr::Invoke {
@@ -256,6 +265,11 @@ fn infer_builtin(function: Builtin, args: &[Type], errors: &mut Vec<TypeError>) 
         Builtin::Contains => {
             if let Some(first) = args.first() {
                 expect_container_or_string(*first, "contains", errors);
+                if matches!(*first, Type::Record | Type::String)
+                    && let Some(key) = args.get(1)
+                {
+                    expect(*key, Type::String, "contains key", errors);
+                }
             }
             Type::Boolean
         }
@@ -290,6 +304,14 @@ fn infer_builtin(function: Builtin, args: &[Type], errors: &mut Vec<TypeError>) 
             }
             Type::Boolean
         }
+    }
+}
+
+fn constant_boolean(expression: &Expr) -> Option<bool> {
+    match expression {
+        Expr::Spanned { expression, .. } => constant_boolean(expression),
+        Expr::Value(Value::Boolean(value)) => Some(*value),
+        _ => None,
     }
 }
 

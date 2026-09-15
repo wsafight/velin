@@ -1,9 +1,60 @@
 //! Compact tagged wire encoding for artifact JSON payloads.
 
-use super::{ArtifactError, MAX_ARTIFACT_BYTES};
+use super::{ArtifactError, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_ENTRIES};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
+use velin_bytecode::Program;
 
 const MAX_WIRE_DEPTH: usize = 64;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(super) struct TypeSiteWire {
+    pub(super) pc: usize,
+    pub(super) expression: velin_syntax::Expr,
+    pub(super) kind: TypeCheckKindWire,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(super) enum TypeCheckKindWire {
+    Expression,
+    Condition,
+    Assignment,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(super) struct HostSiteWire {
+    pub(super) host_id: u32,
+    pub(super) arguments: usize,
+    pub(super) bind: bool,
+    pub(super) line: usize,
+}
+
+pub(super) fn validate_check_sites(
+    program: &Program,
+    hosts: &[String],
+    type_sites: &[TypeSiteWire],
+    host_sites: &[HostSiteWire],
+) -> Result<(), ArtifactError> {
+    if type_sites.len() > MAX_ARTIFACT_ENTRIES || host_sites.len() > MAX_ARTIFACT_ENTRIES {
+        return Err(ArtifactError::new(
+            "artifact has too many static check sites",
+        ));
+    }
+    if type_sites.iter().any(|site| site.pc >= program.ops.len()) {
+        return Err(ArtifactError::new(
+            "type check site points outside the program",
+        ));
+    }
+    if host_sites
+        .iter()
+        .any(|site| usize::try_from(site.host_id).map_or(true, |id| id >= hosts.len()))
+    {
+        return Err(ArtifactError::new(
+            "host check site references an unknown host id",
+        ));
+    }
+    Ok(())
+}
 
 pub(super) fn encode_wire_value(
     value: &JsonValue,

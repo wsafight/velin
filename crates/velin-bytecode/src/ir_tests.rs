@@ -173,3 +173,34 @@ fn keeps_a_self_loop_preheader_outside_the_loop() {
     assert_eq!(loop_info.blocks, vec![1]);
     assert_eq!(loop_info.preheader, Some(0));
 }
+
+#[test]
+fn ssa_worklist_propagates_single_predecessors_out_of_order() {
+    let mut slots = SlotTable::new();
+    let value = slots.intern("value");
+    let sink = slots.intern("sink");
+    let program = Program::from_chunks(
+        vec![
+            Op::CopySlot {
+                slot: sink,
+                source: value,
+                line: 1,
+                column: 1,
+            },
+            Op::Jump(2),
+            Op::SetConst {
+                slot: value,
+                value: Value::Integer(1),
+                line: 2,
+            },
+            Op::Jump(0),
+            Op::Halt,
+        ],
+        Vec::new(),
+        slots,
+    );
+    let ir = TypedIr::from_program(&program);
+    assert!(ir.blocks()[0].operations.iter().any(|operation| {
+        matches!(operation, IrOp::Slot { slot, source: Some(_), .. } if *slot == value)
+    }));
+}

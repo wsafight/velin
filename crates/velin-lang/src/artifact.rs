@@ -1,20 +1,22 @@
 //! Versioned, bounded bytecode artifacts for cross-process script reuse.
 
-use crate::host::CompiledScript;
+use crate::host::{CompiledScript, HostCheckSite};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use velin_bytecode::{InitialFrame, Op, Pc, Program, ProgramValidationError, ValidatedProgram};
+use velin_check::{TypeCheckKind, TypeCheckSite};
 use velin_syntax::{DataFootprint, Value};
 
 mod wire;
-use wire::{decode_wire_value, encode_wire_value};
+use wire::validate_check_sites;
+use wire::{HostSiteWire, TypeCheckKindWire, TypeSiteWire, decode_wire_value, encode_wire_value};
 
 /// Fixed marker at the start of every `.velinc` file.
 pub const ARTIFACT_MAGIC: &[u8; 8] = b"VELINBC\0";
 /// Current artifact payload version.
-pub const ARTIFACT_VERSION: u16 = 3;
+pub const ARTIFACT_VERSION: u16 = 4;
 /// Maximum complete artifact size accepted by the decoder.
 pub const MAX_ARTIFACT_BYTES: usize = 16 * 1024 * 1024;
 const HEADER_BYTES: usize = ARTIFACT_MAGIC.len() + 2 + 8;
@@ -79,6 +81,8 @@ struct ArtifactPayload {
     hosts: Vec<String>,
     labels: BTreeMap<String, Pc>,
     defaults: BTreeMap<String, Value>,
+    type_sites: Vec<TypeSiteWire>,
+    host_sites: Vec<HostSiteWire>,
 }
 
 /// Encodes a compiled script into a versioned artifact.
@@ -101,12 +105,42 @@ pub fn encode_artifact(
         &script.labels,
         &script.defaults,
     )?;
+    if script.type_sites.len() > MAX_ARTIFACT_ENTRIES
+        || script.host_sites.len() > MAX_ARTIFACT_ENTRIES
+    {
+        return Err(ArtifactError::new(
+            "artifact has too many static check sites",
+        ));
+    }
     let payload = ArtifactPayload {
         source_name: source_name.to_owned(),
         program: (*script.program).clone(),
         hosts: script.hosts.clone(),
         labels: script.labels.clone(),
         defaults: script.defaults.clone(),
+        type_sites: script
+            .type_sites
+            .iter()
+            .map(|site| TypeSiteWire {
+                pc: site.pc,
+                expression: site.expression.clone(),
+                kind: match site.kind {
+                    TypeCheckKind::Expression => TypeCheckKindWire::Expression,
+                    TypeCheckKind::Condition => TypeCheckKindWire::Condition,
+                    TypeCheckKind::Assignment => TypeCheckKindWire::Assignment,
+                },
+            })
+            .collect(),
+        host_sites: script
+            .host_sites
+            .iter()
+            .map(|site| HostSiteWire {
+                host_id: site.host_id,
+                arguments: site.arguments,
+                bind: site.bind,
+                line: site.line,
+            })
+            .collect(),
     };
     let value = serde_json::to_value(payload)
         .map_err(|error| ArtifactError::new(format!("cannot encode artifact: {error}")))?;
@@ -139,6 +173,7 @@ pub fn encode_artifact(
 /// # Panics
 /// Does not panic for any byte slice; header conversions are guarded by the
 /// length check at the start of the function.
+#[allow(clippy::too_many_lines)]
 pub fn decode_artifact(bytes: &[u8]) -> Result<BytecodeArtifact, ArtifactError> {
     if bytes.len() > MAX_ARTIFACT_BYTES {
         return Err(ArtifactError::new(format!(
@@ -192,6 +227,12 @@ pub fn decode_artifact(bytes: &[u8]) -> Result<BytecodeArtifact, ArtifactError> 
         &payload.labels,
         &payload.defaults,
     )?;
+    validate_check_sites(
+        &payload.program,
+        &payload.hosts,
+        &payload.type_sites,
+        &payload.host_sites,
+    )?;
     let program = Arc::new(payload.program);
     let validated_program = ValidatedProgram::new(program.clone())
         .map_err(|error| ArtifactError::new(format!("invalid artifact program: {error}")))?;
@@ -220,6 +261,29 @@ pub fn decode_artifact(bytes: &[u8]) -> Result<BytecodeArtifact, ArtifactError> 
         payload.defaults,
         initial_frame,
         initial_types,
+        payload
+            .type_sites
+            .into_iter()
+            .map(|site| TypeCheckSite {
+                pc: site.pc,
+                expression: site.expression,
+                kind: match site.kind {
+                    TypeCheckKindWire::Expression => TypeCheckKind::Expression,
+                    TypeCheckKindWire::Condition => TypeCheckKind::Condition,
+                    TypeCheckKindWire::Assignment => TypeCheckKind::Assignment,
+                },
+            })
+            .collect(),
+        payload
+            .host_sites
+            .into_iter()
+            .map(|site| HostCheckSite {
+                host_id: site.host_id,
+                arguments: site.arguments,
+                bind: site.bind,
+                line: site.line,
+            })
+            .collect(),
     );
     Ok(BytecodeArtifact {
         source_name: payload.source_name,
@@ -227,8 +291,7 @@ pub fn decode_artifact(bytes: &[u8]) -> Result<BytecodeArtifact, ArtifactError> 
     })
 }
 
-/// Computes a stable cache key for source and every input that can change the
-/// resulting execution unit. The key is deliberately independent of paths.
+/// Computes a stable cache key independent of paths.
 #[must_use]
 pub fn artifact_cache_key(
     source: &[u8],
@@ -256,14 +319,12 @@ pub fn artifact_cache_key(
     format!("{hash:016x}.velinc")
 }
 
-/// Returns the path used for one cache key without creating the directory.
 #[must_use]
 pub fn artifact_cache_path(cache_dir: &Path, key: &str) -> PathBuf {
     cache_dir.join(key)
 }
 
-/// Loads an artifact cache entry. A missing or malformed entry is a cache miss
-/// so callers can safely recompile; only filesystem failures are reported.
+/// Loads an artifact cache entry; malformed entries are cache misses.
 ///
 /// # Errors
 /// Returns an error when the cache path cannot be read for reasons other than
@@ -285,8 +346,8 @@ pub fn load_artifact_cache(path: &Path) -> Result<Option<BytecodeArtifact>, Arti
 /// Atomically writes a cache entry through a same-directory temporary file.
 ///
 /// # Errors
-/// Returns an error when encoding fails, the cache directory cannot be
-/// created, the temporary file cannot be written, or the rename fails.
+/// Returns an error if encoding, directory creation, writing, or replacement
+/// fails.
 pub fn store_artifact_cache(
     path: &Path,
     source_name: &str,
@@ -307,11 +368,22 @@ pub fn store_artifact_cache(
     ));
     std::fs::write(&temporary, &bytes)
         .map_err(|error| ArtifactError::new(format!("cannot write cache: {error}")))?;
-    if let Err(error) = std::fs::rename(&temporary, path) {
+    if let Err(error) = replace_file(&temporary, path) {
         let _ = std::fs::remove_file(&temporary);
         return Err(ArtifactError::new(format!("cannot install cache: {error}")));
     }
     Ok(())
+}
+
+fn replace_file(temporary: &Path, target: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    if target.exists() {
+        // The standard library cannot request MOVEFILE_REPLACE_EXISTING.
+        // Removing the old entry first gives Windows the same repeat-write
+        // behavior as Unix while keeping all writes in the target directory.
+        std::fs::remove_file(target)?;
+    }
+    std::fs::rename(temporary, target)
 }
 fn validate_source_name(source_name: &str) -> Result<(), ArtifactError> {
     if source_name.len() > MAX_ARTIFACT_TEXT_BYTES {

@@ -13,6 +13,8 @@ fn artifact_round_trip_keeps_runtime_metadata() {
     assert_eq!(artifact.script().defaults, script.defaults);
     assert_eq!(artifact.script().labels, script.labels);
     assert_eq!(artifact.script().program, script.program);
+    assert_eq!(artifact.script().type_sites, script.type_sites);
+    assert_eq!(artifact.script().host_sites.len(), script.host_sites.len());
 }
 
 #[test]
@@ -23,10 +25,10 @@ fn artifact_header_rejects_truncation_versions_and_length_mismatches() {
 
     let mut previous_version = bytes.clone();
     previous_version[ARTIFACT_MAGIC.len()..ARTIFACT_MAGIC.len() + 2]
-        .copy_from_slice(&2_u16.to_le_bytes());
+        .copy_from_slice(&(ARTIFACT_VERSION - 1).to_le_bytes());
     assert_eq!(
         decode_artifact(&previous_version).unwrap_err().to_string(),
-        "unsupported artifact version 2"
+        "unsupported artifact version 3"
     );
 
     let mut unknown_version = bytes.clone();

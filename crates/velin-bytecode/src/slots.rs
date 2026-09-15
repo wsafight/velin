@@ -23,6 +23,8 @@ pub struct SlotTable {
     index: Option<HashMap<String, u32>>,
     width: usize,
     rng_state: Option<u32>,
+    /// Fingerprint retained after names are stripped for execution images.
+    layout_fingerprint: u64,
 }
 
 impl Default for SlotTable {
@@ -32,6 +34,7 @@ impl Default for SlotTable {
             index: Some(HashMap::new()),
             width: 0,
             rng_state: None,
+            layout_fingerprint: 0,
         }
     }
 }
@@ -114,6 +117,18 @@ impl SlotTable {
         self.names.as_deref().unwrap_or_default()
     }
 
+    /// Returns a stable identity for this exact slot layout. Named tables are
+    /// hashed from slot names in order; name-stripped tables retain the
+    /// fingerprint computed before stripping.
+    #[must_use]
+    pub fn layout_id(&self) -> u64 {
+        if self.names.is_some() {
+            hash_layout(self.names(), self.width, self.rng_state)
+        } else {
+            self.layout_fingerprint
+        }
+    }
+
     /// Returns whether this table retains names and name-to-slot lookup.
     #[must_use]
     pub fn has_names(&self) -> bool {
@@ -127,6 +142,7 @@ impl SlotTable {
     /// become unavailable, while the reserved RNG slot remains addressable.
     #[must_use]
     pub fn without_names(mut self) -> Self {
+        self.layout_fingerprint = self.layout_id();
         self.names = None;
         self.index = None;
         self
@@ -136,6 +152,7 @@ impl SlotTable {
     pub(crate) fn from_nameless(
         width: usize,
         rng_state: Option<u32>,
+        layout_fingerprint: u64,
     ) -> Result<Self, &'static str> {
         if rng_state.is_some_and(|slot| slot as usize >= width) {
             return Err("RNG slot is outside the nameless slot width");
@@ -145,8 +162,30 @@ impl SlotTable {
             index: None,
             width,
             rng_state,
+            layout_fingerprint,
         })
     }
+}
+
+fn hash_layout(names: &[String], width: usize, rng_state: Option<u32>) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for name in names {
+        for byte in name.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    for byte in (width as u64).to_le_bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    for byte in rng_state.unwrap_or(u32::MAX).to_le_bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    hash
 }
 
 #[cfg(test)]

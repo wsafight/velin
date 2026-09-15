@@ -97,6 +97,30 @@ fn batch_delivers_collected_effects_before_reporting_an_error() {
 }
 
 #[test]
+fn batch_defers_errors_from_ordinary_instructions_after_effects() {
+    let mut builder = ProgramBuilder::new();
+    builder.push(Op::host(1, Vec::new(), None, 1));
+    let failing = builder.expr(
+        &Expr::Binary {
+            left: Box::new(Expr::Value(Value::Integer(1))),
+            op: BinaryOp::Divide,
+            right: Box::new(Expr::Value(Value::Integer(0))),
+        },
+        2,
+    );
+    let slot = builder.slot("value");
+    builder.push(Op::Set {
+        slot,
+        value: failing,
+    });
+    let mut machine = Machine::new(builder.build()).unwrap();
+    assert_eq!(machine.run_effect_batch(8).unwrap().len(), 1);
+    let error = machine.run_effect_batch(8).unwrap_err();
+    assert!(error.message.contains("division by zero"));
+    assert_eq!(machine.run_effect_batch(8), Err(error));
+}
+
+#[test]
 fn batch_caps_preallocation_and_records_host_profile_hits() {
     let mut builder = ProgramBuilder::new();
     builder.push(Op::host(1, Vec::new(), None, 1));

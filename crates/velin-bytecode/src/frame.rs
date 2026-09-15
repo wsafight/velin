@@ -16,6 +16,7 @@ pub struct InitialFrame {
     depths: Box<[u8]>,
     total: DataFootprint,
     bindings: Box<[u32]>,
+    layout_id: u64,
 }
 
 /// One validated value resolved to its destination frame slot.
@@ -130,6 +131,7 @@ impl InitialFrame {
             depths: depths.into_boxed_slice(),
             total,
             bindings: bindings.into_boxed_slice(),
+            layout_id: slots.layout_id(),
         })
     }
 
@@ -161,6 +163,9 @@ impl InitialFrame {
         slots: &SlotTable,
         values: impl IntoIterator<Item = (&'a str, &'a Value)>,
     ) -> bool {
+        if !self.matches_layout(slots) {
+            return false;
+        }
         let mut values = values.into_iter();
         let matches = self.bindings.iter().all(|slot| {
             values.next().is_some_and(|(name, value)| {
@@ -169,6 +174,12 @@ impl InitialFrame {
             })
         });
         matches && values.next().is_none()
+    }
+
+    /// Returns whether this frame was prepared for the exact slot layout.
+    #[must_use]
+    pub fn matches_layout(&self, slots: &SlotTable) -> bool {
+        self.values.len() == slots.len() && self.layout_id == slots.layout_id()
     }
 
     #[must_use]

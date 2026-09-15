@@ -15,6 +15,28 @@ fn prepares_dense_metrics_and_detects_source_changes() {
 }
 
 #[test]
+fn frame_layout_identity_includes_slot_order_and_rng_position() {
+    let mut first = SlotTable::new();
+    first.intern("hp");
+    first.intern("name");
+    let mut second = SlotTable::new();
+    second.intern("name");
+    second.intern("hp");
+    assert_ne!(first.layout_id(), second.layout_id());
+    let frame = InitialFrame::from_named_values(&first, [("hp", &Value::Integer(1))]).unwrap();
+    assert!(frame.matches_layout(&first));
+    assert!(!frame.matches_layout(&second));
+
+    let mut rng_a = SlotTable::new();
+    rng_a.intern("hp");
+    rng_a.intern_rng_state();
+    let mut rng_b = SlotTable::new();
+    rng_b.intern_rng_state();
+    rng_b.intern("hp");
+    assert_ne!(rng_a.layout_id(), rng_b.layout_id());
+}
+
+#[test]
 fn reports_every_initial_frame_error_shape() {
     let mut slots = SlotTable::new();
     slots.intern("hp");

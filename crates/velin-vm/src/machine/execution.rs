@@ -19,6 +19,9 @@ impl Machine {
         if initial.values().len() != self.program.slots.len() {
             return Err("initial frame width does not match program slots");
         }
+        if !initial.matches_layout(&self.program.slots) {
+            return Err("initial frame layout does not match program slots");
+        }
         let mut total = initial.total();
         if let Some(slot) = self.program.slots.rng_state() {
             let index = slot as usize;

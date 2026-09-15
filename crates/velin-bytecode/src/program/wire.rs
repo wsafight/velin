@@ -54,10 +54,12 @@ impl Serialize for SlotTable {
             struct NamelessSlotTable {
                 width: usize,
                 rng_state: Option<u32>,
+                layout_fingerprint: u64,
             }
             NamelessSlotTable {
                 width: self.len(),
                 rng_state: self.rng_state(),
+                layout_fingerprint: self.layout_id(),
             }
             .serialize(serializer)
         }
@@ -73,6 +75,7 @@ impl<'de> Deserialize<'de> for SlotTable {
             Nameless {
                 width: usize,
                 rng_state: Option<u32>,
+                layout_fingerprint: u64,
             },
         }
 
@@ -89,9 +92,12 @@ impl<'de> Deserialize<'de> for SlotTable {
                 }
                 Ok(table)
             }
-            SlotTableWire::Nameless { width, rng_state } => {
-                SlotTable::from_nameless(width, rng_state).map_err(serde::de::Error::custom)
-            }
+            SlotTableWire::Nameless {
+                width,
+                rng_state,
+                layout_fingerprint,
+            } => SlotTable::from_nameless(width, rng_state, layout_fingerprint)
+                .map_err(serde::de::Error::custom),
         }
     }
 }

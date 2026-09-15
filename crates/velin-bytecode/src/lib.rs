@@ -2,7 +2,7 @@
 //!
 //! This crate owns the data model shared by the compiler, checker, artifact
 //! loader, and virtual machine. It does not parse source text or execute an
-//! instruction. [`velin-vm`] consumes the validated [`Program`] values defined
+//! instruction. `velin-vm` consumes the validated [`Program`] values defined
 //! here.
 
 mod bytecode;

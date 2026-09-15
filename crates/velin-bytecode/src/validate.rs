@@ -151,6 +151,11 @@ fn validate_instruction(
             function,
             args,
         } => {
+            if matches!(function, Builtin::Random | Builtin::Chance) {
+                return Err(ProgramValidationError::new(format!(
+                    "expression chunk {id} op {pc} must use the dedicated random opcode"
+                )));
+            }
             validate_register(*dst, registers, id, "destination")?;
             validate_range(args, registers, id, pc)?;
             if !function.accepts(args.len()) {

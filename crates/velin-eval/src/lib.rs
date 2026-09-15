@@ -1,7 +1,8 @@
 //! Deterministic evaluation of Velin expressions.
 //!
 //! This crate has no host, I/O, or foreign-code capability. It evaluates an
-//! [`Expr`] against a variable environment and returns a [`Value`] or an
+//! [`velin_syntax::Expr`] against a variable environment and returns a
+//! [`velin_syntax::Value`] or an
 //! [`EvalError`]. Variable storage is a plain map, keeping the evaluator
 //! independent of any host runtime.
 

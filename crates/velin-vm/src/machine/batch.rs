@@ -48,8 +48,12 @@ impl Machine {
                 break;
             }
             let Op::Host(host) = &self.program.ops[self.pc] else {
-                if self.step()?.is_some() {
-                    unreachable!("bound host operations are handled before stepping")
+                match self.step() {
+                    Ok(Some(_)) => {
+                        unreachable!("bound host operations are handled before stepping")
+                    }
+                    Ok(None) => {}
+                    Err(error) => return self.defer_batch_error(error),
                 }
                 continue;
             };

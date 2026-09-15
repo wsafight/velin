@@ -100,6 +100,7 @@ impl HostSchema {
 }
 
 impl CompiledScript {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_artifact(
         program: Arc<Program>,
         validated_program: ValidatedProgram,
@@ -108,6 +109,8 @@ impl CompiledScript {
         defaults: BTreeMap<String, Value>,
         initial_frame: InitialFrame,
         initial_types: Box<[Type]>,
+        type_sites: Vec<TypeCheckSite>,
+        host_sites: Vec<HostCheckSite>,
     ) -> Self {
         Self {
             program,
@@ -117,8 +120,8 @@ impl CompiledScript {
             defaults,
             initial_frame,
             initial_types,
-            type_sites: Vec::new(),
-            host_sites: Vec::new(),
+            type_sites,
+            host_sites,
         }
     }
 
