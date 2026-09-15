@@ -6,6 +6,16 @@ change source and Rust APIs between minor releases.
 
 ## Unreleased
 
+## 0.2.2 - 2026-09-15
+
+### Fixed
+
+- Cached artifacts retain static check sites and use the version 4 wire format; older artifacts are rejected explicitly.
+- Bytecode validation binds random operations to the reserved RNG slot and rejects the legacy random builtin encoding.
+- Initial frames verify slot-layout identity, while batch execution preserves effects before reporting deferred errors.
+- Type checking, SSA propagation, host-event budgets, CLI stdin behavior, and LSP framing/lifecycle now handle their boundary cases consistently.
+- Windows artifact replacement, Wasm benchmarks, C API smoke checks, strict rustdoc, and release-version checks are covered by CI.
+
 ## 0.2.1 - 2026-09-14
 
 ### Fixed
