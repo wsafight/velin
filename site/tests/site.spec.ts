@@ -8,6 +8,7 @@ const language = `${base}docs/language/`;
 const embedding = `${base}docs/embedding/`;
 const tooling = `${base}docs/tooling/`;
 const architecture = `${base}docs/architecture/`;
+const roadmap = `${base}docs/roadmap/`;
 const faq = `${base}docs/faq/`;
 const playgroundGuide = `${base}docs/playground/`;
 const cheatsheet = `${base}docs/cheatsheet/`;
@@ -71,6 +72,7 @@ test('all detailed documentation routes render complete Markdown bodies', async 
   for (const entry of [
     {url: docs, heading: 'Quick start', section: 'Design principles'},
     {url: faq, heading: 'FAQ', section: 'What Velin is for'},
+    {url: roadmap, heading: 'Roadmap', section: 'Evolution rules'},
     {url: playgroundGuide, heading: 'Playground', section: 'Open the site Playground'},
     {url: language, heading: 'Language reference', section: 'File structure'},
     {url: cheatsheet, heading: 'Syntax cheat sheet', section: 'Statements'},
@@ -101,6 +103,7 @@ test('documentation switches complete Markdown bodies', async ({page}) => {
 test('docs sidebar, table of contents, and source links work', async ({page}, testInfo) => {
   await page.goto(docs);
   await expect(page.getByRole('navigation', {name: 'Documentation'}).getByRole('link', {name: 'FAQ'})).toBeVisible();
+  await expect(page.getByRole('navigation', {name: 'Documentation'}).getByRole('link', {name: 'Roadmap'})).toBeVisible();
   await expect(page.getByRole('navigation', {name: 'Documentation'}).getByRole('link', {name: 'Examples and recipes'})).toBeVisible();
   await expect(page.getByRole('navigation', {name: 'Documentation'}).getByRole('link', {name: 'Host protocol'})).toBeVisible();
   await expect(page.getByRole('navigation', {name: 'Documentation'}).getByRole('link', {name: 'Architecture and boundaries'})).toBeVisible();

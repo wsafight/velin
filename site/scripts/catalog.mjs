@@ -28,7 +28,19 @@ export const pages = [
       en: 'What Velin is for, when to choose something else, and how checking, randomness, and trust work.',
       zh: 'Velin 适合做什么、何时该换工具，以及检查、随机数和信任边界如何工作。',
     },
-    see: ['docs', 'docs/language', 'docs/host'],
+    see: ['docs', 'docs/roadmap', 'docs/host'],
+  },
+  {
+    sources: {en: 'docs/ROADMAP.md', zh: 'docs/ROADMAP.zh-CN.md'},
+    generated: 'roadmap.md',
+    slug: 'docs/roadmap',
+    group: 'start',
+    title: {en: 'Roadmap', zh: '路线图'},
+    description: {
+      en: 'The path to a production-grade deterministic runtime, with acceptance criteria and explicit non-goals.',
+      zh: '走向生产级确定性运行时的阶段、验收条件与明确非目标。',
+    },
+    see: ['docs/architecture', 'docs/host', 'docs/limits'],
   },
   {
     sources: {en: 'docs/PLAYGROUND.md', zh: 'docs/PLAYGROUND.zh-CN.md'},

@@ -18,6 +18,7 @@ The name comes from the French *velin* (vellum): scripts write down the rules; t
 
 - [Quick start](docs/QUICKSTART.md) covers the first script, the Playground, and the CLI.
 - [FAQ](docs/FAQ.md) answers when to use Velin, how checking and randomness work, and where the trust boundary sits.
+- [Roadmap](docs/ROADMAP.md) defines the path to a production-grade deterministic runtime and the capabilities Velin deliberately will not pursue.
 - [Playground](docs/PLAYGROUND.md) explains the in-browser editor, replies, and scripted host.
 - [Language reference](docs/LANGUAGE.md) documents values, syntax, control flow, host effects, and built-ins.
 - [Syntax cheat sheet](docs/CHEATSHEET.md) is a one-page lookup.

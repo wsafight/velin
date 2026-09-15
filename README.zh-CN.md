@@ -18,6 +18,7 @@ Velin 是一门**可嵌入、可复现的字节码脚本语言**。它负责表�
 
 - [快速开始](docs/QUICKSTART.zh-CN.md)介绍第一段脚本、Playground 和 CLI。
 - [常见问题](docs/FAQ.zh-CN.md)说明何时使用 Velin、检查与随机数如何工作，以及信任边界在哪里。
+- [路线图](docs/ROADMAP.zh-CN.md)说明走向生产级确定性运行时的路径，以及 Velin 明确不会追求的能力。
 - [Playground](docs/PLAYGROUND.zh-CN.md)说明浏览器编辑器、回复和脚本化宿主。
 - [语言参考](docs/LANGUAGE.zh-CN.md)介绍值、语法、控制流、宿主效果和内置函数。
 - [语法速查](docs/CHEATSHEET.zh-CN.md)是一页查阅表。
