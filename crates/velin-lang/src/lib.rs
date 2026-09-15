@@ -120,3 +120,25 @@ pub fn check_script_with_host_schema(
 ) -> Vec<Diagnostic> {
     script.check_with_host_schema(file, schema)
 }
+
+/// Runs static checks with externally supplied entry-variable types.
+#[must_use]
+pub fn check_script_with_bindings(
+    file: &str,
+    script: &CompiledScript,
+    bindings: &std::collections::BTreeMap<String, velin_check::Type>,
+) -> Vec<Diagnostic> {
+    script.check_with_bindings(file, bindings)
+}
+
+/// Runs static checks with externally supplied entry-variable types and host
+/// command contracts.
+#[must_use]
+pub fn check_script_with_bindings_and_host_schema(
+    file: &str,
+    script: &CompiledScript,
+    bindings: &std::collections::BTreeMap<String, velin_check::Type>,
+    schema: &HostSchema,
+) -> Vec<Diagnostic> {
+    script.check_with_bindings_and_host_schema(file, bindings, schema)
+}

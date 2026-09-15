@@ -38,6 +38,7 @@
 //! * [`evaluate`] — the reference tree-walking evaluator.
 //! * [`Machine`] — the bytecode VM with host-effect yielding.
 //! * [`ScriptRunner`] — checked script instantiation and bounded host driving.
+//! * [`PureModule`] — deterministic value-in/value-out module execution.
 //!
 //! # Example: compile and run a `.velin` script
 //!
@@ -132,11 +133,14 @@ pub use velin_lang::{
     ARTIFACT_MAGIC, ARTIFACT_VERSION, ArtifactError, BytecodeArtifact, CompiledScript, Condition,
     HostSchema, LowerError, MAX_ARTIFACT_BYTES, MAX_SOURCE_BYTES, MAX_SOURCE_LINES,
     MAX_STATEMENT_DEPTH, ParseError, RecoveredProgram, Stmt, artifact_cache_key,
-    artifact_cache_path, check_script, check_script_with_host_schema, compile, decode_artifact,
-    encode_artifact, load_artifact_cache, parse_program, parse_program_recovering,
+    artifact_cache_path, check_script, check_script_with_bindings,
+    check_script_with_bindings_and_host_schema, check_script_with_host_schema, compile,
+    decode_artifact, encode_artifact, load_artifact_cache, parse_program, parse_program_recovering,
     store_artifact_cache,
 };
+mod pure;
 mod repl;
 mod runtime;
 
+pub use pure::{PureModule, PureModuleError};
 pub use repl::{ReplError, ReplSession};

@@ -180,6 +180,72 @@ impl CompiledScript {
         self.check_inner(file, None, Some(values))
     }
 
+    /// Runs static checks with externally supplied variable types treated as
+    /// assigned entry state. The compiled defaults remain available for names
+    /// that are not present in `bindings`; binding types override a default's
+    /// type for the duration of this check.
+    #[must_use]
+    pub fn check_with_bindings(
+        &self,
+        file: &str,
+        bindings: &BTreeMap<String, Type>,
+    ) -> Vec<Diagnostic> {
+        self.check_with_bindings_and_schema(file, bindings, None)
+    }
+
+    /// Runs static checks with externally supplied variable types and host
+    /// command contracts. This is the combined entry point used by embedders
+    /// whose inputs and host protocol are both known before invocation.
+    #[must_use]
+    pub fn check_with_bindings_and_host_schema(
+        &self,
+        file: &str,
+        bindings: &BTreeMap<String, Type>,
+        schema: &HostSchema,
+    ) -> Vec<Diagnostic> {
+        self.check_with_bindings_and_schema(file, bindings, Some(schema))
+    }
+
+    fn check_with_bindings_and_schema(
+        &self,
+        file: &str,
+        bindings: &BTreeMap<String, Type>,
+        schema: Option<&HostSchema>,
+    ) -> Vec<Diagnostic> {
+        let mut assigned = Vec::new();
+        let mut types = vec![Type::Unknown; self.program.slots.len()];
+
+        // Defaults are part of the normal entry frame. If the public defaults
+        // were edited after compilation, fall back to their current values so
+        // diagnostics still describe the script that will be instantiated.
+        if let Some(frame) = self
+            .validated_program
+            .refers_to(&self.program)
+            .then(|| self.initial_frame())
+            .flatten()
+        {
+            assigned.extend_from_slice(frame.assigned_slots());
+            let copied = types.len().min(self.initial_types.len());
+            types[..copied].copy_from_slice(&self.initial_types[..copied]);
+        } else {
+            for (name, value) in &self.defaults {
+                if let Some(slot) = self.program.slots.get(name) {
+                    assigned.push(slot);
+                    types[slot as usize] = Type::from(value);
+                }
+            }
+        }
+
+        for (name, ty) in bindings {
+            if let Some(slot) = self.program.slots.get(name) {
+                assigned.push(slot);
+                types[slot as usize] = *ty;
+            }
+        }
+
+        self.check_inner_context(file, schema, Some(&assigned), Some(&types))
+    }
+
     #[allow(clippy::too_many_lines)]
     fn check_inner(
         &self,
@@ -187,8 +253,6 @@ impl CompiledScript {
         schema: Option<&HostSchema>,
         bindings: Option<&BTreeMap<String, Value>>,
     ) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
-
         let prepared = if bindings.is_none() {
             self.validated_program
                 .refers_to(&self.program)
@@ -214,7 +278,24 @@ impl CompiledScript {
             context_assigned = Some(frame.assigned_slots().to_vec());
             context_types = Some(self.initial_types.to_vec());
         }
-        let unassigned = if let Some(assigned) = context_assigned.as_deref() {
+        self.check_inner_context(
+            file,
+            schema,
+            context_assigned.as_deref(),
+            context_types.as_deref(),
+        )
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn check_inner_context(
+        &self,
+        file: &str,
+        schema: Option<&HostSchema>,
+        context_assigned: Option<&[u32]>,
+        context_types: Option<&[Type]>,
+    ) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        let unassigned = if let Some(assigned) = context_assigned {
             definite_assignment_slots(&self.program, assigned)
         } else {
             let preset: BTreeSet<String> = self.defaults.keys().cloned().collect();
@@ -239,7 +320,7 @@ impl CompiledScript {
                     signatures.insert(host_id, signature.clone());
                 }
             }
-            diagnostics.extend(if let Some(types) = context_types.as_deref() {
+            diagnostics.extend(if let Some(types) = context_types {
                 check_program_types_with_hosts_and_slot_types(
                     &self.program,
                     types,
@@ -294,7 +375,7 @@ impl CompiledScript {
                 }
             }
         } else {
-            diagnostics.extend(if let Some(types) = context_types.as_deref() {
+            diagnostics.extend(if let Some(types) = context_types {
                 check_program_types_with_slot_types(&self.program, types, &self.type_sites, file)
             } else {
                 let env = self.default_environment();

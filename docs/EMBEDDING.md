@@ -38,6 +38,23 @@ if diagnostics.iter().any(velin::Diagnostic::is_error) {
 
 For a known host vocabulary, build a `HostSchema` from `HostSignature::exact` or `HostSignature::variadic`, then call `check_script_with_host_schema`. This adds command-name, arity, argument, binding, and return-flow checks without putting host-specific names into the language.
 
+For value-in/value-out extensions, use `PureModule`. It compiles with an explicit input type map, permits only the `return(value)` and `fail(message)` control signals, rejects all other host commands and `random`/`chance`, and creates a fresh VM state for every invocation:
+
+```rust
+use std::collections::BTreeMap;
+use velin::{PureModule, Type, Value};
+
+let module = PureModule::compile(
+    "reward.velin",
+    "perform return(input * 2)\n",
+    BTreeMap::from([("input".to_owned(), Type::Integer)]),
+)?;
+let result = module.invoke(BTreeMap::from([("input".to_owned(), Value::Integer(21))]))?;
+assert_eq!(result, Value::Integer(42));
+```
+
+`PureModule::invoke` reports missing or unknown inputs, input type mismatches, explicit failures, a missing return, and VM execution errors through `PureModuleError`. It does not expose a persistent machine or a configurable fuel value; the VM's bounded immediate-step budget applies to each call.
+
 For most surface-language hosts, prefer `ScriptRunner`: it validates bytecode, installs defaults, resolves host IDs to names, enforces a cumulative host-effect budget, and can apply the same `HostSchema` at runtime. Use `Machine` directly when an embedder needs lower-level control.
 
 For consecutive commands without a return value, use `ScriptRunner::run_effect_batch` to collect events before handing them to the host. `HostEventQueue` lives in the host driver and applies event-count, value-count, and text-byte backpressure; a bound command remains a natural barrier handled through `run` / `resume`.

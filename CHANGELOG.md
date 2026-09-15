@@ -6,6 +6,13 @@ change source and Rust APIs between minor releases.
 
 ## Unreleased
 
+## 0.3.0 - 2026-09-15
+
+### Added
+
+- Pure value-in/value-out modules with typed input bindings, isolated invocation state, explicit `return`/`fail` control signals, and bounded execution.
+- Combined static checking for entry bindings and host command schemas, including pure-module rejection of undeclared effects and random operations.
+
 ## 0.2.2 - 2026-09-15
 
 ### Fixed

@@ -88,6 +88,8 @@ let diagnostics = check_script_with_host_schema("rules.velin", &script, &schema)
 
 当工具只建模宿主词汇的一部分时，使用 `.allow_unknown(true)`。`ScriptRunner::configured` 接受同一 schema，在运行时校验参数与回复。回复类型错误可修正后重试；非法调用或效果预算耗尽对该 runner 是终止错误。
 
+`PureModule` 使用一份严格的内部 schema，并只接受两个终止命令：`return(value)` 产生模块结果，`fail(message)` 产生受控失败。其他 `perform` 命令都会被拒绝，包含 `random` 或 `chance` 的模块也会在编译期拒绝。每次 `PureModule::invoke` 都从新的初始帧开始，调用之间不会携带变量或执行状态。
+
 ## CLI 与 Playground 约定
 
 面向行的参考宿主实现了两个名字，这样示例不必先写自定义嵌入方也能运行：

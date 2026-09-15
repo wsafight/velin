@@ -1,0 +1,169 @@
+use std::{collections::BTreeMap, sync::Arc};
+
+use velin::{PureModule, PureModuleError, Type, Value};
+
+fn inputs(entries: impl IntoIterator<Item = (&'static str, Type)>) -> BTreeMap<String, Type> {
+    entries
+        .into_iter()
+        .map(|(name, ty)| (name.to_owned(), ty))
+        .collect()
+}
+
+#[test]
+fn invokes_with_fresh_state_and_returns_value() {
+    let module = PureModule::compile(
+        "reward.velin",
+        "set next = input + 1\nperform return(next)\n",
+        inputs([("input", Type::Integer)]),
+    )
+    .unwrap();
+    let call = |value| module.invoke(BTreeMap::from([("input".into(), Value::Integer(value))]));
+    assert_eq!(call(41), Ok(Value::Integer(42)));
+    assert_eq!(call(41), Ok(Value::Integer(42)));
+}
+
+#[test]
+fn validates_input_names_and_types() {
+    let module = PureModule::compile(
+        "input.velin",
+        "perform return(input)\n",
+        inputs([("input", Type::Integer)]),
+    )
+    .unwrap();
+    assert_eq!(
+        module.invoke(BTreeMap::new()),
+        Err(PureModuleError::MissingInput("input".into()))
+    );
+    assert_eq!(
+        module.invoke(BTreeMap::from([(
+            "input".into(),
+            Value::String("wrong".into()),
+        )])),
+        Err(PureModuleError::InputType {
+            name: "input".into(),
+            expected: Type::Integer,
+            found: Type::String,
+        })
+    );
+    assert_eq!(
+        module.invoke(BTreeMap::from([
+            ("input".into(), Value::Integer(1)),
+            ("extra".into(), Value::Integer(2)),
+        ])),
+        Err(PureModuleError::UnknownInput("extra".into()))
+    );
+}
+
+#[test]
+fn handles_explicit_failure_and_missing_return() {
+    let failing = PureModule::compile(
+        "failure.velin",
+        "perform fail(\"missing key\")\n",
+        BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        failing.invoke(BTreeMap::new()),
+        Err(PureModuleError::ExplicitFailure("missing key".into()))
+    );
+
+    let missing = PureModule::compile("missing.velin", "set x = 1\n", BTreeMap::new()).unwrap();
+    assert_eq!(
+        missing.invoke(BTreeMap::new()),
+        Err(PureModuleError::MissingReturn)
+    );
+}
+
+#[test]
+fn rejects_effects_and_randomness_at_compile_time() {
+    let effect = PureModule::compile("effect.velin", "perform say(1)\n", BTreeMap::new());
+    assert!(matches!(effect, Err(PureModuleError::Check(_))));
+
+    let random = PureModule::compile(
+        "random.velin",
+        "set value = random(1, 6)\nperform return(value)\n",
+        BTreeMap::new(),
+    );
+    assert!(
+        matches!(random, Err(PureModuleError::Check(errors)) if errors.iter().any(|error| error.message.contains("random and chance")))
+    );
+
+    let malformed_return =
+        PureModule::compile("return.velin", "perform return()\n", BTreeMap::new());
+    assert!(matches!(malformed_return, Err(PureModuleError::Check(_))));
+
+    let bound_return = PureModule::compile(
+        "return.velin",
+        "answer = perform return(1)\n",
+        BTreeMap::new(),
+    );
+    assert!(matches!(bound_return, Err(PureModuleError::Check(_))));
+}
+
+#[test]
+fn checks_input_bindings_with_defaults() {
+    let module = PureModule::compile(
+        "types.velin",
+        "default prefix = \"x\"\nset output = input + prefix\nperform return(output)\n",
+        inputs([("input", Type::String)]),
+    )
+    .unwrap();
+    assert_eq!(
+        module.invoke(BTreeMap::from([(
+            "input".into(),
+            Value::String("y".into())
+        )])),
+        Ok(Value::String("yx".into()))
+    );
+}
+
+#[test]
+fn dynamic_failure_values_are_checked_at_runtime() {
+    let module = PureModule::compile(
+        "failure.velin",
+        "perform fail(input)\n",
+        inputs([("input", Type::Unknown)]),
+    )
+    .unwrap();
+    assert!(matches!(
+        module.invoke(BTreeMap::from([("input".into(), Value::Integer(1))])),
+        Err(PureModuleError::InvalidReturn(message)) if message.contains("fail expects a string")
+    ));
+}
+
+#[test]
+fn preserves_list_and_record_values() {
+    let list_module = PureModule::compile(
+        "list.velin",
+        "perform return(push(input, 2))\n",
+        inputs([("input", Type::List)]),
+    )
+    .unwrap();
+    assert_eq!(
+        list_module.invoke(BTreeMap::from([(
+            "input".into(),
+            Value::List(Arc::new(vec![Value::Integer(1)])),
+        )])),
+        Ok(Value::List(Arc::new(vec![
+            Value::Integer(1),
+            Value::Integer(2),
+        ])))
+    );
+
+    let record_module = PureModule::compile(
+        "record.velin",
+        "perform return(put(input, \"b\", 2))\n",
+        inputs([("input", Type::Record)]),
+    )
+    .unwrap();
+    assert_eq!(
+        record_module.invoke(BTreeMap::from([(
+            "input".into(),
+            Value::Record(Arc::new(BTreeMap::from([("a".into(), Value::Integer(1))]))),
+        )])),
+        Ok(Value::Record(Arc::new(BTreeMap::from([
+            ("a".into(), Value::Integer(1)),
+            ("b".into(), Value::Integer(2)),
+        ]))))
+    );
+}

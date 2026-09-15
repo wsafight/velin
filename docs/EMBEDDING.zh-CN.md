@@ -38,6 +38,23 @@ if diagnostics.iter().any(velin::Diagnostic::is_error) {
 
 宿主词汇已知时，用 `HostSignature::exact` 或 `HostSignature::variadic` 构建 `HostSchema`，再调用 `check_script_with_host_schema`。这会增加命令名、参数数量、参数类型、绑定和返回值传播检查，同时不把宿主专用名称放进语言核心。
 
+对于“输入值 -> 输出值”的扩展，使用 `PureModule`。它在编译时接收明确的输入类型映射，只允许 `return(value)` 与 `fail(message)` 两种控制信号，拒绝其他宿主命令以及 `random`/`chance`，并为每次调用创建全新的 VM 状态：
+
+```rust
+use std::collections::BTreeMap;
+use velin::{PureModule, Type, Value};
+
+let module = PureModule::compile(
+    "reward.velin",
+    "perform return(input * 2)\n",
+    BTreeMap::from([("input".to_owned(), Type::Integer)]),
+)?;
+let result = module.invoke(BTreeMap::from([("input".to_owned(), Value::Integer(21))]))?;
+assert_eq!(result, Value::Integer(42));
+```
+
+`PureModule::invoke` 会通过 `PureModuleError` 报告缺少或未知输入、输入类型不匹配、显式失败、缺少返回以及 VM 执行错误。它不暴露持久化机器或可配置 fuel；每次调用都使用 VM 当前的有界立即执行步数限制。
+
 大多数语句语言宿主应优先使用 `ScriptRunner`：它会验证字节码、安装默认值、把宿主 ID 解析为名称、执行累计宿主效果预算，并可在运行时应用同一份 `HostSchema`。只有需要更底层控制时才直接使用 `Machine`。
 
 对于连续的无返回值命令，可使用 `ScriptRunner::run_effect_batch` 批量取得事件，再交给宿主队列消费。`HostEventQueue` 位于宿主驱动层，提供容量、值数量和文本字节的背压限制；绑定命令仍会作为自然屏障交给 `run` / `resume`。
