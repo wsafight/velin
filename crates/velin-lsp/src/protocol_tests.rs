@@ -33,6 +33,22 @@ fn missing_content_length_is_invalid() {
 }
 
 #[test]
+fn truncated_headers_and_bodies_are_errors() {
+    let cases = [
+        b"Content-Length: 1\r\n".as_slice(),
+        b"Content-Length: 1\r\n\r\n".as_slice(),
+        b"Content-Length: 1\r\nContent-Type: application/json\r\n".as_slice(),
+    ];
+    for input in cases {
+        let error = read_message(&mut Cursor::new(input)).unwrap_err();
+        assert!(matches!(
+            error.kind(),
+            io::ErrorKind::UnexpectedEof | io::ErrorKind::InvalidData
+        ));
+    }
+}
+
+#[test]
 fn oversized_and_malformed_lengths_are_rejected_before_allocation() {
     let oversized = format!("Content-Length: {}\r\n\r\n", MAX_LSP_MESSAGE_BYTES + 1);
     let error = read_message(&mut Cursor::new(oversized)).unwrap_err();

@@ -91,7 +91,7 @@ echo 1 | cargo run -p velin-cli -- run examples/adventure.velin
 ```
 
 - `velin check [--json] <file|->`：编译源码并输出文本或结构化诊断；仅 error 导致退出码 1。
-- `velin run <file|->`：检查通过后由行式参考宿主执行；`say` 输出文本，`ask` 从 stdin 读取一个值。
+- `velin run <file|->`：检查通过后由行式参考宿主执行；`say` 输出文本，`ask` 从 stdin 读取一个值。`run -` 仅适用于不需要 `ask` 回复的脚本；需要宿主回复时请使用文件。
 
 ## 嵌入 Rust
 

@@ -61,7 +61,8 @@ usage:
     velin --help                              show this help
     velin --version                           show the version
 
-Use `-` to read source from stdin. JSON output is available for `check` only.";
+Use `-` to read source from stdin. `run -` is limited to scripts without host replies;
+use a file when `ask` must read stdin. JSON output is available for `check` only.";
 
 /// Parses `argv` (already past the program name) into a [`Command`].
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
@@ -167,13 +168,25 @@ fn check(path: &str, json: bool) -> ExitCode {
     };
     if bytes.starts_with(ARTIFACT_MAGIC) {
         return match decode_artifact(&bytes) {
-            Ok(_) => {
+            Ok(artifact) => {
+                let file = artifact.source_name();
+                let diagnostics = check_script(file, artifact.script());
+                let ok = diagnostics.iter().all(|diagnostic| !diagnostic.is_error());
                 if json {
-                    print_check_json(true, &[], None);
+                    print_check_json(ok, &diagnostics, None);
                 } else {
-                    println!("{path}: ok");
+                    for diagnostic in &diagnostics {
+                        eprintln!("{diagnostic}");
+                    }
+                    if ok {
+                        println!("{path}: ok");
+                    }
                 }
-                ExitCode::SUCCESS
+                if ok {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::FAILURE
+                }
             }
             Err(error) => {
                 if json {
@@ -252,7 +265,18 @@ fn execute(path: &str) -> ExitCode {
         .starts_with(ARTIFACT_MAGIC)
         .then(|| decode_artifact(&bytes));
     let script = match artifact {
-        Some(Ok(artifact)) => artifact.into_script(),
+        Some(Ok(artifact)) => {
+            let source_name = artifact.source_name().to_owned();
+            let script = artifact.into_script();
+            let diagnostics = check_script(&source_name, &script);
+            if diagnostics.iter().any(velin::Diagnostic::is_error) {
+                for diagnostic in diagnostics {
+                    eprintln!("{diagnostic}");
+                }
+                return ExitCode::FAILURE;
+            }
+            script
+        }
         Some(Err(error)) => {
             eprintln!("{path}: {error}");
             return ExitCode::FAILURE;
@@ -273,8 +297,8 @@ fn execute(path: &str) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            // Source runs retain the static-check gate. Artifacts have already
-            // passed compilation and perform structural validation on load.
+            // Source runs retain the static-check gate. Artifacts are checked
+            // below as well, so cache hits and misses have identical behavior.
             let diagnostics = check_script(file, &script);
             let errors: Vec<_> = diagnostics.iter().filter(|d| d.is_error()).collect();
             if !errors.is_empty() {
@@ -287,6 +311,18 @@ fn execute(path: &str) -> ExitCode {
         }
     };
 
+    if path == "-"
+        && script.program.ops.iter().any(|op| {
+            matches!(op, velin::Op::Host(host)
+                    if host.bind.is_some()
+                        || script.host_name(host.host_id) == Some("ask"))
+        })
+    {
+        eprintln!(
+            "`run -` cannot execute scripts that request host replies; use a source file and provide replies on stdin"
+        );
+        return ExitCode::from(2);
+    }
     let stdin = io::stdin();
     let mut input = stdin.lock();
     let stdout = io::stdout();
@@ -303,7 +339,6 @@ fn execute(path: &str) -> ExitCode {
         }
     }
 }
-
 fn compile_source_cached(
     path: &str,
     file: &str,
@@ -331,7 +366,6 @@ fn compile_source_cached(
     let _ = store_artifact_cache(&cache_path, file, &script);
     Ok(script)
 }
-
 fn compile_artifact(input: &str, output: &str) -> ExitCode {
     if input == "-" {
         eprintln!("`compile` cannot write an artifact when reading source from stdin");
@@ -373,7 +407,6 @@ fn compile_artifact(input: &str, output: &str) -> ExitCode {
         }
     }
 }
-
 fn write_atomic(path: &str, bytes: &[u8]) -> io::Result<()> {
     let target = std::path::Path::new(path);
     let parent = target.parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -396,14 +429,23 @@ fn write_atomic(path: &str, bytes: &[u8]) -> io::Result<()> {
             .open(&temporary)?;
         file.write_all(bytes)?;
         file.sync_all()?;
-        std::fs::rename(&temporary, target)
+        replace_file(&temporary, target)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temporary);
     }
     result
 }
-
+fn replace_file(temporary: &Path, target: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    if target.exists() {
+        // `std::fs::rename` refuses an existing destination on Windows.
+        // Remove it before installing the fully synced temporary file so
+        // repeated artifact writes have the same behavior on every platform.
+        std::fs::remove_file(target)?;
+    }
+    std::fs::rename(temporary, target)
+}
 /// Reads a bounded UTF-8 source file, or stdin when `path` is `-`.
 fn read(path: &str) -> Result<String, String> {
     if path == "-" {
@@ -414,7 +456,6 @@ fn read(path: &str) -> Result<String, String> {
         std::fs::File::open(path).map_err(|error| format!("cannot read `{path}`: {error}"))?;
     read_source(file, path)
 }
-
 fn read_bytes(path: &str, limit: usize) -> Result<Vec<u8>, String> {
     if path == "-" {
         let stdin = io::stdin();
@@ -437,7 +478,6 @@ fn read_bounded(mut input: impl Read, name: &str, limit: usize) -> Result<Vec<u8
     }
     Ok(bytes)
 }
-
 fn read_source(mut input: impl Read, name: &str) -> Result<String, String> {
     let mut bytes = Vec::new();
     input

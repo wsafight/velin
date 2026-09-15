@@ -38,7 +38,7 @@ echo 1 | cargo run -p velin-cli -- run examples/adventure.velin
 ```
 
 - `check` 打印诊断。只有错误才会把退出码设为 1。
-- `run` 使用面向行的参考宿主：`say` 打印，`ask` 从 stdin 读一个值。
+- `run` 使用面向行的参考宿主：`say` 打印，`ask` 从 stdin 读一个值。`run -` 不能同时把 stdin 用作源码和 `ask` 回复；交互脚本请使用文件。
 
 `say` 和 `ask` 是宿主约定，不是关键字。游戏可以改绑 `open_door` 或 `show_menu`。见[宿主协议](HOST.zh-CN.md)。
 

@@ -91,7 +91,7 @@ echo 1 | cargo run -p velin-cli -- run examples/adventure.velin
 ```
 
 - `velin check [--json] <file|->` compiles source and prints text or structured diagnostics; only errors produce exit code 1.
-- `velin run <file|->` executes a checked script with the line-oriented reference host; `say` prints text and `ask` reads one value from stdin.
+- `velin run <file|->` executes a checked script with the line-oriented reference host; `say` prints text and `ask` reads one value from stdin. `run -` is only for scripts without `ask`; use a file when host replies are needed.
 
 ## Embed in Rust
 

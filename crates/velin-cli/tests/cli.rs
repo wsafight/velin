@@ -135,6 +135,22 @@ fn binary_reads_source_from_stdin() {
     let output = run.wait_with_output().unwrap();
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("from stdin"));
+
+    let mut asking = velin()
+        .args(["run", "-"])
+        .stdin(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    asking
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"choice = perform ask(\"pick\")\n")
+        .unwrap();
+    let rejected = asking.wait_with_output().unwrap();
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("run -"));
 }
 
 #[test]
@@ -249,6 +265,15 @@ fn binary_compile_writes_an_artifact_that_check_and_run_accept() {
         "{}",
         String::from_utf8_lossy(&compiled.stderr)
     );
+    let replaced = velin()
+        .args(["compile", &source, "-o", &output])
+        .output()
+        .unwrap();
+    assert!(
+        replaced.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replaced.stderr)
+    );
 
     let checked = velin().args(["check", &output]).output().unwrap();
     assert!(checked.status.success());
@@ -362,6 +387,13 @@ fn binary_check_hits_the_artifact_cache_and_compile_write_errors() {
     assert!(first.status.success());
     let second = velin().args(["check", &source]).output().unwrap();
     assert!(second.status.success());
+
+    let bad_source = temp_script("set total = missing + 1\n");
+    let first_bad = velin().args(["check", &bad_source]).output().unwrap();
+    let second_bad = velin().args(["check", &bad_source]).output().unwrap();
+    assert_eq!(first_bad.status.code(), Some(1));
+    assert_eq!(second_bad.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&second_bad.stderr).contains("missing"));
 
     let parent = temp_path("parent");
     std::fs::write(&parent, b"not a directory").unwrap();

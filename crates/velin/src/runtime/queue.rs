@@ -127,6 +127,10 @@ impl HostEventQueue {
                 .checked_add(metrics.footprint.text_bytes)
                 .ok_or(HostEventQueueError::TextBudget)?;
         }
+        footprint.text_bytes = footprint
+            .text_bytes
+            .checked_add(event.name.len())
+            .ok_or(HostEventQueueError::TextBudget)?;
         let values = self
             .values
             .checked_add(footprint.values)

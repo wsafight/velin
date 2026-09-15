@@ -38,7 +38,7 @@ echo 1 | cargo run -p velin-cli -- run examples/adventure.velin
 ```
 
 - `check` prints diagnostics. Only errors set exit status 1.
-- `run` uses the line-oriented reference host: `say` prints, `ask` reads one stdin value.
+- `run` uses the line-oriented reference host: `say` prints, `ask` reads one stdin value. `run -` cannot combine stdin source with `ask`; use a source file for interactive scripts.
 
 `say` and `ask` are host conventions, not keywords. A game can bind `open_door` or `show_menu` instead. See [Host protocol](HOST.md).
 

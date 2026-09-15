@@ -19,6 +19,8 @@ use velin::Diagnostic;
 pub struct Server<W: Write> {
     documents: HashMap<String, String>,
     output: W,
+    initialized: bool,
+    shutdown: bool,
 }
 
 impl<W: Write> Server<W> {
@@ -27,6 +29,8 @@ impl<W: Write> Server<W> {
         Self {
             documents: HashMap::new(),
             output,
+            initialized: false,
+            shutdown: false,
         }
     }
 
@@ -38,6 +42,9 @@ impl<W: Write> Server<W> {
         while let Some(message) = read_message(input)? {
             let method = message.get("method").and_then(Value::as_str).unwrap_or("");
             if method == "exit" {
+                if !self.shutdown {
+                    return Err(std::io::Error::other("LSP exit received before shutdown"));
+                }
                 break;
             }
             // `shutdown` is answered by `dispatch` like any other request; the
@@ -49,9 +56,24 @@ impl<W: Write> Server<W> {
 
     /// Routes one message to its handler by method name.
     fn dispatch(&mut self, method: &str, message: &Value) -> std::io::Result<()> {
+        if self.shutdown && method != "exit" && is_known_method(method) {
+            if message.get("id").is_some() {
+                return self.respond_error(message, -32600, "server has been shut down");
+            }
+            return Ok(());
+        }
         match method {
-            "initialize" => self.respond(message, &initialize_result()),
-            "shutdown" => self.respond(message, &Value::Null),
+            "initialize" if self.initialized => {
+                self.respond_error(message, -32600, "server is already initialized")
+            }
+            "initialize" => {
+                self.initialized = true;
+                self.respond(message, &initialize_result())
+            }
+            "shutdown" => {
+                self.shutdown = true;
+                self.respond(message, &Value::Null)
+            }
             "textDocument/didOpen" => self.did_open(message),
             "textDocument/didChange" => self.did_change(message),
             "textDocument/didClose" => {
@@ -243,6 +265,23 @@ impl<W: Write> Server<W> {
         });
         write_message(&mut self.output, &response)
     }
+}
+
+fn is_known_method(method: &str) -> bool {
+    matches!(
+        method,
+        "initialize"
+            | "initialized"
+            | "shutdown"
+            | "textDocument/didOpen"
+            | "textDocument/didChange"
+            | "textDocument/didClose"
+            | "textDocument/completion"
+            | "textDocument/documentSymbol"
+            | "textDocument/hover"
+            | "textDocument/definition"
+            | "textDocument/references"
+    )
 }
 
 /// The server capabilities advertised in the `initialize` response.

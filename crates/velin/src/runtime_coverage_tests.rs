@@ -44,6 +44,19 @@ fn queue_defaults_and_error_display_cover_every_variant() {
         Err(HostEventQueueError::InvalidValue(_))
     ));
     assert!(tiny.pop_front().is_none());
+
+    let mut names = HostEventQueue::new(HostEventQueueLimits {
+        capacity: 2,
+        max_values: 2,
+        max_text_bytes: 3,
+    });
+    assert_eq!(
+        names.push(HostEvent {
+            name: "long".into(),
+            values: Vec::new(),
+        }),
+        Err(HostEventQueueError::TextBudget)
+    );
 }
 
 #[test]

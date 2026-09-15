@@ -27,7 +27,13 @@ pub fn read_message(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
             .take((MAX_LSP_HEADER_LINE_BYTES + 1) as u64)
             .read_line(&mut line)?;
         if read == 0 {
-            return Ok(None); // EOF between messages: a clean shutdown.
+            if header_bytes == 0 {
+                return Ok(None); // EOF between messages: a clean shutdown.
+            }
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "truncated LSP message header",
+            ));
         }
         if read > MAX_LSP_HEADER_LINE_BYTES {
             return Err(invalid_data("LSP header line exceeds 8 KiB"));

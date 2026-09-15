@@ -178,7 +178,7 @@ fn host_event_queue_applies_capacity_and_payload_backpressure() {
     let mut queue = HostEventQueue::new(HostEventQueueLimits {
         capacity: 1,
         max_values: 2,
-        max_text_bytes: 4,
+        max_text_bytes: 8,
     });
     queue
         .push(HostEvent {

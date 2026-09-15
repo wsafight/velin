@@ -57,7 +57,7 @@ impl From<ScriptRunError> for RunError {
 /// to `output` so the loop is fully testable.
 ///
 /// # Errors
-/// Returns [`RunError::Eval`] if the machine raises an evaluation error, or
+/// Returns [`RunError::Script`] if the machine raises an evaluation error, or
 /// [`RunError::Io`] if reading a reply or writing output fails.
 pub fn run(
     script: &CompiledScript,

@@ -34,6 +34,7 @@ fn initialize_then_open_publishes_diagnostics() {
                 "text": "if hp > 0\n",
             } },
         }),
+        json!({ "jsonrpc": "2.0", "id": 99, "method": "shutdown" }),
         json!({ "jsonrpc": "2.0", "method": "exit" }),
     ]);
     let mut output = Vec::new();
@@ -90,6 +91,7 @@ fn change_reruns_diagnostics_and_completion_sees_new_names() {
             "method": "textDocument/completion",
             "params": { "textDocument": { "uri": "file:///a.velin" } },
         }),
+        json!({ "jsonrpc": "2.0", "id": 99, "method": "shutdown" }),
         json!({ "jsonrpc": "2.0", "method": "exit" }),
     ]);
     let mut output = Vec::new();
@@ -128,6 +130,7 @@ fn document_symbol_lists_labels() {
             "method": "textDocument/documentSymbol",
             "params": { "textDocument": { "uri": "file:///s.velin" } },
         }),
+        json!({ "jsonrpc": "2.0", "id": 99, "method": "shutdown" }),
         json!({ "jsonrpc": "2.0", "method": "exit" }),
     ]);
     let mut output = Vec::new();
@@ -185,6 +188,7 @@ fn hover_definition_and_references_use_lsp_positions() {
                 "context": { "includeDeclaration": false },
             },
         }),
+        json!({ "jsonrpc": "2.0", "id": 99, "method": "shutdown" }),
         json!({ "jsonrpc": "2.0", "method": "exit" }),
     ]);
     let mut output = Vec::new();
@@ -269,14 +273,19 @@ fn shutdown_unknown_methods_and_malformed_documents() {
     let completion = messages
         .iter()
         .find(|m| m.get("id") == Some(&json!(4)))
-        .expect("completion");
-    assert!(
-        completion["result"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item["label"] == "set")
-    );
+        .expect("completion error");
+    assert_eq!(completion["error"]["code"], -32600);
+}
+
+#[test]
+fn exit_without_shutdown_is_a_process_error() {
+    let mut input = stream(&[
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+        json!({ "jsonrpc": "2.0", "method": "exit" }),
+    ]);
+    let mut output = Vec::new();
+    let error = Server::new(&mut output).run(&mut input).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::Other);
 }
 
 #[test]
