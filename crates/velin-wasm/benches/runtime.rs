@@ -1,6 +1,8 @@
 #[cfg(feature = "runtime")]
 use criterion::{Criterion, criterion_group, criterion_main};
 #[cfg(feature = "runtime")]
+use std::fmt::Write as _;
+#[cfg(feature = "runtime")]
 use std::hint::black_box;
 #[cfg(feature = "runtime")]
 use velin::compile;
@@ -9,9 +11,10 @@ use velin_wasm::RuntimeMachine;
 
 #[cfg(feature = "runtime")]
 fn bench_wasm_batch(c: &mut Criterion) {
-    let source = (0..128)
-        .map(|index| format!("perform emit({index})\n"))
-        .collect::<String>();
+    let mut source = String::new();
+    for index in 0..128 {
+        let _ = writeln!(source, "perform emit({index})");
+    }
     let script = compile("wasm-bench.velin", &source).unwrap();
     let json = serde_json::to_string(&*script.program).unwrap();
     c.bench_function("host/wasm_batch", |b| {

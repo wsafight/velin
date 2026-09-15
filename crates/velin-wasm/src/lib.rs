@@ -13,7 +13,7 @@
 //! the core's determinism / no-float / no-`unsafe` guarantees are preserved
 //! (the only `unsafe` in the built artifact is wasm-bindgen's generated glue).
 //!
-//! Everything is implemented on plain Rust types in [`engine`] and unit-tested
+//! Everything is implemented on plain Rust types in the private engine module and unit-tested
 //! natively; the `#[wasm_bindgen]` layer is a thin string wrapper on top.
 
 #[cfg(feature = "source")]

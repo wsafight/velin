@@ -58,11 +58,7 @@ jobs:
       - name: Prepare binaries and extension
         shell: bash
         run: |
-          version="$(node -p "require('./editors/vscode-velin/package.json').version")"
-          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v${version}" ]]; then
-            echo "release tag ${GITHUB_REF_NAME} does not match manifest version v${version}" >&2
-            exit 1
-          fi
+          version="$(bash scripts/check-release-version.sh "${GITHUB_REF_NAME:-}")"
           archive_name="velin-v${version}-${TARGET}"
           echo "VERSION=${version}" >> "$GITHUB_ENV"
           echo "ARCHIVE_NAME=${archive_name}" >> "$GITHUB_ENV"
