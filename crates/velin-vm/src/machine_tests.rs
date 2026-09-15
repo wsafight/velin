@@ -274,6 +274,70 @@ fn execution_profile_records_anonymous_op_hits_and_merges() {
 }
 
 #[test]
+fn profile_can_be_disabled_and_enabled_without_changing_results() {
+    let mut builder = ProgramBuilder::new();
+    let value = builder.slot("value");
+    builder.push(Op::SetConst {
+        slot: value,
+        value: Value::Integer(7),
+        line: 1,
+    });
+    builder.push(Op::Halt);
+    let program = builder.build();
+    let mut machine = Machine::new_without_profile(program).unwrap();
+    assert!(!machine.profile_enabled());
+    assert_eq!(machine.run(), Ok(Yield::Finished));
+    assert!(machine.profile().op_hits().is_empty());
+    machine
+        .restart(
+            &InitialFrame::from_named_values(&machine.program().slots, []).unwrap(),
+            0,
+        )
+        .unwrap();
+    machine.enable_profile();
+    machine.reset_profile();
+    assert!(machine.profile_enabled());
+    assert_eq!(machine.run(), Ok(Yield::Finished));
+    assert!(machine.profile().op_hits().iter().any(|hits| *hits > 0));
+}
+
+#[test]
+fn single_argument_host_fast_path_avoids_vector_shape_changes() {
+    let mut builder = ProgramBuilder::new();
+    let value = builder.expr(&Expr::Value(Value::Integer(9)), 1);
+    builder.push(Op::host(7, vec![value], None, 1));
+    let mut machine = Machine::new_without_profile(builder.build()).unwrap();
+    assert_eq!(
+        machine.run_with_single_argument_hosts(&[7]),
+        Ok(FastYield::HostOne {
+            host_id: 7,
+            value: Value::Integer(9),
+        })
+    );
+    assert_eq!(machine.resume(None), Ok(Yield::Finished));
+}
+
+#[test]
+fn machine_invoker_restarts_without_leaking_previous_values() {
+    let mut builder = ProgramBuilder::new();
+    let value = builder.slot("value");
+    builder.push(Op::Halt);
+    let program = builder.build();
+    let validated = ValidatedProgram::new(program).unwrap();
+    let initial = InitialFrame::from_named_values(&validated.program().slots, []).unwrap();
+    let mut invoker = MachineInvoker::new(&validated, 0, &initial).unwrap();
+    invoker
+        .machine_mut()
+        .try_set_slot(value, Value::Integer(99))
+        .unwrap();
+    assert_eq!(invoker.machine_mut().run(), Ok(Yield::Finished));
+    invoker.restart().unwrap();
+    assert_eq!(invoker.machine().variable("value"), None);
+    assert_eq!(invoker.machine_mut().run(), Ok(Yield::Finished));
+    assert_eq!(invoker.machine().variable("value"), None);
+}
+
+#[test]
 fn cloning_a_machine_rolls_back_rng_with_the_frame() {
     // Draw and yield once, clone the yielded machine as a checkpoint, then
     // draw again. Resuming the checkpoint must reproduce the second draw.

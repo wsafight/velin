@@ -17,6 +17,7 @@ pub(super) fn eval_chunk_for(
     frame: &mut FrameState,
     register_values: &mut Vec<Option<Value>>,
     register_metrics: &mut Vec<Option<DataMetrics>>,
+    register_touched: &mut Vec<usize>,
     chunk_id: u32,
 ) -> Result<(Value, DataMetrics), EvalError> {
     let (execution, _) = metadata
@@ -50,6 +51,7 @@ pub(super) fn eval_chunk_for(
         constant_metrics,
         register_values,
         register_metrics,
+        register_touched,
         |slot| slots.name(slot).unwrap_or("?").to_owned(),
     )
 }
@@ -60,6 +62,7 @@ pub(super) fn eval_host_args(
     frame: &mut FrameState,
     register_values: &mut Vec<Option<Value>>,
     register_metrics: &mut Vec<Option<DataMetrics>>,
+    register_touched: &mut Vec<usize>,
     host: &HostOp,
 ) -> Result<Vec<Value>, EvalError> {
     let line = host.line as usize;
@@ -72,6 +75,7 @@ pub(super) fn eval_host_args(
             frame,
             register_values,
             register_metrics,
+            register_touched,
             chunk,
         )?;
         payload = checked_total(

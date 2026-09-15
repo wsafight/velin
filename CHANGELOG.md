@@ -6,6 +6,18 @@ change source and Rust APIs between minor releases.
 
 ## Unreleased
 
+## 0.4.0 - 2026-09-15
+
+### Added
+
+- Reusable `MachineInvoker` and `PureModuleInvoker` sessions for repeated execution without rebuilding VM state.
+- Low-allocation single-argument host yields and optional execution profiling controls.
+
+### Changed
+
+- Register workspaces, scalar operations, read-only built-ins, and common collection-length guards now reuse validated runtime state on hot paths while preserving shared semantics and data budgets.
+- VM execution modules are split so every Rust source file remains within the 500-line maintenance limit.
+
 ## 0.3.0 - 2026-09-15
 
 ### Added

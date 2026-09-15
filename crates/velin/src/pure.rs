@@ -8,8 +8,8 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    CompiledScript, Diagnostic, EvalError, HostSchema, HostSignature, Machine, Type, Value, Yield,
-    compile,
+    CompiledScript, Diagnostic, EvalError, FastYield, HostSchema, HostSignature, Machine,
+    MachineInvoker, Type, Value, compile,
 };
 use velin_bytecode::ExprOp;
 
@@ -19,6 +19,16 @@ pub struct PureModule {
     source_name: String,
     script: CompiledScript,
     inputs: BTreeMap<String, Type>,
+    bindings: Box<[InputBinding]>,
+    return_host_id: Option<u32>,
+    fail_host_id: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+struct InputBinding {
+    name: String,
+    slot: u32,
+    expected: Type,
 }
 
 /// Failure while compiling or invoking a [`PureModule`].
@@ -32,6 +42,8 @@ pub enum PureModuleError {
     MissingInput(String),
     /// The invocation supplied a name absent from the module input contract.
     UnknownInput(String),
+    /// A convenience invocation shape does not match the module input arity.
+    InvalidInput(String),
     /// An invocation value does not satisfy its declared input type.
     InputType {
         name: String,
@@ -61,6 +73,9 @@ impl std::fmt::Display for PureModuleError {
             }
             Self::MissingInput(name) => write!(formatter, "missing input `{name}`"),
             Self::UnknownInput(name) => write!(formatter, "unknown input `{name}`"),
+            Self::InvalidInput(message) | Self::InvalidReturn(message) => {
+                formatter.write_str(message)
+            }
             Self::InputType {
                 name,
                 expected,
@@ -72,7 +87,6 @@ impl std::fmt::Display for PureModuleError {
                 found.name()
             ),
             Self::MissingReturn => formatter.write_str("pure module finished without return"),
-            Self::InvalidReturn(message) => formatter.write_str(message),
             Self::ExplicitFailure(message) => write!(formatter, "pure module failed: {message}"),
             Self::Execution(error) => write!(formatter, "execution error: {error}"),
         }
@@ -87,6 +101,7 @@ impl std::error::Error for PureModuleError {
             Self::Check(_)
             | Self::MissingInput(_)
             | Self::UnknownInput(_)
+            | Self::InvalidInput(_)
             | Self::InputType { .. }
             | Self::MissingReturn
             | Self::InvalidReturn(_)
@@ -130,10 +145,34 @@ impl PureModule {
             return Err(PureModuleError::Check(diagnostics));
         }
 
+        let bindings = inputs
+            .iter()
+            .filter_map(|(name, expected)| {
+                script.program.slots.get(name).map(|slot| InputBinding {
+                    name: name.clone(),
+                    slot,
+                    expected: *expected,
+                })
+            })
+            .collect();
+        let return_host_id = script
+            .hosts
+            .iter()
+            .position(|name| name == "return")
+            .and_then(|id| u32::try_from(id).ok());
+        let fail_host_id = script
+            .hosts
+            .iter()
+            .position(|name| name == "fail")
+            .and_then(|id| u32::try_from(id).ok());
+
         Ok(Self {
             source_name,
             script,
             inputs,
+            bindings,
+            return_host_id,
+            fail_host_id,
         })
     }
 
@@ -164,98 +203,187 @@ impl PureModule {
     /// # Errors
     /// Returns an input, protocol, static-execution, or explicit module error.
     pub fn invoke(&self, values: BTreeMap<String, Value>) -> Result<Value, PureModuleError> {
+        let mut invoker = self.invoker()?;
+        invoker.invoke(values)
+    }
+
+    /// Creates a reusable pure-module invocation session.
+    ///
+    /// The session owns one mutable machine and can be used by one concurrent
+    /// caller. Each invocation restarts from the compiled initial frame.
+    ///
+    /// # Errors
+    /// Returns an execution error if the compiled initial frame is invalid.
+    pub fn invoker(&self) -> Result<PureModuleInvoker<'_>, PureModuleError> {
+        let initial = self.script.initial_frame().ok_or_else(|| {
+            PureModuleError::Execution(EvalError::new(0, "compiled initial frame is invalid"))
+        })?;
+        let machine = MachineInvoker::new(
+            self.script.validated_program(),
+            crate::DEFAULT_RNG_SEED,
+            initial,
+        )
+        .ok_or_else(|| {
+            PureModuleError::Execution(EvalError::new(0, "compiled initial frame is invalid"))
+        })?;
+        Ok(PureModuleInvoker {
+            module: self,
+            machine,
+        })
+    }
+
+    fn validate_values(&self, values: &BTreeMap<String, Value>) -> Result<(), PureModuleError> {
         for name in values.keys() {
             if !self.inputs.contains_key(name) {
                 return Err(PureModuleError::UnknownInput(name.clone()));
             }
         }
-        for (name, expected) in &self.inputs {
+        for binding in &self.bindings {
             let value = values
-                .get(name)
-                .ok_or_else(|| PureModuleError::MissingInput(name.clone()))?;
+                .get(&binding.name)
+                .ok_or_else(|| PureModuleError::MissingInput(binding.name.clone()))?;
             let found = Type::from(value);
-            if !found.could_be(*expected) {
+            if !found.could_be(binding.expected) {
                 return Err(PureModuleError::InputType {
-                    name: name.clone(),
-                    expected: *expected,
+                    name: binding.name.clone(),
+                    expected: binding.expected,
                     found,
                 });
             }
         }
+        Ok(())
+    }
 
-        let mut machine = self.new_machine()?;
-        for (name, value) in values {
-            machine.try_set_variable(&name, value).map_err(|error| {
-                PureModuleError::Execution(EvalError::new(0, error.to_string()))
-            })?;
+    fn finish_invocation(&self, machine: &mut Machine) -> Result<Value, PureModuleError> {
+        let mut fast_hosts = [0; 2];
+        let mut fast_host_count = 0;
+        for host_id in [self.return_host_id, self.fail_host_id]
+            .into_iter()
+            .flatten()
+        {
+            if fast_host_count < fast_hosts.len() {
+                fast_hosts[fast_host_count] = host_id;
+                fast_host_count += 1;
+            }
         }
-
-        match machine.run().map_err(PureModuleError::Execution)? {
-            Yield::Finished => Err(PureModuleError::MissingReturn),
-            Yield::Host { host_id, values } => {
-                let name = self.script.host_name(host_id).unwrap_or("<unknown>");
-                match name {
-                    "return" => {
-                        if values.len() != 1 {
-                            return Err(PureModuleError::InvalidReturn(format!(
-                                "return expects exactly one value, found {}",
-                                values.len()
-                            )));
-                        }
-                        values.into_iter().next().ok_or_else(|| {
-                            PureModuleError::InvalidReturn(
-                                "return expects exactly one value, found 0".into(),
-                            )
-                        })
-                    }
-                    "fail" => {
-                        if values.len() != 1 {
-                            return Err(PureModuleError::InvalidReturn(format!(
-                                "fail expects exactly one value, found {}",
-                                values.len()
-                            )));
-                        }
-                        let Some(Value::String(message)) = values.into_iter().next() else {
-                            return Err(PureModuleError::InvalidReturn(
-                                "fail expects a string message".into(),
-                            ));
-                        };
-                        Err(PureModuleError::ExplicitFailure(message.to_string()))
-                    }
-                    other => Err(PureModuleError::InvalidReturn(format!(
-                        "unexpected host command `{other}` in pure module"
-                    ))),
+        match machine
+            .run_with_single_argument_hosts(&fast_hosts[..fast_host_count])
+            .map_err(PureModuleError::Execution)?
+        {
+            FastYield::Finished => Err(PureModuleError::MissingReturn),
+            FastYield::HostOne { host_id, value } => self.finish_single_host(host_id, value),
+            FastYield::Host { host_id, values } => {
+                if values.len() != 1 {
+                    return Err(PureModuleError::InvalidReturn(format!(
+                        "host command expects exactly one value, found {}",
+                        values.len()
+                    )));
                 }
+                let value = values.into_iter().next().ok_or_else(|| {
+                    PureModuleError::InvalidReturn("host command returned no value".into())
+                })?;
+                self.finish_single_host(host_id, value)
             }
         }
     }
 
-    fn new_machine(&self) -> Result<Machine, PureModuleError> {
-        if let Some(frame) = self.script.initial_frame()
-            && let Some(machine) = Machine::from_validated_with_seed_and_frame(
-                self.script.validated_program(),
-                crate::DEFAULT_RNG_SEED,
-                frame,
-            )
-        {
-            return Ok(machine);
+    fn finish_single_host(&self, host_id: u32, value: Value) -> Result<Value, PureModuleError> {
+        if Some(host_id) == self.return_host_id {
+            return Ok(value);
         }
+        if Some(host_id) == self.fail_host_id {
+            let Value::String(message) = value else {
+                return Err(PureModuleError::InvalidReturn(
+                    "fail expects a string message".into(),
+                ));
+            };
+            return Err(PureModuleError::ExplicitFailure(message.to_string()));
+        }
+        let name = self.script.host_name(host_id).unwrap_or("<unknown>");
+        Err(PureModuleError::InvalidReturn(format!(
+            "unexpected host command `{name}` in pure module"
+        )))
+    }
+}
 
-        // This fallback is only reachable if a caller mutates a public
-        // `CompiledScript` field after embedding it. Keep it transactional and
-        // report any resulting initialization failure as execution failure.
-        let mut machine = Machine::from_validated_with_seed(
-            self.script.validated_program(),
-            crate::DEFAULT_RNG_SEED,
-        );
-        for (name, value) in &self.script.defaults {
-            machine
-                .try_set_variable(name, value.clone())
+/// A reusable pure-module invocation session.
+#[derive(Debug)]
+pub struct PureModuleInvoker<'a> {
+    module: &'a PureModule,
+    machine: MachineInvoker,
+}
+
+impl PureModuleInvoker<'_> {
+    /// Invokes the module after resetting its machine to the initial frame.
+    ///
+    /// # Errors
+    /// Returns an input, execution, protocol, or explicit module error.
+    pub fn invoke(
+        &mut self,
+        mut values: BTreeMap<String, Value>,
+    ) -> Result<Value, PureModuleError> {
+        self.module.validate_values(&values)?;
+        self.machine
+            .restart()
+            .map_err(|error| PureModuleError::Execution(EvalError::new(0, error)))?;
+        for binding in &self.module.bindings {
+            let Some(value) = values.remove(&binding.name) else {
+                return Err(PureModuleError::MissingInput(binding.name.clone()));
+            };
+            self.machine
+                .machine_mut()
+                .try_set_slot(binding.slot, value)
                 .map_err(|error| {
                     PureModuleError::Execution(EvalError::new(0, error.to_string()))
                 })?;
         }
-        Ok(machine)
+        self.module.finish_invocation(self.machine.machine_mut())
+    }
+
+    /// Invokes a module that declares exactly one input, without creating a
+    /// map or looking up the input name at runtime.
+    ///
+    /// # Errors
+    /// Returns an arity, type, execution, protocol, or explicit module error.
+    pub fn invoke_one(&mut self, value: Value) -> Result<Value, PureModuleError> {
+        let [binding] = self.module.bindings.as_ref() else {
+            return Err(PureModuleError::InvalidInput(
+                "invoke_one requires exactly one declared input".into(),
+            ));
+        };
+        let found = Type::from(&value);
+        if !found.could_be(binding.expected) {
+            return Err(PureModuleError::InputType {
+                name: binding.name.clone(),
+                expected: binding.expected,
+                found,
+            });
+        }
+        self.machine
+            .restart()
+            .map_err(|error| PureModuleError::Execution(EvalError::new(0, error)))?;
+        self.machine
+            .machine_mut()
+            .try_set_slot(binding.slot, value)
+            .map_err(|error| PureModuleError::Execution(EvalError::new(0, error.to_string())))?;
+        self.module.finish_invocation(self.machine.machine_mut())
+    }
+
+    /// Invokes the same module repeatedly while reusing the session buffers.
+    ///
+    /// # Errors
+    /// Returns the first input, execution, protocol, or explicit module error.
+    pub fn invoke_batch<I>(&mut self, inputs: I) -> Result<Vec<Value>, PureModuleError>
+    where
+        I: IntoIterator<Item = BTreeMap<String, Value>>,
+    {
+        inputs.into_iter().map(|input| self.invoke(input)).collect()
+    }
+
+    /// Returns the underlying reusable machine for advanced host integration.
+    #[must_use]
+    pub const fn machine(&self) -> &Machine {
+        self.machine.machine()
     }
 }
 

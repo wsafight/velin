@@ -7,7 +7,7 @@
 use velin_bytecode::{ExprChunk, ExprChunkRef, ExprOp};
 use velin_eval::{
     EvalError, apply_binary, apply_boolean_not, apply_integer_binary, apply_integer_unary,
-    invoke_measured_with_metrics, invoke_random, invoke_readonly_measured, unassigned,
+    invoke_measured_with_metrics, invoke_random, unassigned,
 };
 use velin_syntax::{BinaryOp, Builtin, DataFootprint, DataMetrics, MAX_DATA_TEXT_BYTES, Value};
 
@@ -50,6 +50,7 @@ pub fn eval_chunk(
     })?;
     let mut values = Vec::new();
     let mut metrics = Vec::new();
+    let mut touched = Vec::new();
     eval_validated_chunk(
         chunk.as_chunk_ref(),
         FrameAccess::Mutable(frame),
@@ -57,6 +58,7 @@ pub fn eval_chunk(
         None,
         &mut values,
         &mut metrics,
+        &mut touched,
         slot_name,
     )
     .map(|(value, _)| value)
@@ -71,11 +73,11 @@ pub(crate) fn eval_validated_chunk(
     constant_metrics: Option<(&[DataMetrics], u32)>,
     values: &mut Vec<Option<Value>>,
     metrics: &mut Vec<Option<DataMetrics>>,
+    touched: &mut Vec<usize>,
     slot_name: impl Fn(u32) -> String,
 ) -> Result<(Value, DataMetrics), EvalError> {
     let register_count = usize::from(chunk.registers);
-    reset_workspace(values, register_count);
-    reset_workspace(metrics, register_count);
+    reset_workspace(values, metrics, touched, register_count);
     let result = execute_registers(
         chunk,
         &mut frame,
@@ -83,10 +85,10 @@ pub(crate) fn eval_validated_chunk(
         constant_metrics,
         values,
         metrics,
+        touched,
         &slot_name,
     );
-    clear_workspace(values, register_count);
-    clear_workspace(metrics, register_count);
+    clear_workspace(values, metrics, touched);
     result
 }
 
@@ -98,6 +100,7 @@ fn execute_registers(
     constant_metrics: Option<(&[DataMetrics], u32)>,
     values: &mut [Option<Value>],
     metrics: &mut [Option<DataMetrics>],
+    touched: &mut Vec<usize>,
     slot_name: &impl Fn(u32) -> String,
 ) -> Result<(Value, DataMetrics), EvalError> {
     let line = chunk.line as usize;
@@ -113,7 +116,7 @@ fn execute_registers(
                             .data_metrics()
                             .expect("validated register constant metrics")
                     });
-                write_register(values, metrics, *dst, value, value_metrics);
+                write_register(values, metrics, touched, *dst, value, value_metrics);
             }
             ExprOp::Load { dst, slot, .. } => {
                 let value = frame.values()[*slot as usize]
@@ -130,13 +133,13 @@ fn execute_registers(
                         max_depth: usize::from(depths[*slot as usize]),
                     },
                 );
-                write_register(values, metrics, *dst, value, value_metrics);
+                write_register(values, metrics, touched, *dst, value, value_metrics);
             }
             ExprOp::Unary { dst, op, source } => {
-                let source = register_value(values, *source).clone();
-                let result = apply_unary_typed(*op, source, line)?;
+                let source = register_value(values, *source);
+                let result = apply_unary_typed_ref(*op, source, line)?;
                 let result_metrics = scalar_metrics(&result);
-                write_register(values, metrics, *dst, result, result_metrics);
+                write_register(values, metrics, touched, *dst, result, result_metrics);
             }
             ExprOp::Binary {
                 dst,
@@ -144,11 +147,11 @@ fn execute_registers(
                 op,
                 right,
             } => {
-                let left = register_value(values, *left).clone();
-                let right = register_value(values, *right).clone();
-                let result = apply_binary_typed(left, *op, right, line)?;
+                let left = register_value(values, *left);
+                let right = register_value(values, *right);
+                let result = apply_binary_typed_ref(left, *op, right, line)?;
                 let result_metrics = shallow_metrics(&result);
-                write_register(values, metrics, *dst, result, result_metrics);
+                write_register(values, metrics, touched, *dst, result, result_metrics);
             }
             ExprOp::Call {
                 dst,
@@ -163,7 +166,7 @@ fn execute_registers(
                             collect_registers(values, metrics, args.clone());
                         invoke_measured_with_metrics(*function, arguments, &argument_metrics, line)?
                     };
-                write_register(values, metrics, *dst, result, result_metrics);
+                write_register(values, metrics, touched, *dst, result, result_metrics);
             }
             ExprOp::Random {
                 dst,
@@ -178,7 +181,7 @@ fn execute_registers(
                     line,
                 )?;
                 let result_metrics = scalar_metrics(&result);
-                write_register(values, metrics, *dst, result, result_metrics);
+                write_register(values, metrics, touched, *dst, result, result_metrics);
             }
             ExprOp::Chance {
                 dst,
@@ -193,7 +196,7 @@ fn execute_registers(
                     line,
                 )?;
                 let result_metrics = scalar_metrics(&result);
-                write_register(values, metrics, *dst, result, result_metrics);
+                write_register(values, metrics, touched, *dst, result, result_metrics);
             }
             ExprOp::JumpIfFalse { condition, target } => {
                 if register_value(values, *condition) == &Value::Boolean(false) {
@@ -232,6 +235,7 @@ fn execute_registers(
                 write_register(
                     values,
                     metrics,
+                    touched,
                     *dst,
                     Value::String(text.into()),
                     result_metrics,
@@ -261,29 +265,69 @@ fn invoke_readonly_registers(
     registers: std::ops::Range<u16>,
     line: usize,
 ) -> Result<(Value, DataMetrics), EvalError> {
-    let result = match registers.len() {
-        1 => {
-            let arguments = [register_value(values, registers.start)];
-            invoke_readonly_measured(function, &arguments, line)?
+    let argc = registers.len();
+    if !function.accepts(argc) {
+        return Err(EvalError::new(line, "invalid built-in argument count"));
+    }
+    let first = register_value(values, registers.start);
+    match function {
+        Builtin::Len => {
+            let length = match first {
+                Value::List(values) => values.len(),
+                Value::Record(values) => values.len(),
+                Value::String(value) => value.chars().count(),
+                _ => return Err(EvalError::new(line, "len expects a list, record or string")),
+            };
+            let length =
+                i64::try_from(length).map_err(|_| EvalError::new(line, "length overflow"))?;
+            Ok((
+                Value::Integer(length),
+                scalar_metrics(&Value::Integer(length)),
+            ))
         }
-        2 => {
-            let arguments = [
-                register_value(values, registers.start),
-                register_value(values, registers.start + 1),
-            ];
-            invoke_readonly_measured(function, &arguments, line)?
+        Builtin::Get => {
+            let second = register_value(values, registers.start + 1);
+            let value = match (first, second) {
+                (Value::List(values), Value::Integer(index)) => usize::try_from(*index)
+                    .ok()
+                    .and_then(|index| values.get(index)),
+                (Value::Record(values), Value::String(key)) => values.get(key.as_str()),
+                _ => {
+                    return Err(EvalError::new(
+                        line,
+                        "get expects a list and integer index, or a record and string key",
+                    ));
+                }
+            };
+            let value = value
+                .or_else(|| (argc == 3).then(|| register_value(values, registers.start + 2)))
+                .cloned()
+                .ok_or_else(|| EvalError::new(line, "missing key or list index"))?;
+            let metrics = value
+                .data_metrics()
+                .map_err(|error| EvalError::new(line, error))?;
+            Ok((value, metrics))
         }
-        3 => {
-            let arguments = [
-                register_value(values, registers.start),
-                register_value(values, registers.start + 1),
-                register_value(values, registers.start + 2),
-            ];
-            invoke_readonly_measured(function, &arguments, line)?
+        Builtin::Contains => {
+            let second = register_value(values, registers.start + 1);
+            let contains = match (first, second) {
+                (Value::List(values), value) => values.contains(value),
+                (Value::Record(values), Value::String(key)) => values.contains_key(key.as_str()),
+                (Value::String(text), Value::String(part)) => text.contains(part.as_str()),
+                _ => {
+                    return Err(EvalError::new(
+                        line,
+                        "contains expects a list, record or string",
+                    ));
+                }
+            };
+            Ok((
+                Value::Boolean(contains),
+                scalar_metrics(&Value::Boolean(contains)),
+            ))
         }
-        _ => unreachable!("validated read-only built-in arity"),
-    };
-    Ok(result)
+        _ => unreachable!("validated read-only built-in"),
+    }
 }
 
 fn collect_registers(
@@ -310,55 +354,93 @@ fn register_value(values: &[Option<Value>], register: u16) -> &Value {
 fn write_register(
     values: &mut [Option<Value>],
     metrics: &mut [Option<DataMetrics>],
+    touched: &mut Vec<usize>,
     dst: u16,
     value: Value,
     value_metrics: DataMetrics,
 ) {
-    values[dst as usize] = Some(value);
-    metrics[dst as usize] = Some(value_metrics);
-}
-
-fn reset_workspace<T>(workspace: &mut Vec<Option<T>>, len: usize) {
-    if workspace.len() < len {
-        workspace.resize_with(len, || None);
+    let index = dst as usize;
+    if values[index].is_none() {
+        touched.push(index);
     }
-    clear_workspace(workspace, len);
+    values[index] = Some(value);
+    metrics[index] = Some(value_metrics);
 }
 
-fn clear_workspace<T>(workspace: &mut [Option<T>], len: usize) {
-    for value in &mut workspace[..len] {
-        *value = None;
+fn reset_workspace(
+    values: &mut Vec<Option<Value>>,
+    metrics: &mut Vec<Option<DataMetrics>>,
+    touched: &mut Vec<usize>,
+    len: usize,
+) {
+    for index in touched.drain(..) {
+        values[index] = None;
+        metrics[index] = None;
+    }
+    if values.len() < len {
+        values.resize_with(len, || None);
+    }
+    if metrics.len() < len {
+        metrics.resize_with(len, || None);
+    }
+    touched.reserve(len.min(8));
+}
+
+fn clear_workspace(
+    values: &mut [Option<Value>],
+    metrics: &mut [Option<DataMetrics>],
+    touched: &mut Vec<usize>,
+) {
+    for index in touched.drain(..) {
+        values[index] = None;
+        metrics[index] = None;
     }
 }
 
 #[inline]
-fn apply_unary_typed(
+fn apply_unary_typed_ref(
     op: velin_syntax::UnaryOp,
-    value: Value,
+    value: &Value,
     line: usize,
 ) -> Result<Value, EvalError> {
-    match (op, &value) {
+    match (op, value) {
         (velin_syntax::UnaryOp::Negate, Value::Integer(value)) => apply_integer_unary(*value, line),
         (velin_syntax::UnaryOp::Not, Value::Boolean(value)) => Ok(apply_boolean_not(*value)),
-        _ => velin_eval::apply_unary(op, value, line),
+        _ => velin_eval::apply_unary(op, value.clone(), line),
     }
 }
 
 #[inline]
-fn apply_binary_typed(
-    left: Value,
+fn apply_binary_typed_ref(
+    left: &Value,
     op: BinaryOp,
-    right: Value,
+    right: &Value,
     line: usize,
 ) -> Result<Value, EvalError> {
-    if matches!(
-        op,
-        BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
-    ) && let (Value::Integer(left), Value::Integer(right)) = (&left, &right)
-    {
-        return apply_integer_binary(*left, op, *right, line);
+    if let (Value::Integer(left), Value::Integer(right)) = (left, right) {
+        return match op {
+            BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
+                apply_integer_binary(*left, op, *right, line)
+            }
+            BinaryOp::Equal => Ok(Value::Boolean(left == right)),
+            BinaryOp::NotEqual => Ok(Value::Boolean(left != right)),
+            BinaryOp::Less => Ok(Value::Boolean(left < right)),
+            BinaryOp::LessEqual => Ok(Value::Boolean(left <= right)),
+            BinaryOp::Greater => Ok(Value::Boolean(left > right)),
+            BinaryOp::GreaterEqual => Ok(Value::Boolean(left >= right)),
+            _ => velin_eval::apply_binary(Value::Integer(*left), op, Value::Integer(*right), line),
+        };
     }
-    apply_binary(left, op, right, line)
+    if let (Value::Boolean(left), Value::Boolean(right)) = (left, right) {
+        return match op {
+            BinaryOp::Equal => Ok(Value::Boolean(left == right)),
+            BinaryOp::NotEqual => Ok(Value::Boolean(left != right)),
+            BinaryOp::And => Ok(Value::Boolean(*left && *right)),
+            BinaryOp::Or => Ok(Value::Boolean(*left || *right)),
+            _ => velin_eval::apply_binary(Value::Boolean(*left), op, Value::Boolean(*right), line),
+        };
+    }
+    apply_binary(left.clone(), op, right.clone(), line)
 }
 
 fn scalar_metrics(_value: &Value) -> DataMetrics {

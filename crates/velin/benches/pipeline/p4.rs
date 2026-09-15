@@ -3,13 +3,14 @@
 use crate::GUARD;
 use crate::sources::{expression_heavy_source, host_call_source, wide_linear_source};
 use criterion::Criterion;
+use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use velin::{
-    Expr, Machine, Op, ProgramBuilder, ScriptRunner, ScriptYield, Value, Variables, Yield,
-    artifact_cache_path, compile, decode_artifact, encode_artifact, evaluate, load_artifact_cache,
-    parse_expression, store_artifact_cache,
+    Expr, Machine, Op, ProgramBuilder, PureModule, ScriptRunner, ScriptYield, Type, Value,
+    Variables, Yield, artifact_cache_path, compile, decode_artifact, encode_artifact, evaluate,
+    load_artifact_cache, parse_expression, store_artifact_cache,
 };
 
 pub(crate) fn bench_eval_tree(c: &mut Criterion) {
@@ -175,6 +176,69 @@ pub(crate) fn bench_machine_restart(c: &mut Criterion) {
             black_box(runner.run().unwrap())
         });
     });
+}
+
+pub(crate) fn bench_pure_module_invocation(c: &mut Criterion) {
+    let module = PureModule::compile(
+        "bench.velin",
+        "perform return(value * 2 + 1)\n",
+        BTreeMap::from([(String::from("value"), Type::Integer)]),
+    )
+    .unwrap();
+    let mut group = c.benchmark_group("pure/invoke");
+    group.bench_function("map_fresh", |b| {
+        b.iter(|| {
+            black_box(
+                module
+                    .invoke(BTreeMap::from([(
+                        String::from("value"),
+                        Value::Integer(21),
+                    )]))
+                    .unwrap(),
+            )
+        });
+    });
+    let mut map_invoker = module.invoker().unwrap();
+    group.bench_function("map_reused", |b| {
+        b.iter(|| {
+            black_box(
+                map_invoker
+                    .invoke(BTreeMap::from([(
+                        String::from("value"),
+                        Value::Integer(21),
+                    )]))
+                    .unwrap(),
+            )
+        });
+    });
+    let mut one_invoker = module.invoker().unwrap();
+    group.bench_function("one_reused", |b| {
+        b.iter(|| black_box(one_invoker.invoke_one(Value::Integer(21)).unwrap()));
+    });
+    group.finish();
+}
+
+pub(crate) fn bench_profile_overhead(c: &mut Criterion) {
+    let script = compile(
+        "bench.velin",
+        "set value = 0\nset index = 0\nwhile index < 256:\n    set value = value + index\n    set index = index + 1\nperform return(value)\n",
+    )
+    .unwrap();
+    let mut group = c.benchmark_group("machine/profile");
+    group.bench_function("enabled", |b| {
+        b.iter(|| {
+            let mut machine = Machine::from_validated(script.validated_program());
+            black_box(machine.run().unwrap())
+        });
+    });
+    group.bench_function("disabled", |b| {
+        b.iter(|| {
+            let mut machine =
+                Machine::from_validated_with_seed_without_profile(script.validated_program(), 0);
+            black_box(machine.run().unwrap())
+        });
+    });
+    group.finish();
 }
 
 pub(crate) fn bench_execution_image(c: &mut Criterion) {

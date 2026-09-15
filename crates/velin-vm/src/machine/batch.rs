@@ -68,6 +68,7 @@ impl Machine {
                 &mut self.frame,
                 &mut self.register_values,
                 &mut self.register_metrics,
+                &mut self.register_touched,
                 host,
             ) {
                 Ok(values) => values,

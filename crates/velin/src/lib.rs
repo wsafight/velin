@@ -113,9 +113,9 @@ pub use velin_bytecode::{
 pub use velin_compile::{ProgramBuilder, compile_expression};
 
 pub use velin_vm::{
-    DEFAULT_RNG_SEED, ExecutionProfile, HostEffect, MAX_HOST_PAYLOAD_TEXT_BYTES,
+    DEFAULT_RNG_SEED, ExecutionProfile, FastYield, HostEffect, MAX_HOST_PAYLOAD_TEXT_BYTES,
     MAX_HOST_PAYLOAD_VALUES, MAX_IMMEDIATE_STEPS, MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES,
-    Machine, SetVariableError, Yield,
+    Machine, MachineInvoker, SetVariableError, Yield,
 };
 
 pub use runtime::{
@@ -142,5 +142,5 @@ mod pure;
 mod repl;
 mod runtime;
 
-pub use pure::{PureModule, PureModuleError};
+pub use pure::{PureModule, PureModuleError, PureModuleInvoker};
 pub use repl::{ReplError, ReplSession};

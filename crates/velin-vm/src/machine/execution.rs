@@ -66,8 +66,7 @@ impl Machine {
                 },
             );
         }
-        self.register_values.clear();
-        self.register_metrics.clear();
+        self.register_touched.clear();
         self.effect_buffer.clear();
         self.pc = 0;
         self.pending_host = None;
@@ -133,7 +132,8 @@ impl Machine {
         }
         let mut steps = 0;
         while !self.finished {
-            steps += self.step_cost();
+            let fused_jump_target = self.update_jump_target();
+            steps += if fused_jump_target.is_some() { 2 } else { 1 };
             if steps > MAX_IMMEDIATE_STEPS {
                 return Err(EvalError::new(
                     self.current_line(),
@@ -144,7 +144,7 @@ impl Machine {
                 self.finished = true;
                 break;
             }
-            if let Some(effect) = self.step()? {
+            if let Some(effect) = self.step_with_known_jump_target(fused_jump_target)? {
                 return Ok(effect);
             }
         }
@@ -180,9 +180,18 @@ impl Machine {
     /// otherwise. Advances `pc` accordingly.
     #[allow(clippy::too_many_lines)]
     pub(super) fn step(&mut self) -> Result<Option<Yield>, EvalError> {
+        self.step_with_known_jump_target(None)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub(super) fn step_with_known_jump_target(
+        &mut self,
+        known_jump_target: Option<usize>,
+    ) -> Result<Option<Yield>, EvalError> {
         let current_pc = self.pc;
         self.profile.record(current_pc);
-        if self.update_jump_target().is_some() {
+        let jump_target = known_jump_target.or_else(|| self.update_jump_target());
+        if jump_target.is_some() {
             self.profile.record(current_pc.saturating_add(1));
         }
         match &self.program.ops[self.pc] {
@@ -195,6 +204,7 @@ impl Machine {
                     &mut self.frame,
                     &mut self.register_values,
                     &mut self.register_metrics,
+                    &mut self.register_touched,
                     value,
                 )?;
                 let line = self.program.chunks[value as usize].line as usize;
@@ -238,7 +248,6 @@ impl Machine {
                 let slot = *slot;
                 let operation = *operation;
                 let line = *line as usize;
-                let jump_target = self.update_jump_target();
                 self.step_update(slot, operation, line)?;
                 self.pc = jump_target.unwrap_or(self.pc + 1);
             }
@@ -275,6 +284,7 @@ impl Machine {
                     &mut self.frame,
                     &mut self.register_values,
                     &mut self.register_metrics,
+                    &mut self.register_touched,
                     host,
                 )?;
                 self.pc += 1; // resume past the effect, never re-run it
@@ -295,6 +305,9 @@ impl Machine {
 
     fn step_jump_if_false(&mut self, condition: u32, target: u32) -> Result<(), EvalError> {
         let condition_line = self.program.chunks[condition as usize].line as usize;
+        if let Some(guard) = self.length_guards.get(self.pc).and_then(Option::as_ref) {
+            return self.step_length_guard(*guard, condition_line, target);
+        }
         let chunk = self
             .program
             .chunk(condition)
@@ -329,6 +342,7 @@ impl Machine {
             &mut self.frame,
             &mut self.register_values,
             &mut self.register_metrics,
+            &mut self.register_touched,
             condition,
         )?
         .0;
@@ -405,7 +419,7 @@ impl Machine {
         }
     }
 
-    fn update_jump_target(&self) -> Option<usize> {
+    pub(super) fn update_jump_target(&self) -> Option<usize> {
         if !matches!(self.program.ops.get(self.pc), Some(Op::Update { .. })) {
             return None;
         }

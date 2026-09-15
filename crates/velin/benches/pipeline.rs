@@ -184,6 +184,8 @@ criterion_group!(
     pipeline_p4::bench_host_roundtrips,
     pipeline_p4::bench_artifact_pipeline,
     pipeline_p4::bench_machine_restart,
+    pipeline_p4::bench_pure_module_invocation,
+    pipeline_p4::bench_profile_overhead,
     pipeline_p4::bench_execution_image,
     pipeline_p4::bench_real_workloads,
     pipeline_p4::bench_vm_additional_shapes

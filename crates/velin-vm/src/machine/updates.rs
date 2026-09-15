@@ -309,6 +309,7 @@ impl Machine {
                     &mut self.frame,
                     &mut self.register_values,
                     &mut self.register_metrics,
+                    &mut self.register_touched,
                     rhs,
                 )?;
                 self.update_add(slot, rhs, line)
@@ -321,6 +322,7 @@ impl Machine {
                     &mut self.frame,
                     &mut self.register_values,
                     &mut self.register_metrics,
+                    &mut self.register_touched,
                     value,
                 )?;
                 self.update_push(slot, value, metrics, line)
@@ -332,6 +334,7 @@ impl Machine {
                     &mut self.frame,
                     &mut self.register_values,
                     &mut self.register_metrics,
+                    &mut self.register_touched,
                     key,
                 )?;
                 let (value, metrics) = eval_chunk_for(
@@ -340,6 +343,7 @@ impl Machine {
                     &mut self.frame,
                     &mut self.register_values,
                     &mut self.register_metrics,
+                    &mut self.register_touched,
                     value,
                 )?;
                 self.update_put(slot, key, value, metrics, line)
@@ -351,6 +355,7 @@ impl Machine {
                     &mut self.frame,
                     &mut self.register_values,
                     &mut self.register_metrics,
+                    &mut self.register_touched,
                     key,
                 )?;
                 self.update_remove(slot, key, line)

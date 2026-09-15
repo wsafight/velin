@@ -167,3 +167,54 @@ fn preserves_list_and_record_values() {
         ]))))
     );
 }
+
+#[test]
+fn reusable_invoker_supports_single_inputs_and_batch_calls() {
+    let module = PureModule::compile(
+        "invoker.velin",
+        "perform return(value + 1)\n",
+        inputs([("value", Type::Integer)]),
+    )
+    .unwrap();
+    let mut invoker = module.invoker().unwrap();
+    assert!(!invoker.machine().profile_enabled());
+    assert_eq!(invoker.invoke_one(Value::Integer(4)), Ok(Value::Integer(5)));
+    assert_eq!(invoker.invoke_one(Value::Integer(4)), Ok(Value::Integer(5)));
+    let batch = invoker
+        .invoke_batch([
+            BTreeMap::from([("value".into(), Value::Integer(1))]),
+            BTreeMap::from([("value".into(), Value::Integer(2))]),
+        ])
+        .unwrap();
+    assert_eq!(batch, vec![Value::Integer(2), Value::Integer(3)]);
+}
+
+#[test]
+fn single_input_fast_path_rejects_the_wrong_module_arity() {
+    let module = PureModule::compile(
+        "two-inputs.velin",
+        "perform return(left + right)\n",
+        inputs([("left", Type::Integer), ("right", Type::Integer)]),
+    )
+    .unwrap();
+    let mut invoker = module.invoker().unwrap();
+    assert_eq!(
+        invoker.invoke_one(Value::Integer(1)),
+        Err(PureModuleError::InvalidInput(
+            "invoke_one requires exactly one declared input".into(),
+        ))
+    );
+}
+
+#[test]
+fn length_guard_fast_path_preserves_loop_results() {
+    let module = PureModule::compile(
+        "sum.velin",
+        "set total = 0\nset index = 0\nwhile index < len(values):\n    set total = total + get(values, index)\n    set index = index + 1\nperform return(total)\n",
+        inputs([("values", Type::List)]),
+    )
+    .unwrap();
+    let mut invoker = module.invoker().unwrap();
+    let values = Value::List(Arc::new((0..256).map(Value::Integer).collect()));
+    assert_eq!(invoker.invoke_one(values), Ok(Value::Integer(32_640)));
+}
