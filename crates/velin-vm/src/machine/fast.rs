@@ -1,5 +1,5 @@
 use super::support::eval_chunk_for;
-use super::{EvalError, FastYield, MAX_IMMEDIATE_STEPS, Machine, Op, Yield};
+use super::{EvalError, FastYield, Machine, Op, Yield};
 
 impl Machine {
     /// Runs until completion or a selected single-argument host operation.
@@ -24,16 +24,13 @@ impl Machine {
         if let Some(error) = &self.pending_batch_error {
             return Err(error.clone());
         }
-        let mut steps = 0;
+        let mut immediate_fuel = 0;
         while !self.finished {
             let fused_jump_target = self.update_jump_target();
-            steps += if fused_jump_target.is_some() { 2 } else { 1 };
-            if steps > MAX_IMMEDIATE_STEPS {
-                return Err(EvalError::new(
-                    self.current_line(),
-                    "possible infinite loop: too many steps without yielding",
-                ));
-            }
+            self.consume_fuel(
+                if fused_jump_target.is_some() { 2 } else { 1 },
+                &mut immediate_fuel,
+            )?;
             if self.pc >= self.program.ops.len() {
                 self.finished = true;
                 break;
@@ -66,7 +63,7 @@ impl Machine {
         let line = host.line as usize;
         let chunk = host.args[0];
         self.profile.record(self.pc);
-        let (value, _) = eval_chunk_for(
+        let (value, metrics) = eval_chunk_for(
             &self.program,
             &self.metadata,
             &mut self.frame,
@@ -75,6 +72,17 @@ impl Machine {
             &mut self.register_touched,
             chunk,
         )?;
+        if metrics.footprint.values > self.policy.max_value_values
+            || metrics.footprint.text_bytes > self.policy.max_value_text_bytes
+            || metrics.footprint.values > self.policy.max_host_payload_values
+            || metrics.footprint.text_bytes > self.policy.max_host_payload_text_bytes
+        {
+            return Err(EvalError::new(
+                line,
+                "host payload value exceeds the execution policy",
+            ));
+        }
+        self.record_host_effect()?;
         self.pc += 1;
         self.pending_host = Some(super::PendingHost { bind, line });
         Ok(Some(FastYield::HostOne { host_id, value }))

@@ -111,7 +111,7 @@ while n > 0:
     set n = n - 1
 ```
 
-VM 在两次宿主让出之间最多立即执行 10,000 条指令，因此不含 `perform` 的循环不能无限占用调用线程。
+默认 VM 策略允许每次执行调用最多 10,000 个立即 fuel 单位，因此不含 `perform` 的循环不能无限占用调用线程。
 
 ## 标签与跳转
 
@@ -174,7 +174,7 @@ cargo run -p velin-cli -- check examples/adventure.velin
 - **把 `say` 当关键字。** 要写 `perform say(...)`。单独的 `say(...)` 不是语句。
 - **原地改列表。** `push(items, "key")` 若没有 `set items = ...`，看起来不会有变化。
 - **`if 1:`。** 条件必须是布尔。写成 `if choice == 1:`。
-- **没有 `perform` 的紧循环。** VM 会在 10,000 条立即指令后停止。
+- **没有 `perform` 的紧循环。** VM 会在立即 fuel 上限（默认 10,000）后停止。
 - **只在一个分支里赋值却在外面读取。** 确定赋值会报。
 
 源码、值和 VM 的预算列在[资源预算](LIMITS.zh-CN.md)。

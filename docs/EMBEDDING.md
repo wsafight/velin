@@ -13,7 +13,7 @@ While working from this workspace, use a path dependency:
 velin = { path = "../velin/crates/velin" }
 ```
 
-The project is in its pre-stable `0.x` line and does not currently promise backward compatibility for its Rust API or serialized program format.
+The project remains pre-1.0. The `velin` facade, lower-level crates, artifacts, and C ABI have distinct guarantees in the [compatibility policy](COMPATIBILITY.md).
 
 ## Compile and check
 
@@ -53,9 +53,9 @@ let result = module.invoke(BTreeMap::from([("input".to_owned(), Value::Integer(2
 assert_eq!(result, Value::Integer(42));
 ```
 
-`PureModule::invoke` reports missing or unknown inputs, input type mismatches, explicit failures, a missing return, and VM execution errors through `PureModuleError`. It does not expose a persistent machine or a configurable fuel value; the VM's bounded immediate-step budget applies to each call.
+`PureModule::invoke` reports missing or unknown inputs, input type mismatches, explicit failures, a missing return, fuel exhaustion, cancellation, and VM execution errors through `PureModuleError`. Use `PureModule::invoke_with_policy` or `PureModule::invoker_with_policy` when the module needs a non-default `ExecutionPolicy`; the reusable invoker restarts its cumulative budget for each invocation.
 
-For most surface-language hosts, prefer `ScriptRunner`: it validates bytecode, installs defaults, resolves host IDs to names, enforces a cumulative host-effect budget, and can apply the same `HostSchema` at runtime. Use `Machine` directly when an embedder needs lower-level control.
+For most surface-language hosts, prefer `ScriptRunner`: it validates bytecode, installs defaults, resolves host IDs to names, applies the shared `ExecutionPolicy`, and can apply the same `HostSchema` at runtime. Use `ScriptRunner::configured_with_policy` for explicit fuel, cancellation, value, and host budgets. Use `Machine` directly when an embedder needs lower-level control.
 
 For consecutive commands without a return value, use `ScriptRunner::run_effect_batch` to collect events before handing them to the host. `HostEventQueue` lives in the host driver and applies event-count, value-count, and text-byte backpressure; a bound command remains a natural barrier handled through `run` / `resume`.
 

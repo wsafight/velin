@@ -1,7 +1,6 @@
 use super::{
-    DataFootprint, DataMetrics, EvalError, ExecutionMetadata, FrameAccess, FrameState, HostOp,
-    MAX_DATA_DEPTH, MAX_DATA_TEXT_BYTES, MAX_DATA_VALUES, MAX_HOST_PAYLOAD_TEXT_BYTES,
-    MAX_HOST_PAYLOAD_VALUES, Program, Value, eval_validated_chunk,
+    DataFootprint, DataMetrics, EvalError, ExecutionMetadata, ExecutionPolicy, FrameAccess,
+    FrameState, HostOp, MAX_DATA_DEPTH, Program, Value, eval_validated_chunk,
 };
 
 #[inline]
@@ -56,6 +55,7 @@ pub(super) fn eval_chunk_for(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn eval_host_args(
     program: &Program,
     metadata: &ExecutionMetadata,
@@ -64,6 +64,7 @@ pub(super) fn eval_host_args(
     register_metrics: &mut Vec<Option<DataMetrics>>,
     register_touched: &mut Vec<usize>,
     host: &HostOp,
+    policy: &ExecutionPolicy,
 ) -> Result<Vec<Value>, EvalError> {
     let line = host.line as usize;
     let mut values = Vec::with_capacity(host.args.len());
@@ -78,11 +79,19 @@ pub(super) fn eval_host_args(
             register_touched,
             chunk,
         )?;
+        if metrics.footprint.values > policy.max_value_values
+            || metrics.footprint.text_bytes > policy.max_value_text_bytes
+        {
+            return Err(EvalError::new(
+                line,
+                "host payload value exceeds the execution policy",
+            ));
+        }
         payload = checked_total(
             payload,
             metrics.footprint,
-            MAX_HOST_PAYLOAD_VALUES,
-            MAX_HOST_PAYLOAD_TEXT_BYTES,
+            policy.max_host_payload_values,
+            policy.max_host_payload_text_bytes,
             "host payload",
         )
         .map_err(|error| EvalError::new(line, error))?;
@@ -123,6 +132,7 @@ pub(super) fn updated_collection_depth(
     Ok(current.max_depth.max(added_depth))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn adjusted_footprint(
     current: DataFootprint,
     removed: DataFootprint,
@@ -130,13 +140,15 @@ pub(super) fn adjusted_footprint(
     removed_key_bytes: usize,
     added_key_bytes: usize,
     line: usize,
+    max_values: usize,
+    max_text_bytes: usize,
 ) -> Result<DataFootprint, EvalError> {
     let values = current
         .values
         .checked_sub(removed.values)
         .and_then(|values| values.checked_add(added.values))
         .ok_or_else(|| EvalError::new(line, "data value count overflow"))?;
-    if values > MAX_DATA_VALUES {
+    if values > max_values {
         return Err(EvalError::new(
             line,
             "data exceeds 4096 values or 16 nesting levels",
@@ -155,7 +167,7 @@ pub(super) fn adjusted_footprint(
         .checked_sub(removed_text)
         .and_then(|bytes| bytes.checked_add(added_text))
         .ok_or_else(|| EvalError::new(line, "data text size overflow"))?;
-    if text_bytes > MAX_DATA_TEXT_BYTES {
+    if text_bytes > max_text_bytes {
         return Err(EvalError::new(line, "data text exceeds 1 MiB"));
     }
     Ok(DataFootprint { values, text_bytes })

@@ -55,7 +55,7 @@ The checker never inserts runtime traps and never alters program counters. A scr
 
 - Whether a host command name is implemented.
 - Argument count and types of a host command (names are opaque).
-- Infinite loops that `perform` (those yield; the 10,000-step budget stops loops that never yield).
+- Infinite loops that `perform` (those yield; the immediate fuel budget stops loops that never yield).
 - Values that become illegal only after the host resumes.
 
 Those belong to the [host protocol](HOST.md) and [resource limits](LIMITS.md).

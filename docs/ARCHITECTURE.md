@@ -213,7 +213,11 @@ Static checking never changes bytecode or runtime behavior. The CLI and other ho
 
 `Machine` holds an immutable `Program` through `Arc` and owns an independent variable frame, program counter, suspended effect, completion flag, and reusable register value/metric files. Construction is fallible; only a validated program can enter runtime state. Frame slots retain their measured data footprints, and expression/built-in evaluation returns metrics with its value, avoiding a second recursive resource scan during assignment or host-payload accounting.
 
-Each `run` or `resume` call executes at most `MAX_IMMEDIATE_STEPS` consecutive control-flow operations. Reaching that budget returns a possible-infinite-loop error so a script with no host yield point cannot occupy its caller forever.
+`ExecutionPolicy` is shared by `Machine`, `ScriptRunner`, `MachineInvoker`, and `PureModule`. The default policy allows 10,000,000 cumulative fuel, 10,000 immediate fuel units per `run` / `resume` / batch call, 1,000 host effects, a call depth of 64, and the published value, machine, payload, and queue data budgets. A progress callback can report fuel and request cooperative cancellation; wall-clock deadlines remain host policy.
+
+Immediate fuel is reset at the start of every execution call, while cumulative fuel and yielded host-effect count continue across `run` / `resume`. `Machine::clone` copies the policy, cumulative counters, pending host state, and cancellation flag, so a snapshot preserves the exact budget state. `restart` starts a fresh budget lifetime and clears fuel, host effects, and cancellation.
+
+Each execution call remains bounded even when no host effect is reached. Reaching the immediate fuel budget returns a possible-infinite-loop/fuel error so a script with no host yield point cannot occupy its caller forever.
 
 Current built-in limits:
 
@@ -248,7 +252,7 @@ The VS Code extension registers `.velin` files, provides TextMate highlighting, 
 
 ## 11. Stability rules
 
-The project is in its pre-stable `0.x` line and currently makes no backward-compatibility promise for source syntax, serialization formats, or Rust APIs. Clear boundaries and correctness take priority. Once stabilized, these rules constrain evolution:
+Velin remains in its pre-1.0 line, but source, Rust facade, artifact, and C ABI boundaries now have separate contracts in the [compatibility policy](COMPATIBILITY.md). The following architectural rules constrain all of them:
 
 - `velin-eval` is the reference value semantics; VM changes must pass differential tests.
 - New external behavior must be modeled as a host effect, never direct VM I/O.
@@ -267,4 +271,4 @@ cargo clippy --all-targets --workspace -- -D warnings
 cargo build --workspace --target wasm32-unknown-unknown
 ```
 
-Benchmarks are used only to detect relative regressions, not as a pre-stable compatibility promise.
+Benchmarks are used to detect relative regressions; compatibility guarantees are defined separately in [Compatibility Policy](COMPATIBILITY.md).

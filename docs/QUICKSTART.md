@@ -84,7 +84,7 @@ Copy more patterns from [Examples](EXAMPLES.md). Keep the [syntax cheat sheet](C
     -> Finished
 ```
 
-The VM suspends on `perform`. After the host acts, it calls `resume`. A loop with no `perform` stops after 10,000 immediate steps.
+The VM suspends on `perform`. After the host acts, it calls `resume`. A loop with no `perform` stops after 10,000 immediate fuel units by default.
 
 ## Where to go next
 

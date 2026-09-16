@@ -1,5 +1,6 @@
 //! Bounded host-owned event queue.
 
+use crate::ExecutionPolicy;
 use std::collections::VecDeque;
 use velin_syntax::{DataFootprint, Value};
 
@@ -26,6 +27,18 @@ impl Default for HostEventQueueLimits {
             capacity: 1_024,
             max_values: 1_000_000,
             max_text_bytes: 64 * 1024 * 1024,
+        }
+    }
+}
+
+impl HostEventQueueLimits {
+    /// Derives host queue budgets from a VM execution policy.
+    #[must_use]
+    pub fn from_policy(policy: &ExecutionPolicy) -> Self {
+        Self {
+            capacity: policy.max_host_queue_events,
+            max_values: policy.max_host_queue_values,
+            max_text_bytes: policy.max_host_queue_text_bytes,
         }
     }
 }
@@ -77,6 +90,12 @@ impl HostEventQueue {
             values: 0,
             text_bytes: 0,
         }
+    }
+
+    /// Creates a host queue using the queue budgets from an execution policy.
+    #[must_use]
+    pub fn from_policy(policy: &ExecutionPolicy) -> Self {
+        Self::new(HostEventQueueLimits::from_policy(policy))
     }
 
     #[must_use]

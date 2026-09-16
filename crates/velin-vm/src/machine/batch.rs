@@ -1,5 +1,5 @@
 use super::support::eval_host_args;
-use super::{EvalError, HostEffect, MAX_IMMEDIATE_STEPS, Machine, Op};
+use super::{EvalError, HostEffect, Machine, Op};
 
 impl Machine {
     /// Runs side-effect-only host commands into the machine's reusable batch
@@ -33,15 +33,13 @@ impl Machine {
             return Err(error.clone());
         }
         self.effect_buffer.clear();
-        self.effect_buffer.reserve(limit.min(MAX_IMMEDIATE_STEPS));
-        let mut steps = 0;
+        self.effect_buffer.reserve(
+            limit.min(usize::try_from(self.policy.max_immediate_fuel).unwrap_or(usize::MAX)),
+        );
+        let mut immediate_fuel = 0;
         while !self.finished && self.effect_buffer.len() < limit {
-            steps += self.step_cost();
-            if steps > MAX_IMMEDIATE_STEPS {
-                return self.defer_batch_error(EvalError::new(
-                    self.current_line(),
-                    "possible infinite loop: too many steps without yielding",
-                ));
+            if let Err(error) = self.consume_fuel(self.step_cost() as u64, &mut immediate_fuel) {
+                return self.defer_batch_error(error);
             }
             if self.pc >= self.program.ops.len() {
                 self.finished = true;
@@ -70,10 +68,14 @@ impl Machine {
                 &mut self.register_metrics,
                 &mut self.register_touched,
                 host,
+                &self.policy,
             ) {
                 Ok(values) => values,
                 Err(error) => return self.defer_batch_error(error),
             };
+            if let Err(error) = self.record_host_effect() {
+                return self.defer_batch_error(error);
+            }
             self.pc += 1;
             self.effect_buffer.push(HostEffect { host_id, values });
         }

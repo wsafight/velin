@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use velin::{PureModule, PureModuleError, Type, Value};
+use velin::{ExecutionPolicy, PureModule, PureModuleError, Type, Value};
 
 fn inputs(entries: impl IntoIterator<Item = (&'static str, Type)>) -> BTreeMap<String, Type> {
     entries
@@ -20,6 +20,23 @@ fn invokes_with_fresh_state_and_returns_value() {
     let call = |value| module.invoke(BTreeMap::from([("input".into(), Value::Integer(value))]));
     assert_eq!(call(41), Ok(Value::Integer(42)));
     assert_eq!(call(41), Ok(Value::Integer(42)));
+}
+
+#[test]
+fn explicit_policy_applies_to_pure_invocations() {
+    let module = PureModule::compile(
+        "policy.velin",
+        "perform return(input + 1)\n",
+        inputs([("input", Type::Integer)]),
+    )
+    .unwrap();
+    assert_eq!(
+        module.invoke_with_policy(
+            BTreeMap::from([("input".into(), Value::Integer(1))]),
+            ExecutionPolicy::default().with_max_fuel(0),
+        ),
+        Err(PureModuleError::FuelExhausted)
+    );
 }
 
 #[test]

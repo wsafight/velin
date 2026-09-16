@@ -6,6 +6,15 @@ change source and Rust APIs between minor releases.
 
 ## Unreleased
 
+### Added
+
+- Unified `ExecutionPolicy` budgets for VM fuel, host effects, call depth, runtime data, host queues, progress callbacks, and cooperative cancellation.
+- Layered source, Rust API, artifact, and C ABI compatibility policies with versioned source/artifact fixtures.
+
+### Changed
+
+- Machine snapshots preserve cumulative fuel, host-effect counters, policy, and cancellation state; machine restart begins a fresh budget lifetime.
+
 ## 0.4.0 - 2026-09-15
 
 ### Added

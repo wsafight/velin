@@ -1,0 +1,4 @@
+default hp = 3
+perform emit(hp)
+set hp = hp + 2
+perform emit(hp)

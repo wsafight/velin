@@ -96,6 +96,8 @@ let diagnostics = check_script_with_host_schema("rules.velin", &script, &schema)
 
 Use `.allow_unknown(true)` when a tool intentionally models only part of a host vocabulary. `ScriptRunner::configured` accepts the same schema for runtime argument and reply validation. A reply type error can be corrected and retried; an invalid call or exhausted effect budget is terminal for that runner.
 
+`PureModule` uses a strict private schema with two terminating commands: `return(value)` produces the module result and `fail(message)` produces a controlled failure. No other `perform` command is accepted, and modules containing `random` or `chance` are rejected at compile time. Each `PureModule::invoke` starts from a fresh initial frame, so values and execution state never carry across calls.
+
 ## CLI and Playground conventions
 
 The line-oriented reference host implements two names so examples can run without a custom embedder:

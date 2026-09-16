@@ -34,6 +34,62 @@ fn initializes_defaults_resolves_names_and_counts_effects() {
 }
 
 #[test]
+fn configured_policy_maps_vm_fuel_and_cancellation_errors() {
+    let script = compile("runner.velin", "perform first()\nperform second()\n").unwrap();
+    let mut runner = ScriptRunner::configured_with_policy(
+        &script,
+        0,
+        ExecutionPolicy::default().with_max_fuel(1),
+        None,
+    )
+    .unwrap();
+    assert!(matches!(runner.run().unwrap(), ScriptYield::Host { .. }));
+    assert!(matches!(
+        runner.resume(None).unwrap_err(),
+        ScriptRunError::FuelExhausted {
+            immediate: false,
+            limit: 1
+        }
+    ));
+
+    let looping = compile("runner.velin", "while true:\n    set x = 1\n").unwrap();
+    let mut cancelling = ScriptRunner::configured_with_policy(
+        &looping,
+        0,
+        ExecutionPolicy::default().with_progress_callback(1, |_| false),
+        None,
+    )
+    .unwrap();
+    assert!(matches!(cancelling.run(), Err(ScriptRunError::Cancelled)));
+}
+
+#[test]
+fn cancellation_before_resume_preserves_the_pending_reply() {
+    let script = compile("runner.velin", "answer = perform ask()\n").unwrap();
+    let schema =
+        HostSchema::new().command("ask", HostSignature::exact(Vec::new(), Some(Type::Integer)));
+    let mut runner =
+        ScriptRunner::configured_with_policy(&script, 0, ExecutionPolicy::default(), Some(&schema))
+            .unwrap();
+    runner.run().unwrap();
+    runner.cancel();
+    assert!(matches!(
+        runner.resume(Some(Value::Integer(7))),
+        Err(ScriptRunError::Cancelled)
+    ));
+    assert!(runner.machine().variable("answer").is_none());
+    runner.clear_cancellation();
+    assert_eq!(
+        runner.resume(Some(Value::Integer(7))).unwrap(),
+        ScriptYield::Finished
+    );
+    assert_eq!(
+        runner.machine().variable("answer"),
+        Some(&Value::Integer(7))
+    );
+}
+
+#[test]
 fn enforces_host_arguments_and_allows_reply_retry() {
     let emit = compile("runner.velin", "perform emit(1)\n").unwrap();
     let schema = HostSchema::new().command("emit", HostSignature::exact(vec![Type::String], None));

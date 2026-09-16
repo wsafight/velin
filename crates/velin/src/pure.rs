@@ -8,8 +8,8 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    CompiledScript, Diagnostic, EvalError, FastYield, HostSchema, HostSignature, Machine,
-    MachineInvoker, Type, Value, compile,
+    CompiledScript, Diagnostic, EvalError, EvalErrorKind, ExecutionPolicy, FastYield, HostSchema,
+    HostSignature, Machine, MachineInvoker, Type, Value, compile,
 };
 use velin_bytecode::ExprOp;
 
@@ -56,6 +56,10 @@ pub enum PureModuleError {
     InvalidReturn(String),
     /// The module explicitly stopped with `fail(message)`.
     ExplicitFailure(String),
+    /// The VM exhausted its cumulative or immediate fuel budget.
+    FuelExhausted,
+    /// The host cooperatively cancelled execution.
+    Cancelled,
     /// The underlying VM rejected an expression or execution step.
     Execution(EvalError),
 }
@@ -88,6 +92,8 @@ impl std::fmt::Display for PureModuleError {
             ),
             Self::MissingReturn => formatter.write_str("pure module finished without return"),
             Self::ExplicitFailure(message) => write!(formatter, "pure module failed: {message}"),
+            Self::FuelExhausted => formatter.write_str("pure module execution fuel exhausted"),
+            Self::Cancelled => formatter.write_str("pure module execution cancelled by host"),
             Self::Execution(error) => write!(formatter, "execution error: {error}"),
         }
     }
@@ -105,7 +111,9 @@ impl std::error::Error for PureModuleError {
             | Self::InputType { .. }
             | Self::MissingReturn
             | Self::InvalidReturn(_)
-            | Self::ExplicitFailure(_) => None,
+            | Self::ExplicitFailure(_)
+            | Self::FuelExhausted
+            | Self::Cancelled => None,
         }
     }
 }
@@ -207,6 +215,20 @@ impl PureModule {
         invoker.invoke(values)
     }
 
+    /// Invokes the module with an explicit VM execution policy.
+    ///
+    /// # Errors
+    /// Returns the same input, protocol, execution, and explicit module
+    /// failures as [`PureModule::invoke`].
+    pub fn invoke_with_policy(
+        &self,
+        values: BTreeMap<String, Value>,
+        policy: ExecutionPolicy,
+    ) -> Result<Value, PureModuleError> {
+        let mut invoker = self.invoker_with_policy(policy)?;
+        invoker.invoke(values)
+    }
+
     /// Creates a reusable pure-module invocation session.
     ///
     /// The session owns one mutable machine and can be used by one concurrent
@@ -215,13 +237,26 @@ impl PureModule {
     /// # Errors
     /// Returns an execution error if the compiled initial frame is invalid.
     pub fn invoker(&self) -> Result<PureModuleInvoker<'_>, PureModuleError> {
+        self.invoker_with_policy(ExecutionPolicy::default())
+    }
+
+    /// Creates a reusable invocation session with an explicit VM policy.
+    ///
+    /// # Errors
+    /// Returns an error if the compiled initial frame cannot satisfy the
+    /// supplied policy.
+    pub fn invoker_with_policy(
+        &self,
+        policy: ExecutionPolicy,
+    ) -> Result<PureModuleInvoker<'_>, PureModuleError> {
         let initial = self.script.initial_frame().ok_or_else(|| {
             PureModuleError::Execution(EvalError::new(0, "compiled initial frame is invalid"))
         })?;
-        let machine = MachineInvoker::new(
+        let machine = MachineInvoker::new_with_policy(
             self.script.validated_program(),
             crate::DEFAULT_RNG_SEED,
             initial,
+            policy,
         )
         .ok_or_else(|| {
             PureModuleError::Execution(EvalError::new(0, "compiled initial frame is invalid"))
@@ -268,7 +303,7 @@ impl PureModule {
         }
         match machine
             .run_with_single_argument_hosts(&fast_hosts[..fast_host_count])
-            .map_err(PureModuleError::Execution)?
+            .map_err(map_eval_error)?
         {
             FastYield::Finished => Err(PureModuleError::MissingReturn),
             FastYield::HostOne { host_id, value } => self.finish_single_host(host_id, value),
@@ -384,6 +419,16 @@ impl PureModuleInvoker<'_> {
     #[must_use]
     pub const fn machine(&self) -> &Machine {
         self.machine.machine()
+    }
+}
+
+fn map_eval_error(error: EvalError) -> PureModuleError {
+    match error.kind() {
+        EvalErrorKind::FuelExhausted => PureModuleError::FuelExhausted,
+        EvalErrorKind::Cancelled => PureModuleError::Cancelled,
+        EvalErrorKind::Runtime | EvalErrorKind::HostEffectsExceeded => {
+            PureModuleError::Execution(error)
+        }
     }
 }
 

@@ -12,18 +12,17 @@ use self::support::{cache_metrics, checked_total};
 use crate::chunk::{FrameAccess, eval_validated_chunk};
 use std::sync::Arc;
 use velin_bytecode::{
-    ExecutionImage, ExecutionMetadata, HostOp, InitialFrame, Op, Program, ProgramValidationError,
-    UpdateOp, ValidatedProgram,
+    ExecutionMetadata, HostOp, InitialFrame, Op, Program, UpdateOp, ValidatedProgram,
 };
 use velin_eval::EvalError;
-use velin_syntax::{
-    BinaryOp, DataFootprint, DataMetrics, MAX_DATA_DEPTH, MAX_DATA_TEXT_BYTES, MAX_DATA_VALUES,
-    Value,
-};
+use velin_syntax::{BinaryOp, DataFootprint, DataMetrics, MAX_DATA_DEPTH, Value};
 
+mod budget;
 mod invoker;
+mod policy;
 mod types;
 pub use invoker::MachineInvoker;
+pub use policy::{DEFAULT_MAX_FUEL, ExecutionPolicy, ExecutionProgress, ProgressCallback};
 pub use types::{ExecutionProfile, FastYield, HostEffect, SetVariableError, Yield};
 
 /// The maximum number of control-flow ops executed between two yields.
@@ -54,6 +53,7 @@ pub const DEFAULT_RNG_SEED: i64 = 0;
 pub struct Machine {
     program: Arc<Program>,
     metadata: Arc<ExecutionMetadata>,
+    policy: ExecutionPolicy,
     frame: FrameState,
     frame_total: DataFootprint,
     register_values: Vec<Option<Value>>,
@@ -69,6 +69,10 @@ pub struct Machine {
     /// The error is reported after those effects have been drained.
     pending_batch_error: Option<EvalError>,
     finished: bool,
+    fuel_used: u64,
+    host_effects: usize,
+    call_depth: usize,
+    cancelled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -101,118 +105,12 @@ struct LengthGuard {
 }
 
 impl Machine {
-    /// Creates a machine for a validated `program` with an empty variable frame.
-    ///
-    /// # Errors
-    /// Returns an error when serialized or manually assembled bytecode is
-    /// malformed or exceeds a program budget.
-    pub fn new(program: impl Into<Arc<Program>>) -> Result<Self, ProgramValidationError> {
-        Self::with_seed(program, DEFAULT_RNG_SEED)
-    }
-
-    /// Creates a machine without allocating or recording an execution
-    /// profile.
-    ///
-    /// # Errors
-    /// Returns an error when `program` fails structural validation.
-    pub fn new_without_profile(
-        program: impl Into<Arc<Program>>,
-    ) -> Result<Self, ProgramValidationError> {
-        Self::with_seed_without_profile(program, DEFAULT_RNG_SEED)
-    }
-
-    /// Creates a machine from a name-free runtime execution image.
-    ///
-    /// # Errors
-    /// Returns an error when the execution image fails structural validation.
-    pub fn new_execution_image(image: ExecutionImage) -> Result<Self, ProgramValidationError> {
-        Self::new(image.into_program())
-    }
-
-    /// Creates a machine and initializes its threaded RNG slot with `seed`.
-    ///
-    /// # Errors
-    /// Returns an error when `program` fails structural validation.
-    pub fn with_seed(
-        program: impl Into<Arc<Program>>,
-        seed: i64,
-    ) -> Result<Self, ProgramValidationError> {
-        let program = ValidatedProgram::new(program)?;
-        Ok(Self::from_validated_with_seed(&program, seed))
-    }
-
-    /// Creates a machine without allocating or recording an execution profile.
-    ///
-    /// # Errors
-    /// Returns an error when `program` fails structural validation.
-    pub fn with_seed_without_profile(
-        program: impl Into<Arc<Program>>,
-        seed: i64,
-    ) -> Result<Self, ProgramValidationError> {
-        let program = ValidatedProgram::new(program)?;
-        Ok(Self::from_validated_with_seed_without_profile(
-            &program, seed,
-        ))
-    }
-
-    /// Creates a machine from a program that has already passed validation.
-    #[must_use]
-    pub fn from_validated(program: &ValidatedProgram) -> Self {
-        Self::from_validated_with_seed(program, DEFAULT_RNG_SEED)
-    }
-
-    /// Creates a seeded machine without rescanning already validated bytecode.
-    #[must_use]
-    pub fn from_validated_with_seed(program: &ValidatedProgram, seed: i64) -> Self {
-        Self::initialize(
-            program.shared(),
-            program.shared_execution_metadata(),
-            seed,
-            true,
-        )
-    }
-
-    /// Creates a seeded machine without allocating or recording an execution
-    /// profile. This is intended for latency-sensitive production execution.
-    #[must_use]
-    pub fn from_validated_with_seed_without_profile(program: &ValidatedProgram, seed: i64) -> Self {
-        Self::initialize(
-            program.shared(),
-            program.shared_execution_metadata(),
-            seed,
-            false,
-        )
-    }
-
-    /// Creates a seeded machine by cloning a prevalidated initial frame.
-    ///
-    /// Returns `None` if the frame layout differs from the program or the
-    /// aggregate machine-state budget would be exceeded after seeding RNG.
-    #[must_use]
-    pub fn from_validated_with_seed_and_frame(
-        program: &ValidatedProgram,
-        seed: i64,
-        initial: &InitialFrame,
-    ) -> Option<Self> {
-        Self::from_validated_with_seed_and_frame_inner(program, seed, initial, true)
-    }
-
-    /// Creates a seeded machine from a prevalidated initial frame without
-    /// allocating or recording an execution profile.
-    #[must_use]
-    pub fn from_validated_with_seed_and_frame_without_profile(
-        program: &ValidatedProgram,
-        seed: i64,
-        initial: &InitialFrame,
-    ) -> Option<Self> {
-        Self::from_validated_with_seed_and_frame_inner(program, seed, initial, false)
-    }
-
     fn from_validated_with_seed_and_frame_inner(
         program: &ValidatedProgram,
         seed: i64,
         initial: &InitialFrame,
         profile_enabled: bool,
+        policy: ExecutionPolicy,
     ) -> Option<Self> {
         let metadata = program.shared_execution_metadata();
         let program = program.shared();
@@ -231,6 +129,12 @@ impl Machine {
             depths: initial.depths().to_vec(),
         };
         let mut frame_total = initial.total();
+        if frame.footprints.iter().any(|footprint| {
+            footprint.values > policy.max_value_values
+                || footprint.text_bytes > policy.max_value_text_bytes
+        }) {
+            return None;
+        }
         if let Some(slot) = program.slots.rng_state() {
             let index = slot as usize;
             let retained = DataFootprint {
@@ -251,8 +155,8 @@ impl Machine {
             frame_total = checked_total(
                 retained,
                 seed_metrics.footprint,
-                MAX_MACHINE_DATA_VALUES,
-                MAX_MACHINE_TEXT_BYTES,
+                policy.max_machine_values,
+                policy.max_machine_text_bytes,
                 "machine state",
             )
             .ok()?;
@@ -262,8 +166,8 @@ impl Machine {
             checked_total(
                 DataFootprint::default(),
                 frame_total,
-                MAX_MACHINE_DATA_VALUES,
-                MAX_MACHINE_TEXT_BYTES,
+                policy.max_machine_values,
+                policy.max_machine_text_bytes,
                 "machine state",
             )
             .ok()?;
@@ -271,6 +175,7 @@ impl Machine {
         Some(Self {
             program,
             metadata,
+            policy,
             frame,
             frame_total,
             register_values: Vec::new(),
@@ -283,6 +188,10 @@ impl Machine {
             pending_host: None,
             pending_batch_error: None,
             finished: false,
+            fuel_used: 0,
+            host_effects: 0,
+            call_depth: 1,
+            cancelled: false,
         })
     }
 
@@ -291,6 +200,7 @@ impl Machine {
         metadata: Arc<ExecutionMetadata>,
         seed: i64,
         profile_enabled: bool,
+        policy: ExecutionPolicy,
     ) -> Self {
         let width = program.slots.len();
         let profile = if profile_enabled {
@@ -314,6 +224,7 @@ impl Machine {
         Self {
             program,
             metadata,
+            policy,
             frame: FrameState {
                 values: frame,
                 footprints: frame_footprints,
@@ -330,6 +241,10 @@ impl Machine {
             pending_host: None,
             pending_batch_error: None,
             finished: false,
+            fuel_used: 0,
+            host_effects: 0,
+            call_depth: 1,
+            cancelled: false,
         }
     }
 

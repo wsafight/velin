@@ -61,6 +61,6 @@ Lists are zero-based. Collections are persistent: assign the result of `push` / 
 
 - Source: 1 MiB, 10,000 lines, 64 statement-block levels.
 - One expression: 64 KiB, 512 tokens, 32 parenthesis levels.
-- VM: 10,000 immediate steps between host yields.
+- VM: 10,000 immediate fuel units per execution call by default; configure `ExecutionPolicy` for other limits.
 
 Full tables live in [Resource limits](LIMITS.md).

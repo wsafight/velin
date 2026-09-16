@@ -1,7 +1,7 @@
 use super::support::{cache_metrics, checked_total, eval_chunk_for, eval_host_args};
 use super::{
-    BinaryOp, DataFootprint, DataMetrics, EvalError, InitialFrame, MAX_IMMEDIATE_STEPS,
-    MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES, Machine, Op, PendingHost, Value, Yield,
+    BinaryOp, DataFootprint, DataMetrics, EvalError, InitialFrame, Machine, Op, PendingHost, Value,
+    Yield,
 };
 use velin_bytecode::ExprOp;
 
@@ -35,15 +35,15 @@ impl Machine {
                 .text_bytes
                 .checked_sub(old.text_bytes)
                 .ok_or("machine state text size overflow")?;
-            if total.values > MAX_MACHINE_DATA_VALUES {
+            if total.values > self.policy.max_machine_values {
                 return Err("machine state exceeds 100,000 values");
             }
-            if total.text_bytes > MAX_MACHINE_TEXT_BYTES {
+            if total.text_bytes > self.policy.max_machine_text_bytes {
                 return Err("machine state text exceeds 16 MiB");
             }
-        } else if total.values > MAX_MACHINE_DATA_VALUES {
+        } else if total.values > self.policy.max_machine_values {
             return Err("machine state exceeds 100,000 values");
-        } else if total.text_bytes > MAX_MACHINE_TEXT_BYTES {
+        } else if total.text_bytes > self.policy.max_machine_text_bytes {
             return Err("machine state text exceeds 16 MiB");
         }
 
@@ -72,6 +72,10 @@ impl Machine {
         self.pending_host = None;
         self.pending_batch_error = None;
         self.finished = false;
+        self.fuel_used = 0;
+        self.host_effects = 0;
+        self.call_depth = 1;
+        self.cancelled = false;
         Ok(())
     }
 
@@ -119,7 +123,7 @@ impl Machine {
     ///
     /// # Errors
     /// Returns [`EvalError`] from any expression evaluation, or a synthetic
-    /// error if [`MAX_IMMEDIATE_STEPS`] is exceeded.
+    /// error if the immediate fuel budget is exceeded.
     pub fn run(&mut self) -> Result<Yield, EvalError> {
         if let Some(pending) = self.pending_host {
             return Err(EvalError::new(
@@ -130,16 +134,13 @@ impl Machine {
         if let Some(error) = &self.pending_batch_error {
             return Err(error.clone());
         }
-        let mut steps = 0;
+        let mut immediate_fuel = 0;
         while !self.finished {
             let fused_jump_target = self.update_jump_target();
-            steps += if fused_jump_target.is_some() { 2 } else { 1 };
-            if steps > MAX_IMMEDIATE_STEPS {
-                return Err(EvalError::new(
-                    self.current_line(),
-                    "possible infinite loop: too many steps without yielding",
-                ));
-            }
+            self.consume_fuel(
+                if fused_jump_target.is_some() { 2 } else { 1 },
+                &mut immediate_fuel,
+            )?;
             if self.pc >= self.program.ops.len() {
                 self.finished = true;
                 break;
@@ -159,6 +160,9 @@ impl Machine {
     pub fn resume(&mut self, value: Option<Value>) -> Result<Yield, EvalError> {
         if let Some(error) = &self.pending_batch_error {
             return Err(error.clone());
+        }
+        if self.cancelled {
+            return Err(EvalError::cancelled(self.current_line()));
         }
         let pending = self.pending_host.ok_or_else(|| {
             EvalError::new(
@@ -286,7 +290,9 @@ impl Machine {
                     &mut self.register_metrics,
                     &mut self.register_touched,
                     host,
+                    &self.policy,
                 )?;
+                self.record_host_effect()?;
                 self.pc += 1; // resume past the effect, never re-run it
                 self.pending_host = Some(PendingHost { bind, line });
                 return Ok(Some(Yield::Host { host_id, values }));
@@ -376,6 +382,12 @@ impl Machine {
         value: Value,
         metrics: DataMetrics,
     ) -> Result<(), &'static str> {
+        if metrics.footprint.values > self.policy.max_value_values {
+            return Err("value exceeds execution policy value budget");
+        }
+        if metrics.footprint.text_bytes > self.policy.max_value_text_bytes {
+            return Err("value exceeds execution policy text budget");
+        }
         let index = slot as usize;
         let frame = &mut self.frame;
         let old = frame.footprints[index];
@@ -392,8 +404,8 @@ impl Machine {
         let total = checked_total(
             retained,
             metrics.footprint,
-            MAX_MACHINE_DATA_VALUES,
-            MAX_MACHINE_TEXT_BYTES,
+            self.policy.max_machine_values,
+            self.policy.max_machine_text_bytes,
             "machine state",
         )?;
         frame.values[index] = Some(value);

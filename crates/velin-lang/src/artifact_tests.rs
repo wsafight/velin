@@ -18,6 +18,19 @@ fn artifact_round_trip_keeps_runtime_metadata() {
 }
 
 #[test]
+fn released_v4_artifact_fixture_remains_decodable() {
+    let bytes = include_bytes!("../../../fixtures/compatibility/0.4.0/artifact-v4.velinc");
+    let artifact = decode_artifact(bytes).unwrap();
+    assert!(artifact.source_name().ends_with("source.velin"));
+    assert_eq!(artifact.script().hosts, ["emit"]);
+    assert_eq!(
+        artifact.script().defaults.get("hp"),
+        Some(&Value::Integer(3))
+    );
+    assert_eq!(artifact.script().program.ops.len(), 4);
+}
+
+#[test]
 fn artifact_header_rejects_truncation_versions_and_length_mismatches() {
     let script = compile("test.velin", "set x = 1\n").unwrap();
     let bytes = encode_artifact("test.velin", &script).unwrap();

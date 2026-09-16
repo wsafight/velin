@@ -34,6 +34,16 @@ Every value passed into `set_variable` or `resume` is checked against the same p
 
 ## Bytecode and the VM
 
+The default `ExecutionPolicy` also applies runtime budgets across execution calls:
+
+| Limit | Default |
+| --- | --- |
+| Cumulative fuel per machine lifetime | 10,000,000 |
+| Immediate fuel per `run` / `resume` / batch call | 10,000 |
+| Host effects per machine lifetime | 1,000 |
+| VM call depth | 64 |
+| Host queue events / values / text | 1,024 / 1,000,000 / 64 MiB |
+
 | Limit | Value |
 | --- | --- |
 | Control-flow operations | 100,000 |
@@ -44,9 +54,11 @@ Every value passed into `set_variable` or `resume` is checked against the same p
 | Operations per expression chunk | 4,096 |
 | Registers per expression chunk | 1,024 |
 | Arguments per host instruction | 128 |
-| Immediate VM steps per `run` / `resume` | 10,000 |
+| Immediate VM steps per `run` / `resume` | 10,000 fuel units |
 
-A loop with no `perform` hits the immediate-step budget and returns an error instead of occupying the caller.
+A loop with no `perform` hits the immediate fuel budget and returns an error instead of occupying the caller.
+
+Immediate fuel resets for each execution call. Cumulative fuel and host-effect counts survive `run` / `resume` and are copied by `Machine::clone`; `restart` clears them. Hosts may configure all of these limits through `ExecutionPolicy`.
 
 ## Tooling caps
 

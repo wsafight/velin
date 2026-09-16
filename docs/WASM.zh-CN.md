@@ -33,7 +33,7 @@ const ran = JSON.parse(run(`perform say("hi")\n`, "[]"));
 
 `repliesJson` 是整数、布尔或字符串的 JSON 数组，例如 `[1]` 或 `["east"]`。畸形 JSON 或任意不支持的项会返回失败的 `RunResult`，且不会执行脚本。其他命令名会写进 `output`，并无返回值地恢复，与 CLI 对未知命令的行为一致。
 
-执行失败时（溢出、缺下标、回复用尽、步数预算）`RunResult` 还会带 `error`。
+执行失败时（溢出、缺下标、回复用尽、fuel 预算或取消）`RunResult` 还会带 `error`。
 
 runtime-only 的 `RuntimeMachine::run_batch(limit)` 可一次返回连续的无返回值 Host 事件：
 

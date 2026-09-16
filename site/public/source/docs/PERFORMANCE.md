@@ -2,6 +2,8 @@
 
 [简体中文](PERFORMANCE.zh-CN.md)
 
+For a dated local measurement snapshot, see the [current performance baseline](PERFORMANCE-BASELINE.md).
+
 Velin compiles source code to bytecode and executes that bytecode in a VM. Source is parsed only during compilation, and the resulting `Program` can be reused to create multiple `Machine` instances or run the same script repeatedly. A program has two instruction layers:
 
 - `Op` handles control flow such as assignment, jumps, host calls, and termination.
@@ -168,7 +170,7 @@ A constant boolean condition can become a direct jump, and an unconditional jump
 
 ### Loop tails execute as one VM step
 
-The VM recognizes an `Update` immediately followed by an unconditional `Jump`, the common tail emitted for a counter loop. It performs the update and chooses the jump target in one dispatch. The step budget charges both original instructions, so loop bounds and infinite-loop diagnostics remain unchanged. This is a runtime dispatch optimization only; the public bytecode shape and validation rules stay the same.
+The VM recognizes an `Update` immediately followed by an unconditional `Jump`, the common tail emitted for a counter loop. It performs the update and chooses the jump target in one dispatch. Immediate fuel charges both original instructions, so loop bounds and infinite-loop diagnostics remain unchanged. This is a runtime dispatch optimization only; the public bytecode shape and validation rules stay the same.
 
 ## Bytecode validation and execution preparation
 

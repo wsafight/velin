@@ -84,7 +84,7 @@ label start:
     -> Finished
 ```
 
-VM 在 `perform` 处挂起。宿主做完动作后调用 `resume`。没有 `perform` 的循环会在 10,000 条立即指令后停止。
+VM 在 `perform` 处挂起。宿主做完动作后调用 `resume`。没有 `perform` 的循环默认会在 10,000 个立即 fuel 单位后停止。
 
 ## 接下来读什么
 

@@ -57,6 +57,17 @@ fn queue_defaults_and_error_display_cover_every_variant() {
         }),
         Err(HostEventQueueError::TextBudget)
     );
+
+    let policy = ExecutionPolicy::default().with_host_queue_budgets(3, 4, 5);
+    let policy_queue = HostEventQueue::from_policy(&policy);
+    assert_eq!(
+        policy_queue.limits(),
+        HostEventQueueLimits {
+            capacity: 3,
+            max_values: 4,
+            max_text_bytes: 5,
+        }
+    );
 }
 
 #[test]

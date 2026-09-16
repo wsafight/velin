@@ -2,10 +2,7 @@ use super::support::{
     adjusted_footprint, cache_metrics, checked_total, ensure_child_depth, eval_chunk_for,
     updated_collection_depth, value_metrics,
 };
-use super::{
-    Arc, DataFootprint, DataMetrics, EvalError, MAX_DATA_TEXT_BYTES, MAX_MACHINE_DATA_VALUES,
-    MAX_MACHINE_TEXT_BYTES, Machine, UpdateOp, Value,
-};
+use super::{Arc, DataFootprint, DataMetrics, EvalError, Machine, UpdateOp, Value};
 
 impl Machine {
     pub(super) fn update_add(
@@ -31,7 +28,7 @@ impl Machine {
                     .len()
                     .checked_add(right.len())
                     .ok_or_else(|| EvalError::new(line, "data text exceeds 1 MiB"))?;
-                if text_bytes > MAX_DATA_TEXT_BYTES {
+                if text_bytes > self.policy.max_value_text_bytes {
                     return Err(EvalError::new(line, "data text exceeds 1 MiB"));
                 }
                 DataFootprint {
@@ -98,6 +95,8 @@ impl Machine {
             0,
             0,
             line,
+            self.policy.max_value_values,
+            self.policy.max_value_text_bytes,
         )?;
         let total = self.replacement_total(slot, footprint, line)?;
         let Value::List(mut values) = self.frame.values[slot as usize]
@@ -158,6 +157,8 @@ impl Machine {
             removed_key_bytes,
             added_key_bytes,
             line,
+            self.policy.max_value_values,
+            self.policy.max_value_text_bytes,
         )?;
         let total = self.replacement_total(slot, footprint, line)?;
         let source = self.frame.values[slot as usize]
@@ -226,6 +227,8 @@ impl Machine {
             removed_key_bytes,
             0,
             line,
+            self.policy.max_value_values,
+            self.policy.max_value_text_bytes,
         )?;
         let total = self.replacement_total(slot, footprint, line)?;
         let source = self.frame.values[slot as usize]
@@ -270,8 +273,8 @@ impl Machine {
         checked_total(
             retained,
             footprint,
-            MAX_MACHINE_DATA_VALUES,
-            MAX_MACHINE_TEXT_BYTES,
+            self.policy.max_machine_values,
+            self.policy.max_machine_text_bytes,
             "machine state",
         )
         .map_err(|error| EvalError::new(line, error))
@@ -403,8 +406,8 @@ impl Machine {
         let total = checked_total(
             retained,
             footprint,
-            MAX_MACHINE_DATA_VALUES,
-            MAX_MACHINE_TEXT_BYTES,
+            self.policy.max_machine_values,
+            self.policy.max_machine_text_bytes,
             "machine state",
         )
         .map_err(|error| EvalError::new(line, error))?;

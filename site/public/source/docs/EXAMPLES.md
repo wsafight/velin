@@ -165,7 +165,7 @@ In Rust, create the machine with `Machine::with_seed(program, seed)` when the ho
 
 ## Room loop with labels
 
-A label is a jump target. Use it for rooms, menus, and retry loops. Each `run`/`resume` burst still stops after 10,000 immediate steps, so a loop should `perform` (yield to the host) rather than spin.
+A label is a jump target. Use it for rooms, menus, and retry loops. Each `run`/`resume` burst still stops after 10,000 immediate fuel units by default, so a loop should `perform` (yield to the host) rather than spin.
 
 ```velin
 default visits = 0

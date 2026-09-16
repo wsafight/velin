@@ -1,4 +1,8 @@
 use super::*;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 use velin_compile::ProgramBuilder;
 use velin_syntax::Expr;
 
@@ -72,6 +76,104 @@ fn external_values_must_fit_the_data_budget() {
             .try_set_variable("missing", Value::Integer(1))
             .unwrap_err(),
         SetVariableError::UnknownVariable("missing".into())
+    );
+}
+
+#[test]
+fn execution_policy_accumulates_fuel_across_resumes_and_restart_clears_it() {
+    let mut builder = ProgramBuilder::new();
+    builder.push(Op::host(1, Vec::new(), None, 1));
+    builder.push(Op::host(2, Vec::new(), None, 1));
+    let policy = ExecutionPolicy::default().with_max_fuel(1);
+    let mut machine = Machine::with_seed_and_policy(builder.build(), 0, policy).unwrap();
+    assert!(matches!(
+        machine.run().unwrap(),
+        Yield::Host { host_id: 1, .. }
+    ));
+    assert_eq!(machine.fuel_used(), 1);
+    let error = machine.resume(None).unwrap_err();
+    assert_eq!(error.kind(), velin_eval::EvalErrorKind::FuelExhausted);
+    assert_eq!(machine.fuel_used(), 1);
+
+    let snapshot = machine.clone();
+    assert_eq!(snapshot.fuel_used(), machine.fuel_used());
+    let initial =
+        InitialFrame::from_named_values(&machine.program().slots, std::iter::empty()).unwrap();
+    machine.restart(&initial, 0).unwrap();
+    assert_eq!(machine.fuel_used(), 0);
+    assert_eq!(machine.host_effects(), 0);
+}
+
+#[test]
+fn immediate_fuel_resets_for_resume_and_progress_callback_can_cancel() {
+    let mut builder = ProgramBuilder::new();
+    builder.push(Op::host(1, Vec::new(), None, 1));
+    builder.push(Op::host(2, Vec::new(), None, 1));
+    let mut machine = Machine::with_seed_and_policy(
+        builder.build(),
+        0,
+        ExecutionPolicy::default().with_max_immediate_fuel(1),
+    )
+    .unwrap();
+    machine.run().unwrap();
+    assert!(matches!(
+        machine.resume(None).unwrap(),
+        Yield::Host { host_id: 2, .. }
+    ));
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let callback_calls = Arc::clone(&calls);
+    // A non-empty program is needed to cross a fuel checkpoint.
+    let mut loop_builder = ProgramBuilder::new();
+    loop_builder.push(Op::Jump(0));
+    let mut cancelling = Machine::with_seed_and_policy(
+        loop_builder.build(),
+        0,
+        ExecutionPolicy::default().with_progress_callback(1, move |_| {
+            callback_calls.fetch_add(1, Ordering::Relaxed);
+            false
+        }),
+    )
+    .unwrap();
+    assert_eq!(
+        cancelling.run().unwrap_err().kind(),
+        velin_eval::EvalErrorKind::Cancelled
+    );
+    assert!(calls.load(Ordering::Relaxed) > 0);
+}
+
+#[test]
+fn custom_value_and_host_effect_budgets_are_enforced() {
+    let mut builder = ProgramBuilder::new();
+    let value = builder.slot("value");
+    builder.push(Op::SetConst {
+        slot: value,
+        value: Value::String("ab".into()),
+        line: 1,
+    });
+    let mut machine = Machine::with_seed_and_policy(
+        builder.build(),
+        0,
+        ExecutionPolicy::default()
+            .with_value_budgets(1, 1)
+            .with_max_host_effects(1),
+    )
+    .unwrap();
+    assert!(machine.run().is_err());
+
+    let mut hosts = ProgramBuilder::new();
+    hosts.push(Op::host(1, Vec::new(), None, 1));
+    hosts.push(Op::host(2, Vec::new(), None, 1));
+    let mut machine = Machine::with_seed_and_policy(
+        hosts.build(),
+        0,
+        ExecutionPolicy::default().with_max_host_effects(1),
+    )
+    .unwrap();
+    machine.run().unwrap();
+    assert_eq!(
+        machine.resume(None).unwrap_err().kind(),
+        velin_eval::EvalErrorKind::HostEffectsExceeded
     );
 }
 

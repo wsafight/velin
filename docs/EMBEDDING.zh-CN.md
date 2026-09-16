@@ -13,7 +13,7 @@
 velin = { path = "../velin/crates/velin" }
 ```
 
-项目仍处于预稳定的 `0.x` 阶段，目前不承诺 Rust API 或序列化程序格式的向后兼容。
+项目仍处于 1.0 之前；`velin` 门面、底层 crate、artifact 和 C ABI 的不同保证见[兼容性政策](COMPATIBILITY.zh-CN.md)。
 
 ## 编译与检查
 
@@ -53,9 +53,9 @@ let result = module.invoke(BTreeMap::from([("input".to_owned(), Value::Integer(2
 assert_eq!(result, Value::Integer(42));
 ```
 
-`PureModule::invoke` 会通过 `PureModuleError` 报告缺少或未知输入、输入类型不匹配、显式失败、缺少返回以及 VM 执行错误。它不暴露持久化机器或可配置 fuel；每次调用都使用 VM 当前的有界立即执行步数限制。
+`PureModule::invoke` 会通过 `PureModuleError` 报告缺少或未知输入、输入类型不匹配、显式失败、缺少返回、fuel 耗尽、取消以及 VM 执行错误。需要非默认 `ExecutionPolicy` 时使用 `PureModule::invoke_with_policy` 或 `PureModule::invoker_with_policy`；可复用调用器的每次调用都会重启自己的累计预算。
 
-大多数语句语言宿主应优先使用 `ScriptRunner`：它会验证字节码、安装默认值、把宿主 ID 解析为名称、执行累计宿主效果预算，并可在运行时应用同一份 `HostSchema`。只有需要更底层控制时才直接使用 `Machine`。
+大多数语句语言宿主应优先使用 `ScriptRunner`：它会验证字节码、安装默认值、把宿主 ID 解析为名称、应用统一的 `ExecutionPolicy`，并可在运行时应用同一份 `HostSchema`。需要明确设置 fuel、取消、值或宿主预算时使用 `ScriptRunner::configured_with_policy`。只有需要更底层控制时才直接使用 `Machine`。
 
 对于连续的无返回值命令，可使用 `ScriptRunner::run_effect_batch` 批量取得事件，再交给宿主队列消费。`HostEventQueue` 位于宿主驱动层，提供容量、值数量和文本字节的背压限制；绑定命令仍会作为自然屏障交给 `run` / `resume`。
 

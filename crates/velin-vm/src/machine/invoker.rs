@@ -1,4 +1,4 @@
-use super::{LengthGuard, Machine};
+use super::{ExecutionPolicy, LengthGuard, Machine};
 use velin_bytecode::{ExprOp, InitialFrame, Op, Program, ValidatedProgram};
 
 /// Reusable owner of a validated machine and its initial frame.
@@ -17,8 +17,20 @@ impl MachineInvoker {
     /// Creates a low-latency invoker with execution profiling disabled.
     #[must_use]
     pub fn new(program: &ValidatedProgram, seed: i64, initial: &InitialFrame) -> Option<Self> {
-        let machine =
-            Machine::from_validated_with_seed_and_frame_without_profile(program, seed, initial)?;
+        Self::new_with_policy(program, seed, initial, ExecutionPolicy::default())
+    }
+
+    /// Creates a low-latency invoker with an explicit execution policy.
+    #[must_use]
+    pub fn new_with_policy(
+        program: &ValidatedProgram,
+        seed: i64,
+        initial: &InitialFrame,
+        policy: ExecutionPolicy,
+    ) -> Option<Self> {
+        let machine = Machine::from_validated_with_seed_and_frame_without_profile_and_policy(
+            program, seed, initial, policy,
+        )?;
         Some(Self {
             machine,
             initial: initial.clone(),
@@ -33,7 +45,19 @@ impl MachineInvoker {
         seed: i64,
         initial: &InitialFrame,
     ) -> Option<Self> {
-        let machine = Machine::from_validated_with_seed_and_frame(program, seed, initial)?;
+        Self::with_profile_and_policy(program, seed, initial, ExecutionPolicy::default())
+    }
+
+    /// Creates a profiled invoker with an explicit execution policy.
+    #[must_use]
+    pub fn with_profile_and_policy(
+        program: &ValidatedProgram,
+        seed: i64,
+        initial: &InitialFrame,
+        policy: ExecutionPolicy,
+    ) -> Option<Self> {
+        let machine =
+            Machine::from_validated_with_seed_and_frame_and_policy(program, seed, initial, policy)?;
         Some(Self {
             machine,
             initial: initial.clone(),

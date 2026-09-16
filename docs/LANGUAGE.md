@@ -111,7 +111,7 @@ while n > 0:
     set n = n - 1
 ```
 
-The VM allows at most 10,000 immediate instructions between host yields. A loop with no `perform` cannot occupy the caller indefinitely.
+The default VM policy allows at most 10,000 immediate fuel units per execution call. A loop with no `perform` cannot occupy the caller indefinitely.
 
 ## Labels and jumps
 
@@ -174,7 +174,7 @@ Diagnostics use 1-based line and column positions and point to the relevant expr
 - **`say` as a keyword.** Write `perform say(...)`. Bare `say(...)` is not a statement.
 - **Mutating a list in place.** `push(items, "key")` without `set items = ...` does nothing visible.
 - **`if 1:`.** Conditions must be booleans. Write `if choice == 1:`.
-- **A tight loop with no `perform`.** The VM stops after 10,000 immediate steps.
+- **A tight loop with no `perform`.** The VM stops after the immediate fuel budget (10,000 by default).
 - **Reading a variable set in only one branch.** Definite assignment will flag it.
 
 Budgets for source, values, and the VM are listed in [Resource limits](LIMITS.md).

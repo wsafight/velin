@@ -11,6 +11,8 @@ use velin::{
     compile_expression, parse_expression, parse_program,
 };
 
+#[path = "pipeline/p0.rs"]
+mod pipeline_p0;
 #[path = "pipeline/p1.rs"]
 mod pipeline_p1;
 #[path = "pipeline/p2.rs"]
@@ -152,6 +154,10 @@ fn bench_constant_folding(c: &mut Criterion) {
 }
 criterion_group!(
     benches,
+    pipeline_p0::bench_machine_snapshot,
+    pipeline_p0::bench_snapshot_replay,
+    pipeline_p0::bench_host_queue_push_pop,
+    pipeline_p0::bench_host_queue_backpressure,
     bench_parse,
     bench_parse_wide_script,
     bench_parse_host_calls,

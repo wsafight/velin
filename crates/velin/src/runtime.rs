@@ -1,8 +1,8 @@
 //! Shared script instantiation and bounded host-effect driving.
 
 use crate::{
-    CompiledScript, DEFAULT_RNG_SEED, EvalError, HostSchema, Machine, ProgramValidationError,
-    SetVariableError, Type, Value, Yield,
+    CompiledScript, DEFAULT_RNG_SEED, EvalError, EvalErrorKind, ExecutionPolicy, HostSchema,
+    Machine, ProgramValidationError, SetVariableError, Type, Value, Yield,
 };
 use velin_bytecode::InitialFrame;
 
@@ -30,6 +30,7 @@ pub enum ScriptYield {
     Finished,
 }
 
+mod error;
 mod queue;
 pub use queue::{HostEvent, HostEventQueue, HostEventQueueError, HostEventQueueLimits};
 
@@ -42,42 +43,15 @@ pub enum ScriptRunError {
         source: SetVariableError,
     },
     Evaluation(EvalError),
+    FuelExhausted {
+        limit: u64,
+        immediate: bool,
+    },
+    Cancelled,
     HostEffectsExceeded {
         limit: usize,
     },
     HostContract(String),
-}
-
-impl std::fmt::Display for ScriptRunError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Program(error) => write!(formatter, "invalid bytecode: {error}"),
-            Self::InitialValue { name, source } => {
-                write!(formatter, "cannot initialize `{name}`: {source}")
-            }
-            Self::Evaluation(error) => write!(
-                formatter,
-                "runtime error at line {}: {}",
-                error.line, error.message
-            ),
-            Self::HostEffectsExceeded { limit } => write!(
-                formatter,
-                "execution budget exceeded: too many host effects (limit {limit})"
-            ),
-            Self::HostContract(message) => write!(formatter, "host contract error: {message}"),
-        }
-    }
-}
-
-impl std::error::Error for ScriptRunError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Program(error) => Some(error),
-            Self::InitialValue { source, .. } => Some(source),
-            Self::Evaluation(error) => Some(error),
-            Self::HostEffectsExceeded { .. } | Self::HostContract(_) => None,
-        }
-    }
 }
 
 /// A compiled script instance with shared initialization and execution limits.
@@ -85,6 +59,7 @@ pub struct ScriptRunner<'a> {
     script: &'a CompiledScript,
     schema: Option<&'a HostSchema>,
     machine: Machine,
+    policy: ExecutionPolicy,
     limits: ExecutionLimits,
     host_effects: usize,
     pending_host: Option<String>,
@@ -94,6 +69,7 @@ pub struct ScriptRunner<'a> {
 #[derive(Debug, Clone)]
 enum PendingFailure {
     HostEffectsExceeded { limit: usize },
+    FuelExhausted { limit: u64, immediate: bool },
     HostContract(String),
 }
 
@@ -103,6 +79,10 @@ impl PendingFailure {
             Self::HostEffectsExceeded { limit } => {
                 ScriptRunError::HostEffectsExceeded { limit: *limit }
             }
+            Self::FuelExhausted { limit, immediate } => ScriptRunError::FuelExhausted {
+                limit: *limit,
+                immediate: *immediate,
+            },
             Self::HostContract(message) => ScriptRunError::HostContract(message.clone()),
         }
     }
@@ -128,20 +108,49 @@ impl<'a> ScriptRunner<'a> {
         limits: ExecutionLimits,
         schema: Option<&'a HostSchema>,
     ) -> Result<Self, ScriptRunError> {
+        let policy = ExecutionPolicy::default().with_max_host_effects(limits.max_host_effects);
+        Self::configured_with_policy(script, seed, policy, schema)
+    }
+
+    /// Instantiates a script with an explicit VM execution policy and optional
+    /// host contract used for runtime argument and reply validation.
+    ///
+    /// # Errors
+    /// Returns an error if bytecode validation or policy-constrained default
+    /// initialization fails.
+    pub fn configured_with_policy(
+        script: &'a CompiledScript,
+        seed: i64,
+        policy: ExecutionPolicy,
+        schema: Option<&'a HostSchema>,
+    ) -> Result<Self, ScriptRunError> {
+        let limits = ExecutionLimits {
+            max_host_effects: policy.max_host_effects,
+        };
         let validated = script.validated_program().refers_to(&script.program);
         let prepared = validated
             .then(|| script.initial_frame())
             .flatten()
             .and_then(|frame| {
-                Machine::from_validated_with_seed_and_frame(script.validated_program(), seed, frame)
+                Machine::from_validated_with_seed_and_frame_and_policy(
+                    script.validated_program(),
+                    seed,
+                    frame,
+                    policy.clone(),
+                )
             });
         let used_prepared_frame = prepared.is_some();
         let mut machine = if let Some(machine) = prepared {
             machine
         } else if validated {
-            Machine::from_validated_with_seed(script.validated_program(), seed)
+            Machine::from_validated_with_seed_and_policy(
+                script.validated_program(),
+                seed,
+                policy.clone(),
+            )
         } else {
-            Machine::with_seed(script.program.clone(), seed).map_err(ScriptRunError::Program)?
+            Machine::with_seed_and_policy(script.program.clone(), seed, policy.clone())
+                .map_err(ScriptRunError::Program)?
         };
         if !used_prepared_frame {
             for (name, value) in &script.defaults {
@@ -158,6 +167,7 @@ impl<'a> ScriptRunner<'a> {
             schema,
             machine,
             limits,
+            policy,
             host_effects: 0,
             pending_host: None,
             pending_failure: None,
@@ -188,6 +198,28 @@ impl<'a> ScriptRunner<'a> {
     #[must_use]
     pub const fn host_effects(&self) -> usize {
         self.host_effects
+    }
+
+    /// Returns the execution policy used by this runner.
+    #[must_use]
+    pub const fn policy(&self) -> &ExecutionPolicy {
+        &self.policy
+    }
+
+    /// Returns cumulative VM fuel consumed since construction or restart.
+    #[must_use]
+    pub const fn fuel_used(&self) -> u64 {
+        self.machine.fuel_used()
+    }
+
+    /// Requests cooperative cancellation at the next VM fuel checkpoint.
+    pub fn cancel(&mut self) {
+        self.machine.cancel();
+    }
+
+    /// Clears a previous cooperative cancellation request.
+    pub fn clear_cancellation(&mut self) {
+        self.machine.clear_cancellation();
     }
 
     /// Restarts this runner from the script's current defaults while reusing
@@ -235,7 +267,10 @@ impl<'a> ScriptRunner<'a> {
         if let Some(failure) = &self.pending_failure {
             return Err(failure.error());
         }
-        let outcome = self.machine.run().map_err(ScriptRunError::Evaluation)?;
+        let outcome = match self.machine.run() {
+            Ok(outcome) => outcome,
+            Err(error) => return Err(self.map_machine_error(error)),
+        };
         self.resolve(outcome)
     }
 
@@ -266,10 +301,10 @@ impl<'a> ScriptRunner<'a> {
                 limit: self.limits.max_host_effects,
             });
         }
-        let count = self
-            .machine
-            .run_effect_batch_reusable(limit.min(remaining))
-            .map_err(ScriptRunError::Evaluation)?;
+        let count = match self.machine.run_effect_batch_reusable(limit.min(remaining)) {
+            Ok(count) => count,
+            Err(error) => return Err(self.map_machine_error(error)),
+        };
         let raw = self.machine.effect_batch().to_vec();
         let mut events = Vec::with_capacity(count);
         let mut failure = None;
@@ -320,10 +355,10 @@ impl<'a> ScriptRunner<'a> {
             return Err(failure.error());
         }
         self.validate_reply(value.as_ref())?;
-        let outcome = self
-            .machine
-            .resume(value)
-            .map_err(ScriptRunError::Evaluation)?;
+        let outcome = match self.machine.resume(value) {
+            Ok(outcome) => outcome,
+            Err(error) => return Err(self.map_machine_error(error)),
+        };
         self.pending_host = None;
         self.resolve(outcome)
     }
@@ -356,6 +391,23 @@ impl<'a> ScriptRunner<'a> {
         let error = failure.error();
         self.pending_failure = Some(failure);
         Err(error)
+    }
+
+    fn map_machine_error(&mut self, error: EvalError) -> ScriptRunError {
+        let mapped = map_eval_error(error);
+        match mapped {
+            ScriptRunError::HostEffectsExceeded { limit } => {
+                self.pending_host = None;
+                self.pending_failure = Some(PendingFailure::HostEffectsExceeded { limit });
+                ScriptRunError::HostEffectsExceeded { limit }
+            }
+            ScriptRunError::FuelExhausted { limit, immediate } => {
+                self.pending_host = None;
+                self.pending_failure = Some(PendingFailure::FuelExhausted { limit, immediate });
+                ScriptRunError::FuelExhausted { limit, immediate }
+            }
+            other => other,
+        }
     }
 
     fn validate_call(&self, name: &str, values: &[Value]) -> Result<(), String> {
@@ -416,6 +468,20 @@ impl<'a> ScriptRunner<'a> {
                 actual.name()
             )))
         }
+    }
+}
+
+fn map_eval_error(error: EvalError) -> ScriptRunError {
+    match error.kind() {
+        EvalErrorKind::FuelExhausted => ScriptRunError::FuelExhausted {
+            limit: error.limit().unwrap_or_default(),
+            immediate: error.message.contains("immediate"),
+        },
+        EvalErrorKind::Cancelled => ScriptRunError::Cancelled,
+        EvalErrorKind::HostEffectsExceeded => ScriptRunError::HostEffectsExceeded {
+            limit: usize::try_from(error.limit().unwrap_or_default()).unwrap_or(usize::MAX),
+        },
+        EvalErrorKind::Runtime => ScriptRunError::Evaluation(error),
     }
 }
 

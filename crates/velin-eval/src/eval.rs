@@ -15,6 +15,19 @@ use velin_syntax::{BinaryOp, Expr, MAX_DATA_TEXT_BYTES, StrPart, UnaryOp, Value}
 /// serialization) is stable across runs.
 pub type Variables = BTreeMap<String, Value>;
 
+/// The broad class of an evaluation failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvalErrorKind {
+    /// A language, value, or bytecode execution error.
+    Runtime,
+    /// The cumulative or per-call fuel policy was exhausted.
+    FuelExhausted,
+    /// The host effect budget was exhausted.
+    HostEffectsExceeded,
+    /// The host cooperatively cancelled execution.
+    Cancelled,
+}
+
 /// An error raised while evaluating an expression.
 ///
 /// It records the 1-based source `line` the failing expression came from and a
@@ -33,6 +46,54 @@ impl EvalError {
             line,
             message: message.into(),
         }
+    }
+
+    #[must_use]
+    pub fn fuel_exhausted(line: usize, limit: u64, immediate: bool) -> Self {
+        let message = if immediate {
+            format!("possible infinite loop: immediate execution fuel exhausted (limit {limit})")
+        } else {
+            format!("cumulative execution fuel exhausted (limit {limit})")
+        };
+        Self { line, message }
+    }
+
+    #[must_use]
+    pub fn host_effects_exceeded(line: usize, limit: usize) -> Self {
+        Self {
+            line,
+            message: format!("host effect budget exhausted (limit {limit})"),
+        }
+    }
+
+    #[must_use]
+    pub fn cancelled(line: usize) -> Self {
+        Self {
+            line,
+            message: "execution cancelled by host".into(),
+        }
+    }
+
+    #[must_use]
+    pub fn kind(&self) -> EvalErrorKind {
+        if self.message.contains("execution fuel exhausted (limit ") {
+            EvalErrorKind::FuelExhausted
+        } else if self
+            .message
+            .starts_with("host effect budget exhausted (limit ")
+        {
+            EvalErrorKind::HostEffectsExceeded
+        } else if self.message == "execution cancelled by host" {
+            EvalErrorKind::Cancelled
+        } else {
+            EvalErrorKind::Runtime
+        }
+    }
+
+    #[must_use]
+    pub fn limit(&self) -> Option<u64> {
+        let (_, suffix) = self.message.rsplit_once("(limit ")?;
+        suffix.strip_suffix(')')?.parse().ok()
     }
 }
 

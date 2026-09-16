@@ -57,13 +57,13 @@ There is no access to system entropy, wall clocks, or thread-local random state.
 
 ## Can untrusted scripts take over the host?
 
-They cannot perform I/O themselves, and every layer has a budget: source size, AST depth, values, bytecode, and immediate VM steps. A loop with no `perform` stops after 10,000 immediate instructions.
+They cannot perform I/O themselves, and every layer has a budget: source size, AST depth, values, bytecode, cumulative fuel, immediate fuel, host effects, and queue payloads. A loop with no `perform` stops after the default 10,000 immediate fuel units. Hosts can override these limits with `ExecutionPolicy`.
 
 The host is still the trust boundary. It must allow-list command names, check arguments, and apply its own time, output, and permission limits. See [Host protocol](HOST.md).
 
 ## Can I save a running script?
 
-`Machine` implements `Clone`. A clone is an in-memory snapshot of the program counter, variables, pending host effect, completion flag, and RNG. It is not a stable on-disk format.
+`Machine` implements `Clone`. A clone is an in-memory snapshot of the program counter, variables, pending host effect, completion flag, RNG, execution policy, cumulative fuel, host-effect count, and cancellation state. Immediate fuel belongs to one call and is not stored between calls; the cumulative counters are preserved by the clone. It is not a stable on-disk format.
 
 If you serialize a `Program`, deserialization validates the bytecode before it can run. Do not treat today's snapshot layout as a long-term save format until the project makes a compatibility promise.
 

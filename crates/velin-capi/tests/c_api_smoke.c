@@ -3,8 +3,11 @@
 #include <assert.h>
 #include <string.h>
 
+/* ABI v1 compatibility fixture: changing this contract must fail CI. */
+_Static_assert(VELIN_C_API_VERSION == 1u, "unexpected Velin C ABI version");
+
 int main(void) {
-    assert(velin_c_api_version() == VELIN_C_API_VERSION);
+    assert(velin_c_api_version() == 1u);
     static const char program_json[] =
         "{\"ops\":[{\"Set\":{\"slot\":0,\"value\":0}},\"Halt\"],"
         "\"chunks\":[{\"ops\":[{\"Const\":{\"dst\":0,\"constant\":0}}],"

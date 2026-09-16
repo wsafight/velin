@@ -187,6 +187,18 @@ export const pages = [
     see: ['docs/checking', 'docs/host', 'docs/architecture'],
   },
   {
+    sources: {en: 'docs/COMPATIBILITY.md', zh: 'docs/COMPATIBILITY.zh-CN.md'},
+    generated: 'compatibility.md',
+    slug: 'docs/compatibility',
+    group: 'engine',
+    title: {en: 'Compatibility policy', zh: '兼容性政策'},
+    description: {
+      en: 'Separate source, Rust API, artifact, and C ABI contracts, fixtures, and release rules.',
+      zh: '源码、Rust API、artifact 和 C ABI 的独立契约、fixture 与发布规则。',
+    },
+    see: ['docs/roadmap', 'docs/embedding', 'docs/architecture'],
+  },
+  {
     sources: {en: 'docs/PERFORMANCE.md', zh: 'docs/PERFORMANCE.zh-CN.md'},
     generated: 'performance.md',
     slug: 'docs/performance',
@@ -197,5 +209,17 @@ export const pages = [
       zh: '性能测量、优化结果、基准命令和运行时取舍。',
     },
     see: ['docs/architecture', 'docs/limits', 'docs/embedding'],
+  },
+  {
+    sources: {en: 'docs/PERFORMANCE-BASELINE.md', zh: 'docs/PERFORMANCE-BASELINE.zh-CN.md'},
+    generated: 'performance-baseline.md',
+    slug: 'docs/performance-baseline',
+    group: 'engine',
+    title: {en: 'Performance baseline', zh: '性能基线'},
+    description: {
+      en: 'A dated local snapshot of pipeline, VM, host-boundary, C ABI, and Wasm benchmark metrics.',
+      zh: '记录 pipeline、VM、宿主边界、C ABI 和 Wasm benchmark 的本地性能快照。',
+    },
+    see: ['docs/performance', 'docs/roadmap', 'docs/embedding'],
   },
 ];
