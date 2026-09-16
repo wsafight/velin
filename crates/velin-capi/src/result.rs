@@ -1,4 +1,5 @@
-use crate::value::{VelinValue, to_c_value};
+use crate::value::{VelinValue, to_c_value, to_c_value_json};
+use velin_syntax::Value;
 use velin_vm::{HostEffect, Yield};
 
 /// The machine finished normally.
@@ -52,12 +53,23 @@ pub struct VelinBatch {
 }
 
 pub fn yield_from_result<E: std::fmt::Display>(result: Result<Yield, E>) -> VelinYield {
+    yield_from_result_with(result, to_c_value)
+}
+
+pub fn yield_from_result_json<E: std::fmt::Display>(result: Result<Yield, E>) -> VelinYield {
+    yield_from_result_with(result, to_c_value_json)
+}
+
+fn yield_from_result_with<E: std::fmt::Display>(
+    result: Result<Yield, E>,
+    encode: fn(&Value) -> VelinValue,
+) -> VelinYield {
     match result {
         Ok(Yield::Finished) => finished_yield(),
         Ok(Yield::Host { host_id, values }) => {
             let values = values
                 .iter()
-                .map(to_c_value)
+                .map(encode)
                 .collect::<Vec<_>>()
                 .into_boxed_slice();
             let values_len = values.len();
@@ -102,6 +114,19 @@ pub fn error_yield(message: &str) -> VelinYield {
 }
 
 pub fn batch_from_result<E: std::fmt::Display>(result: Result<Vec<HostEffect>, E>) -> VelinBatch {
+    batch_from_result_with(result, to_c_value)
+}
+
+pub fn batch_from_result_json<E: std::fmt::Display>(
+    result: Result<Vec<HostEffect>, E>,
+) -> VelinBatch {
+    batch_from_result_with(result, to_c_value_json)
+}
+
+fn batch_from_result_with<E: std::fmt::Display>(
+    result: Result<Vec<HostEffect>, E>,
+    encode: fn(&Value) -> VelinValue,
+) -> VelinBatch {
     match result {
         Ok(effects) if effects.is_empty() => empty_batch(),
         Ok(effects) => {
@@ -111,7 +136,7 @@ pub fn batch_from_result<E: std::fmt::Display>(result: Result<Vec<HostEffect>, E
                     let values = effect
                         .values
                         .iter()
-                        .map(to_c_value)
+                        .map(encode)
                         .collect::<Vec<_>>()
                         .into_boxed_slice();
                     let values_len = values.len();

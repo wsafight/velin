@@ -45,6 +45,7 @@ mod limits;
 mod lines;
 mod lower;
 mod parser;
+mod schema;
 mod token;
 
 pub use artifact::{
@@ -54,10 +55,11 @@ pub use artifact::{
 };
 pub use ast::{Condition, Stmt};
 pub use error::ParseError;
-pub use host::{CompiledScript, HostSchema};
+pub use host::CompiledScript;
 pub use limits::{MAX_SOURCE_BYTES, MAX_SOURCE_LINES, MAX_STATEMENT_DEPTH};
 pub use lower::LowerError;
 pub use parser::RecoveredProgram;
+pub use schema::{HostCommand, HostContractError, HostSchema};
 
 use velin_syntax::Diagnostic;
 

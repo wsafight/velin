@@ -3,8 +3,9 @@
 //! The ABI deliberately exposes opaque program and machine handles. The only
 //! data crossing the boundary are fixed-layout tags, integers, booleans and
 //! owned UTF-8 buffers. Programs are loaded from JSON once at the raw ABI
-//! boundary and immediately retained as a validated proof; host effects use
-//! the binary `VelinValue` array and do not require JSON round trips.
+//! boundary and immediately retained as a validated proof. Host effects use
+//! the binary `VelinValue` array; opt-in JSON functions provide reversible
+//! List and Record payloads without changing the legacy compound tag.
 
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::module_name_repetitions)]
@@ -17,7 +18,10 @@ mod value;
 pub use handles::{VelinMachine, VelinProgram};
 pub use result::VelinYield;
 pub use result::{VelinBatch, VelinEffect};
-use result::{batch_from_result, error_yield, yield_from_result};
+use result::{
+    batch_from_result, batch_from_result_json, error_yield, yield_from_result,
+    yield_from_result_json,
+};
 use std::slice;
 use std::sync::Arc;
 use velin_bytecode::{InitialFrame, Program, ValidatedProgram};
@@ -28,7 +32,8 @@ pub use result::{
     VELIN_YIELD_FINISHED, VELIN_YIELD_HOST,
 };
 pub use value::{
-    VELIN_VALUE_BOOLEAN, VELIN_VALUE_COMPOUND, VELIN_VALUE_INTEGER, VELIN_VALUE_STRING, VelinValue,
+    VELIN_VALUE_BOOLEAN, VELIN_VALUE_COMPOUND, VELIN_VALUE_INTEGER, VELIN_VALUE_JSON,
+    VELIN_VALUE_STRING, VelinValue,
 };
 
 /// Version of the exported C data structures and function contract.
@@ -153,6 +158,15 @@ pub unsafe extern "C" fn velin_machine_run(machine: *mut VelinMachine) -> VelinY
     yield_from_result(machine.machine.run())
 }
 
+/// Runs like [`velin_machine_run`], encoding List and Record arguments as JSON.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn velin_machine_run_json(machine: *mut VelinMachine) -> VelinYield {
+    let Some(machine) = (unsafe { machine.as_mut() }) else {
+        return error_yield("machine handle is null");
+    };
+    yield_from_result_json(machine.machine.run())
+}
+
 /// Runs side-effect-only host commands in source order until `limit`, a bound
 /// host command, completion, or an execution error.
 #[unsafe(no_mangle)]
@@ -167,7 +181,19 @@ pub unsafe extern "C" fn velin_machine_run_batch(
     batch_from_result(result)
 }
 
-/// Resumes a pending host effect with a scalar value, or null for no value.
+/// Runs a batch with List and Record arguments encoded as stable JSON.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn velin_machine_run_batch_json(
+    machine: *mut VelinMachine,
+    limit: usize,
+) -> VelinBatch {
+    let Some(machine) = (unsafe { machine.as_mut() }) else {
+        return result::batch_from_result_json::<&str>(Err("machine handle is null"));
+    };
+    batch_from_result_json(machine.machine.run_effect_batch(limit))
+}
+
+/// Resumes a pending host effect with a tagged value, or null for no value.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn velin_machine_resume(
     machine: *mut VelinMachine,
@@ -187,6 +213,26 @@ pub unsafe extern "C" fn velin_machine_resume(
     yield_from_result(machine.machine.resume(value))
 }
 
+/// Resumes like [`velin_machine_resume`], encoding the next compounds as JSON.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn velin_machine_resume_json(
+    machine: *mut VelinMachine,
+    value: *const VelinValue,
+) -> VelinYield {
+    let Some(machine) = (unsafe { machine.as_mut() }) else {
+        return error_yield("machine handle is null");
+    };
+    let value = if value.is_null() {
+        None
+    } else {
+        match unsafe { value::from_c_value(&*value) } {
+            Ok(value) => Some(value),
+            Err(error) => return error_yield(&error),
+        }
+    };
+    yield_from_result_json(machine.machine.resume(value))
+}
+
 /// Restarts a machine with an empty frame and a new RNG seed, then runs it.
 ///
 /// # Panics
@@ -204,6 +250,22 @@ pub unsafe extern "C" fn velin_machine_restart(
         .restart(&machine.initial, seed)
         .expect("restarting with the program's own initial frame succeeds");
     yield_from_result(machine.machine.run())
+}
+
+/// Restarts like [`velin_machine_restart`], encoding compounds as JSON.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn velin_machine_restart_json(
+    machine: *mut VelinMachine,
+    seed: i64,
+) -> VelinYield {
+    let Some(machine) = (unsafe { machine.as_mut() }) else {
+        return error_yield("machine handle is null");
+    };
+    machine
+        .machine
+        .restart(&machine.initial, seed)
+        .expect("restarting with the program's own initial frame succeeds");
+    yield_from_result_json(machine.machine.run())
 }
 
 /// Releases all buffers owned by a yield result and clears it.
@@ -262,3 +324,7 @@ fn write_error(
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "json_tests.rs"]
+mod json_tests;

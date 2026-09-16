@@ -36,7 +36,7 @@ if diagnostics.iter().any(velin::Diagnostic::is_error) {
 
 `check_script` 运行 CFG 感知的类型传播和确定赋值分析，不会修改程序。
 
-宿主词汇已知时，用 `HostSignature::exact` 或 `HostSignature::variadic` 构建 `HostSchema`，再调用 `check_script_with_host_schema`。这会增加命令名、参数数量、参数类型、绑定和返回值传播检查，同时不把宿主专用名称放进语言核心。
+宿主词汇已知时，用 `HostSignature::exact` 或 `HostSignature::variadic` 声明 `HostCommand`，加入 `HostSchema`，再调用 `check_script_with_host_schema`。命令的可选描述也会用于 schema 感知的 LSP 补全、签名帮助与 hover。这会增加命令名、参数数量、参数类型、绑定和返回值传播检查，同时不把宿主专用名称放进语言核心。
 
 对于“输入值 -> 输出值”的扩展，使用 `PureModule`。它在编译时接收明确的输入类型映射，只允许 `return(value)` 与 `fail(message)` 两种控制信号，拒绝其他宿主命令以及 `random`/`chance`，并为每次调用创建全新的 VM 状态：
 
@@ -55,9 +55,11 @@ assert_eq!(result, Value::Integer(42));
 
 `PureModule::invoke` 会通过 `PureModuleError` 报告缺少或未知输入、输入类型不匹配、显式失败、缺少返回、fuel 耗尽、取消以及 VM 执行错误。需要非默认 `ExecutionPolicy` 时使用 `PureModule::invoke_with_policy` 或 `PureModule::invoker_with_policy`；可复用调用器的每次调用都会重启自己的累计预算。
 
-大多数语句语言宿主应优先使用 `ScriptRunner`：它会验证字节码、安装默认值、把宿主 ID 解析为名称、应用统一的 `ExecutionPolicy`，并可在运行时应用同一份 `HostSchema`。需要明确设置 fuel、取消、值或宿主预算时使用 `ScriptRunner::configured_with_policy`。只有需要更底层控制时才直接使用 `Machine`。
+大多数语句语言宿主应优先使用 `SyncHostDriver` 或 `AsyncHostDriver`。把处理器与 `HostCommand` 一起注册后，同一声明会驱动静态检查、ID/名称分派以及运行时参数/回复校验；两种驱动都会返回最终 `Machine`。应用需要手动挂起或批处理时再直接使用 `ScriptRunner`；它会验证字节码、安装默认值、解析宿主 ID、应用统一的 `ExecutionPolicy`，并在运行时使用同一份 `HostSchema`。
 
 对于连续的无返回值命令，可使用 `ScriptRunner::run_effect_batch` 批量取得事件，再交给宿主队列消费。`HostEventQueue` 位于宿主驱动层，提供容量、值数量和文本字节的背压限制；绑定命令仍会作为自然屏障交给 `run` / `resume`。
+
+对于可序列化的应用 DTO，`to_value` 与 `from_value` 提供带明确 `MarshallingLimits` 的 Serde 转换。转换保持 `i64` 整数范围和稳定 Record 顺序，拒绝 null 与浮点数据，并报告具体失败字段或 List 下标。C ABI 保留原有仅展示的复合值 tag，另增使用 `VELIN_VALUE_JSON` 的 `*_json` run/resume/batch/restart 函数，使 ABI 版本 1 宿主可以按需接入 List/Record 输入输出而不改变旧调用。
 
 ## 创建机器
 

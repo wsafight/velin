@@ -12,7 +12,7 @@ use crate::protocol::{read_message, write_message};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
-use velin::Diagnostic;
+use velin::{Diagnostic, HostSchema};
 
 /// A running server instance: the open documents keyed by URI, plus the output
 /// stream diagnostics and responses are written to.
@@ -21,6 +21,7 @@ pub struct Server<W: Write> {
     output: W,
     initialized: bool,
     shutdown: bool,
+    host_schema: Option<HostSchema>,
 }
 
 impl<W: Write> Server<W> {
@@ -31,6 +32,18 @@ impl<W: Write> Server<W> {
             output,
             initialized: false,
             shutdown: false,
+            host_schema: None,
+        }
+    }
+
+    /// Creates a server whose diagnostics and editor features share a host schema.
+    pub fn with_host_schema(output: W, host_schema: HostSchema) -> Self {
+        Self {
+            documents: HashMap::new(),
+            output,
+            initialized: false,
+            shutdown: false,
+            host_schema: Some(host_schema),
         }
     }
 
@@ -83,6 +96,7 @@ impl<W: Write> Server<W> {
             "textDocument/completion" => self.completion(message),
             "textDocument/documentSymbol" => self.document_symbol(message),
             "textDocument/hover" => self.hover(message),
+            "textDocument/signatureHelp" => self.signature_help(message),
             "textDocument/definition" => self.definition(message),
             "textDocument/references" => self.references(message),
             // Unknown notifications are ignored; requests receive the JSON-RPC
@@ -145,13 +159,18 @@ impl<W: Write> Server<W> {
     /// Answers a completion request with the merged vocabulary + declared names.
     fn completion(&mut self, message: &Value) -> std::io::Result<()> {
         let text = self.document_for(message).unwrap_or_default();
-        let items: Vec<Value> = analysis::completions(text)
+        let completions = self.host_schema.as_ref().map_or_else(
+            || analysis::completions(text),
+            |schema| analysis::completions_with_host_schema(text, schema),
+        );
+        let items: Vec<Value> = completions
             .into_iter()
             .map(|completion| {
                 json!({
                     "label": completion.label,
                     "kind": completion_item_kind(completion.kind),
                     "detail": completion.detail,
+                    "documentation": completion.documentation,
                 })
             })
             .collect();
@@ -181,10 +200,36 @@ impl<W: Write> Server<W> {
         let result = self.document_for(message).and_then(|text| {
             let (line, column) = request_position(message, text)?;
             let lines: Vec<&str> = text.lines().collect();
-            let hover = analysis::hover(text, line, column)?;
+            let hover = self.host_schema.as_ref().map_or_else(
+                || analysis::hover(text, line, column),
+                |schema| analysis::hover_with_host_schema(text, line, column, schema),
+            )?;
             Some(json!({
                 "contents": { "kind": "markdown", "value": hover.contents },
                 "range": lsp_source_range(hover.range, &lines),
+            }))
+        });
+        self.respond(message, &result.unwrap_or(Value::Null))
+    }
+
+    fn signature_help(&mut self, message: &Value) -> std::io::Result<()> {
+        let result = self.document_for(message).and_then(|text| {
+            let schema = self.host_schema.as_ref()?;
+            let (line, column) = request_position(message, text)?;
+            let help = analysis::signature_help(text, line, column, schema)?;
+            let parameters: Vec<Value> = help
+                .parameters
+                .into_iter()
+                .map(|label| json!({ "label": label }))
+                .collect();
+            Some(json!({
+                "signatures": [{
+                    "label": help.label,
+                    "documentation": help.documentation,
+                    "parameters": parameters,
+                }],
+                "activeSignature": 0,
+                "activeParameter": help.active_parameter,
             }))
         });
         self.respond(message, &result.unwrap_or(Value::Null))
@@ -227,7 +272,11 @@ impl<W: Write> Server<W> {
             return Ok(());
         };
         let lines: Vec<&str> = text.lines().collect();
-        let diagnostics: Vec<Value> = analysis::diagnostics(uri, text)
+        let analyzed = self.host_schema.as_ref().map_or_else(
+            || analysis::diagnostics(uri, text),
+            |schema| analysis::diagnostics_with_host_schema(uri, text, schema),
+        );
+        let diagnostics: Vec<Value> = analyzed
             .iter()
             .map(|diagnostic| lsp_diagnostic(diagnostic, &lines))
             .collect();
@@ -279,6 +328,7 @@ fn is_known_method(method: &str) -> bool {
             | "textDocument/completion"
             | "textDocument/documentSymbol"
             | "textDocument/hover"
+            | "textDocument/signatureHelp"
             | "textDocument/definition"
             | "textDocument/references"
     )
@@ -290,6 +340,7 @@ fn initialize_result() -> Value {
         "capabilities": {
             "textDocumentSync": 1, // full document sync
             "completionProvider": { "triggerCharacters": [] },
+            "signatureHelpProvider": { "triggerCharacters": ["(", ","] },
             "documentSymbolProvider": true,
             "hoverProvider": true,
             "definitionProvider": true,

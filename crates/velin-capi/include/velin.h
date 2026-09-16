@@ -17,7 +17,8 @@ enum {
     VELIN_VALUE_INTEGER = 1,
     VELIN_VALUE_BOOLEAN = 2,
     VELIN_VALUE_STRING = 3,
-    VELIN_VALUE_COMPOUND = 4
+    VELIN_VALUE_COMPOUND = 4,
+    VELIN_VALUE_JSON = 5
 };
 
 enum {
@@ -81,6 +82,14 @@ VelinYield velin_machine_run(VelinMachine *machine);
 VelinBatch velin_machine_run_batch(VelinMachine *machine, size_t limit);
 VelinYield velin_machine_resume(VelinMachine *machine, const VelinValue *value);
 VelinYield velin_machine_restart(VelinMachine *machine, int64_t seed);
+
+/* Opt-in compound marshalling. List and Record text is stable JSON tagged
+ * VELIN_VALUE_JSON; scalars retain their existing binary tags. */
+VelinYield velin_machine_run_json(VelinMachine *machine);
+VelinBatch velin_machine_run_batch_json(VelinMachine *machine, size_t limit);
+VelinYield velin_machine_resume_json(VelinMachine *machine,
+                                     const VelinValue *value);
+VelinYield velin_machine_restart_json(VelinMachine *machine, int64_t seed);
 
 void velin_yield_free(VelinYield *result);
 void velin_batch_free(VelinBatch *result);

@@ -166,6 +166,23 @@ fn null_handles_return_errors_and_null_frees_are_accepted() {
     assert_eq!(restart.kind, VELIN_YIELD_ERROR);
     unsafe { velin_yield_free(&mut restart) };
 
+    let mut run_json = unsafe { velin_machine_run_json(std::ptr::null_mut()) };
+    assert_eq!(run_json.kind, VELIN_YIELD_ERROR);
+    unsafe { velin_yield_free(&mut run_json) };
+
+    let mut batch_json = unsafe { velin_machine_run_batch_json(std::ptr::null_mut(), 1) };
+    assert_eq!(batch_json.kind, VELIN_BATCH_ERROR);
+    unsafe { velin_batch_free(&mut batch_json) };
+
+    let mut resume_json =
+        unsafe { velin_machine_resume_json(std::ptr::null_mut(), std::ptr::null()) };
+    assert_eq!(resume_json.kind, VELIN_YIELD_ERROR);
+    unsafe { velin_yield_free(&mut resume_json) };
+
+    let mut restart_json = unsafe { velin_machine_restart_json(std::ptr::null_mut(), 0) };
+    assert_eq!(restart_json.kind, VELIN_YIELD_ERROR);
+    unsafe { velin_yield_free(&mut restart_json) };
+
     unsafe {
         velin_program_free(std::ptr::null_mut());
         velin_machine_free(std::ptr::null_mut());

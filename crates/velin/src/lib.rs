@@ -97,7 +97,8 @@
 //! ```
 
 pub use velin_syntax::{
-    BinaryOp, Builtin, Diagnostic, Expr, Severity, SharedString, Span, UnaryOp, Value,
+    BinaryOp, Builtin, Diagnostic, Expr, MAX_DATA_DEPTH, MAX_DATA_TEXT_BYTES, MAX_DATA_VALUES,
+    Severity, SharedString, Span, UnaryOp, Value,
 };
 
 pub use velin_parse::parse_expression;
@@ -132,16 +133,22 @@ pub use velin_check::{
 
 pub use velin_lang::{
     ARTIFACT_MAGIC, ARTIFACT_VERSION, ArtifactError, BytecodeArtifact, CompiledScript, Condition,
-    HostSchema, LowerError, MAX_ARTIFACT_BYTES, MAX_SOURCE_BYTES, MAX_SOURCE_LINES,
-    MAX_STATEMENT_DEPTH, ParseError, RecoveredProgram, Stmt, artifact_cache_key,
+    HostCommand, HostContractError, HostSchema, LowerError, MAX_ARTIFACT_BYTES, MAX_SOURCE_BYTES,
+    MAX_SOURCE_LINES, MAX_STATEMENT_DEPTH, ParseError, RecoveredProgram, Stmt, artifact_cache_key,
     artifact_cache_path, check_script, check_script_with_bindings,
     check_script_with_bindings_and_host_schema, check_script_with_host_schema, compile,
     decode_artifact, encode_artifact, load_artifact_cache, parse_program, parse_program_recovering,
     store_artifact_cache,
 };
+mod host_sdk;
+mod marshal;
 mod pure;
 mod repl;
 mod runtime;
 
+pub use host_sdk::{AsyncHostDriver, HostDriveError, SyncHostDriver};
+pub use marshal::{
+    MarshalError, MarshallingLimits, from_value, json_to_value, to_value, value_to_json,
+};
 pub use pure::{PureModule, PureModuleError, PureModuleInvoker};
 pub use repl::{ReplError, ReplSession};

@@ -53,3 +53,16 @@ fn batch_results_preserve_host_order() {
     assert!(json.contains("\"host_id\":2"));
     assert!(json.contains("\"host_id\":3"));
 }
+
+#[test]
+fn runtime_results_serialize_list_and_record_values() {
+    let value = Value::Record(std::sync::Arc::new(std::collections::BTreeMap::from([(
+        "items".to_owned(),
+        Value::List(std::sync::Arc::new(vec![Value::Integer(1)])),
+    )])));
+    let json = yield_to_json(Ok::<_, String>(Yield::Host {
+        host_id: 1,
+        values: vec![value],
+    }));
+    assert!(json.contains(r#""values":[{"items":[1]}]"#));
+}

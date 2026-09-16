@@ -9,11 +9,12 @@
 //! Host commands are interned here rather than baked in as keywords. A
 //! `perform foo(...)` statement simply interns `"foo"` to a small integer.
 
+use crate::HostSchema;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use velin_bytecode::{InitialFrame, Pc, Program, ValidatedProgram};
 use velin_check::{
-    Environment, HostSignature, HostSignatures, Type, TypeCheckSite, check_program_types,
+    Environment, HostSignatures, Type, TypeCheckSite, check_program_types,
     check_program_types_with_hosts, check_program_types_with_hosts_and_slot_types,
     check_program_types_with_slot_types, definite_assignment, definite_assignment_slots,
 };
@@ -47,56 +48,6 @@ pub(crate) struct HostCheckSite {
     pub arguments: usize,
     pub bind: bool,
     pub line: usize,
-}
-
-/// Host-owned command contracts used by static checking.
-#[derive(Debug, Clone, Default)]
-pub struct HostSchema {
-    commands: BTreeMap<String, HostSignature>,
-    allow_unknown: bool,
-}
-
-impl HostSchema {
-    /// Creates a strict schema that reports every undeclared command.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Controls whether commands absent from the schema remain valid opaque
-    /// effects. This is useful for reference tools that know only part of a
-    /// host application's vocabulary.
-    #[must_use]
-    pub const fn allow_unknown(mut self, allow: bool) -> Self {
-        self.allow_unknown = allow;
-        self
-    }
-
-    /// Adds or replaces a command contract.
-    #[must_use]
-    pub fn command(mut self, name: impl Into<String>, signature: HostSignature) -> Self {
-        self.commands.insert(name.into(), signature);
-        self
-    }
-
-    /// Adds or replaces a command contract, returning the previous contract.
-    pub fn insert(
-        &mut self,
-        name: impl Into<String>,
-        signature: HostSignature,
-    ) -> Option<HostSignature> {
-        self.commands.insert(name.into(), signature)
-    }
-
-    #[must_use]
-    pub fn get(&self, name: &str) -> Option<&HostSignature> {
-        self.commands.get(name)
-    }
-
-    #[must_use]
-    pub const fn allows_unknown(&self) -> bool {
-        self.allow_unknown
-    }
 }
 
 impl CompiledScript {
@@ -341,7 +292,7 @@ impl CompiledScript {
             for site in &self.host_sites {
                 let name = self.host_name(site.host_id).unwrap_or("<unknown>");
                 match schema.get(name) {
-                    None if !schema.allow_unknown => diagnostics.push(Diagnostic::new(
+                    None if !schema.allows_unknown() => diagnostics.push(Diagnostic::new(
                         file,
                         site.line,
                         1,

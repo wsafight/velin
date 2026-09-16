@@ -36,9 +36,9 @@ pub fn check(source: &str) -> String {
 
 /// Runs a `.velin` `source` against the scripted host and returns a JSON
 /// `RunResult`. `replies_json` is a JSON array of answers for `ask` effects,
-/// consumed in order (integers, `true`/`false`, or strings); pass `"[]"` for
-/// none. Malformed JSON or unsupported values return a failed `RunResult`
-/// without executing the script.
+/// consumed in order. Integers, booleans, strings, lists, and records are
+/// accepted; pass `"[]"` for none. Malformed, unsupported, or over-budget
+/// values return a failed `RunResult` without executing the script.
 #[cfg(feature = "source")]
 #[wasm_bindgen]
 #[must_use]
@@ -61,6 +61,9 @@ pub fn run(source: &str, replies_json: &str) -> String {
 pub struct RuntimeMachine {
     machine: velin_vm::Machine,
 }
+
+#[cfg(feature = "runtime")]
+const MAX_RUNTIME_VALUE_JSON_BYTES: usize = 1024 * 1024;
 
 #[cfg(feature = "runtime")]
 #[wasm_bindgen]
@@ -97,6 +100,9 @@ impl RuntimeMachine {
     /// command has no return value.
     #[must_use]
     pub fn resume(&mut self, value_json: &str) -> String {
+        if value_json.len() > MAX_RUNTIME_VALUE_JSON_BYTES {
+            return runtime::error_to_json("invalid resume value: JSON exceeds 1 MiB");
+        }
         let value = match serde_json::from_str(value_json) {
             Ok(value) => value,
             Err(error) => return runtime::error_to_json(format!("invalid resume value: {error}")),

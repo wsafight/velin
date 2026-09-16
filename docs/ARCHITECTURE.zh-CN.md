@@ -240,7 +240,7 @@ CLI、WebAssembly 或其他宿主仍应按自己的风险模型增加时间、�
 
 ### LSP 与 VS Code
 
-`velin-lsp` 使用 stdio JSON-RPC，提供可恢复的多错误诊断、补全、标签文档符号、悬停说明，以及标签定义/引用导航。它直接调用 `velin-lang` 和 `velin-check`，不维护第二套语言语义；未知请求返回标准 `MethodNotFound`。
+`velin-lsp` 使用 stdio JSON-RPC，提供可恢复的多错误诊断、补全、签名帮助、标签文档符号、悬停说明，以及标签定义/引用导航。嵌入式编辑器可以构造 `Server::with_host_schema`，让宿主诊断、补全详情、签名与文档全部来自运行时的 `HostSchema`。它直接调用 `velin-lang` 和 `velin-check`，不维护第二套语言语义；未知请求返回标准 `MethodNotFound`。
 
 VS Code 扩展负责 `.velin` 文件注册、TextMate 高亮和启动 LSP。各平台发布的 VSIX 内置对应原生服务器，也允许用显式配置覆盖。
 

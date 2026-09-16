@@ -10,6 +10,8 @@ change source and Rust APIs between minor releases.
 
 - Unified `ExecutionPolicy` budgets for VM fuel, host effects, call depth, runtime data, host queues, progress callbacks, and cooperative cancellation.
 - Layered source, Rust API, artifact, and C ABI compatibility policies with versioned source/artifact fixtures.
+- Typed host command declarations shared by static checking, runtime validation, synchronous/asynchronous host drivers, and schema-aware LSP completion, signature help, and hover.
+- Budget-aware, path-reporting Serde value marshalling plus complete List/Record JSON input and output for WebAssembly and the append-only C ABI extension.
 
 ### Changed
 

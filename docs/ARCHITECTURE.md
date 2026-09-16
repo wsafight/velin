@@ -240,7 +240,7 @@ CLI, WebAssembly, and other hosts should add time, effect permission, and extern
 
 ### LSP and VS Code
 
-`velin-lsp` speaks JSON-RPC over stdio and provides recovering multi-error diagnostics, completion, label document symbols, hover, and label definition/reference navigation. It directly calls `velin-lang` and `velin-check` instead of maintaining a second set of language semantics. Unknown requests return the standard `MethodNotFound` response.
+`velin-lsp` speaks JSON-RPC over stdio and provides recovering multi-error diagnostics, completion, signature help, label document symbols, hover, and label definition/reference navigation. An embedding editor can construct `Server::with_host_schema` so host diagnostics, completion details, signatures, and documentation all come from the runtime's `HostSchema`. It directly calls `velin-lang` and `velin-check` instead of maintaining a second set of language semantics. Unknown requests return the standard `MethodNotFound` response.
 
 The VS Code extension registers `.velin` files, provides TextMate highlighting, and launches the LSP. Platform release VSIX packages bundle the matching native server; explicit configuration can override it.
 

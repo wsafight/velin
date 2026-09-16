@@ -157,3 +157,46 @@ fn label_navigation_survives_an_error_between_references() {
     assert!(references.iter().all(|range| range.line > 1));
     assert!(label_definition(source, 5, 7).is_some());
 }
+
+#[test]
+fn host_schema_drives_diagnostics_completion_hover_and_signature_help() {
+    let schema = HostSchema::new().declare(
+        HostCommand::new(
+            "ask",
+            velin::HostSignature::exact(
+                vec![velin::Type::String, velin::Type::Integer],
+                Some(velin::Type::Boolean),
+            ),
+        )
+        .description("Ask a question with a retry limit."),
+    );
+    let source = "answer = perform ask(\"Ready?\", 3)\n";
+
+    assert!(diagnostics_with_host_schema("t.velin", source, &schema).is_empty());
+    assert!(
+        diagnostics_with_host_schema("t.velin", "perform missing()\n", &schema)
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("not declared"))
+    );
+    let completion = completions_with_host_schema(source, &schema)
+        .into_iter()
+        .find(|completion| completion.label == "ask")
+        .unwrap();
+    assert_eq!(completion.detail, "ask(string, integer) -> boolean");
+    assert_eq!(
+        completion.documentation.as_deref(),
+        Some("Ask a question with a retry limit.")
+    );
+    let hover = hover_with_host_schema(source, 1, 20, &schema).unwrap();
+    assert!(hover.contents.contains("ask(string, integer) -> boolean"));
+    assert!(hover.contents.contains("retry limit"));
+
+    let help = signature_help(source, 1, 33, &schema).unwrap();
+    assert_eq!(help.label, "ask(string, integer) -> boolean");
+    assert_eq!(help.parameters, vec!["string", "integer"]);
+    assert_eq!(help.active_parameter, 1);
+
+    let quoted_keyword = "answer = perform ask(\"perform fake(\", 3)\n";
+    let help = signature_help(quoted_keyword, 1, 40, &schema).unwrap();
+    assert_eq!(help.active_parameter, 1);
+}

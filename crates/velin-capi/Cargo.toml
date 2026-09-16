@@ -16,7 +16,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 serde_json.workspace = true
 velin-bytecode = { workspace = true, features = ["serde"] }
 velin-vm = { workspace = true, default-features = false }
-velin-syntax = { workspace = true, default-features = false }
+velin-syntax = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }

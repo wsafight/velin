@@ -80,6 +80,18 @@ impl HostSignature {
         self.arguments.len()
     }
 
+    /// Returns the fixed leading argument types in declaration order.
+    #[must_use]
+    pub fn arguments(&self) -> &[Type] {
+        &self.arguments
+    }
+
+    /// Returns the repeated trailing argument type, when this is variadic.
+    #[must_use]
+    pub const fn variadic_type(&self) -> Option<Type> {
+        self.variadic
+    }
+
     #[must_use]
     pub fn is_variadic(&self) -> bool {
         self.variadic.is_some()

@@ -64,7 +64,11 @@ fn parse_replies_accepts_scalars_and_rejects_the_entire_invalid_input() {
     ));
     assert_eq!(
         parse_replies("[1, null, 2]"),
-        Err(ParseRepliesError::UnsupportedValue { index: 2 })
+        Err(ParseRepliesError::UnsupportedValue {
+            index: 2,
+            path: "$".to_owned(),
+            message: "null is not a Velin value".to_owned(),
+        })
     );
     assert_eq!(
         parse_replies(&" ".repeat(MAX_REPLIES_JSON_BYTES + 1)),
@@ -123,9 +127,38 @@ fn run_covers_compile_runtime_and_host_paths() {
 
     assert!(matches!(
         parse_replies("[1.5, null, {}, []]"),
-        Err(ParseRepliesError::UnsupportedValue { index: 1 })
+        Err(ParseRepliesError::UnsupportedValue { index: 1, .. })
     ));
     assert!(parse_replies("[]").unwrap().is_empty());
+}
+
+#[test]
+fn parse_replies_preserves_lists_records_order_and_nested_error_paths() {
+    let replies = parse_replies(r#"[[1, true], {"z": 2, "a": [3]}]"#).unwrap();
+    assert_eq!(
+        replies[0],
+        Value::List(std::sync::Arc::new(vec![
+            Value::Integer(1),
+            Value::Boolean(true),
+        ]))
+    );
+    let Value::Record(record) = &replies[1] else {
+        panic!("expected record")
+    };
+    assert_eq!(
+        record.keys().map(String::as_str).collect::<Vec<_>>(),
+        vec!["a", "z"]
+    );
+
+    let error = parse_replies(r#"[{"items": [1, null]}]"#).unwrap_err();
+    assert!(matches!(
+        error,
+        ParseRepliesError::UnsupportedValue {
+            index: 1,
+            ref path,
+            ..
+        } if path == "$[\"items\"][1]"
+    ));
 }
 
 #[test]

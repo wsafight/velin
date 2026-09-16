@@ -20,3 +20,25 @@ fn wasm_bindings_return_json() {
     assert!(shifted.contains("item 2"), "{shifted}");
     assert!(!shifted.contains("first\""), "{shifted}");
 }
+
+#[cfg(feature = "runtime")]
+#[test]
+fn runtime_binding_accepts_compounds_and_caps_resume_json() {
+    let script = velin::compile(
+        "runtime.velin",
+        "answer = perform ask()\nperform emit(answer)\n",
+    )
+    .unwrap();
+    let program = serde_json::to_string(&*script.program).unwrap();
+    let mut machine = super::RuntimeMachine::new(&program).unwrap();
+    assert!(machine.run().contains("\"kind\":\"host\""));
+    let resumed = machine.resume(r#"{"items":[1,true]}"#);
+    assert!(resumed.contains(r#""values":[{"items":[1,true]}]"#));
+
+    let script = velin::compile("runtime.velin", "answer = perform ask()\n").unwrap();
+    let program = serde_json::to_string(&*script.program).unwrap();
+    let mut machine = super::RuntimeMachine::new(&program).unwrap();
+    let _ = machine.run();
+    let oversized = " ".repeat(super::MAX_RUNTIME_VALUE_JSON_BYTES + 1);
+    assert!(machine.resume(&oversized).contains("JSON exceeds 1 MiB"));
+}

@@ -36,7 +36,7 @@ if diagnostics.iter().any(velin::Diagnostic::is_error) {
 
 `check_script` runs CFG-aware type propagation and definite-assignment analysis. It does not mutate the program.
 
-For a known host vocabulary, build a `HostSchema` from `HostSignature::exact` or `HostSignature::variadic`, then call `check_script_with_host_schema`. This adds command-name, arity, argument, binding, and return-flow checks without putting host-specific names into the language.
+For a known host vocabulary, declare `HostCommand` values with `HostSignature::exact` or `HostSignature::variadic`, add them to a `HostSchema`, then call `check_script_with_host_schema`. The optional command description is also consumed by schema-aware LSP completion, signature help, and hover. This adds command-name, arity, argument, binding, and return-flow checks without putting host-specific names into the language.
 
 For value-in/value-out extensions, use `PureModule`. It compiles with an explicit input type map, permits only the `return(value)` and `fail(message)` control signals, rejects all other host commands and `random`/`chance`, and creates a fresh VM state for every invocation:
 
@@ -55,9 +55,11 @@ assert_eq!(result, Value::Integer(42));
 
 `PureModule::invoke` reports missing or unknown inputs, input type mismatches, explicit failures, a missing return, fuel exhaustion, cancellation, and VM execution errors through `PureModuleError`. Use `PureModule::invoke_with_policy` or `PureModule::invoker_with_policy` when the module needs a non-default `ExecutionPolicy`; the reusable invoker restarts its cumulative budget for each invocation.
 
-For most surface-language hosts, prefer `ScriptRunner`: it validates bytecode, installs defaults, resolves host IDs to names, applies the shared `ExecutionPolicy`, and can apply the same `HostSchema` at runtime. Use `ScriptRunner::configured_with_policy` for explicit fuel, cancellation, value, and host budgets. Use `Machine` directly when an embedder needs lower-level control.
+For most surface-language hosts, prefer `SyncHostDriver` or `AsyncHostDriver`. Registering a handler together with its `HostCommand` makes that declaration drive static checking, ID/name dispatch, and runtime argument/reply validation. Both drivers return the final `Machine`. Use `ScriptRunner` directly when the application needs manual suspension or batching; it validates bytecode, installs defaults, resolves host IDs to names, applies the shared `ExecutionPolicy`, and can apply the same `HostSchema` at runtime.
 
 For consecutive commands without a return value, use `ScriptRunner::run_effect_batch` to collect events before handing them to the host. `HostEventQueue` lives in the host driver and applies event-count, value-count, and text-byte backpressure; a bound command remains a natural barrier handled through `run` / `resume`.
+
+For serializable application DTOs, `to_value` and `from_value` provide Serde conversion with explicit `MarshallingLimits`. They preserve the `i64` integer range and stable record order, reject null and floating-point data, and report the exact failing field or list index. The C ABI retains its original display-only compound tag and adds opt-in `*_json` run/resume/batch/restart functions using `VELIN_VALUE_JSON`, so ABI version 1 hosts can adopt List/Record input and output without changing existing calls.
 
 ## Create a machine
 

@@ -68,25 +68,25 @@ answer = perform ask("Continue?")
 
 ## 声明宿主契约
 
-核心保持宿主无关，但嵌入方可以在边界提供 `HostSchema`。严格 schema 会报告未声明命令，并检查参数数量、参数类型、绑定命令是否返回值，以及该返回值向后传播的类型。
+核心保持宿主无关，但嵌入方可以在边界提供 `HostSchema`。严格 schema 会报告未声明命令，并检查参数数量、参数类型、绑定命令是否返回值，以及该返回值向后传播的类型。`HostCommand` 在签名上增加命令名和可选文档，让检查器、运行时驱动与 LSP 共同读取一份声明。
 
 ```rust
-use velin::{HostSchema, HostSignature, Type, check_script_with_host_schema};
+use velin::{HostCommand, HostSchema, HostSignature, Type, check_script_with_host_schema};
 
 let schema = HostSchema::new()
-    .command(
+    .declare(HostCommand::new(
         "say",
         HostSignature::variadic(Vec::new(), Type::Unknown, None),
-    )
-    .command(
+    ).description("把值写入对话日志。"))
+    .declare(HostCommand::new(
         "ask",
         HostSignature::exact(vec![Type::String], Some(Type::Integer)),
-    );
+    ).description("请玩家选择一个选项。"));
 
 let diagnostics = check_script_with_host_schema("rules.velin", &script, &schema);
 ```
 
-当工具只建模宿主词汇的一部分时，使用 `.allow_unknown(true)`。`ScriptRunner::configured` 接受同一 schema，在运行时校验参数与回复。回复类型错误可修正后重试；非法调用或效果预算耗尽对该 runner 是终止错误。
+当工具只建模宿主词汇的一部分时，使用 `.allow_unknown(true)`。`ScriptRunner::configured` 接受同一 schema，在运行时校验参数与回复。`Server::with_host_schema` 会把签名和文档用于 LSP 诊断、补全、签名帮助与 hover。回复类型错误可修正后重试；非法调用或效果预算耗尽对该 runner 是终止错误。
 
 `PureModule` 使用一份严格的内部 schema，并只接受两个终止命令：`return(value)` 产生模块结果，`fail(message)` 产生受控失败。其他 `perform` 命令都会被拒绝，包含 `random` 或 `chance` 的模块也会在编译期拒绝。每次 `PureModule::invoke` 都从新的初始帧开始，调用之间不会携带变量或执行状态。
 
@@ -101,45 +101,46 @@ let diagnostics = check_script_with_host_schema("rules.velin", &script, &schema)
 
 CLI 与 Playground 每次运行最多接受 1,000 次宿主效果和 1 MiB 输出。Playground 还把回复 JSON 限制为 1 MiB。这些是工具限制，不是语言语义。
 
-## 最小 Rust 宿主
+## Schema 驱动的 Rust 宿主
 
 ```rust
-use velin::{ScriptRunner, ScriptYield, Value, compile};
-
-fn reply_for(name: &str, values: &[Value]) -> Result<Option<Value>, String> {
-    match name {
-        "say" => {
-            for (i, value) in values.iter().enumerate() {
-                if i > 0 {
-                    print!(" ");
-                }
-                print!("{}", value.try_to_display().map_err(|e| e.to_string())?);
-            }
-            println!();
-            Ok(None)
-        }
-        "ask" => Ok(Some(Value::Integer(1))),
-        other => Err(format!("unsupported effect: {other}")),
-    }
-}
+use velin::{HostCommand, HostSignature, SyncHostDriver, Type, Value, compile};
 
 fn drive(source: &str) -> Result<(), String> {
     let script = compile("rules.velin", source).map_err(|e| e.to_string())?;
-    let mut runner = ScriptRunner::new(&script).map_err(|e| e.to_string())?;
-    let mut outcome = runner.run().map_err(|e| e.to_string())?;
-    loop {
-        match outcome {
-            ScriptYield::Finished => return Ok(()),
-            ScriptYield::Host { name, values } => {
-                let reply = reply_for(&name, &values)?;
-                outcome = runner.resume(reply).map_err(|e| e.to_string())?;
-            }
-        }
-    }
+    let mut host = SyncHostDriver::<String>::new()
+        .command(
+            HostCommand::new(
+                "say",
+                HostSignature::variadic(Vec::new(), Type::Unknown, None),
+            ).description("把值写入对话日志。"),
+            |values| {
+                let rendered = values.iter()
+                    .map(Value::try_to_display)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(str::to_owned)?;
+                println!("{}", rendered.join(" "));
+                Ok(None)
+            },
+        )
+        .command(
+            HostCommand::new(
+                "ask",
+                HostSignature::exact(vec![Type::String], Some(Type::Integer)),
+            ).description("请玩家选择一个选项。"),
+            |_| Ok(Some(Value::Integer(1))),
+        );
+    host.run("rules.velin", &script)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 ```
 
-把 `reply_for` 换成界面、网络或存储。把这些逻辑留在脚本外面。
+`AsyncHostDriver` 为返回 future 的处理器提供相同的注册和检查。两种驱动都会在分派前拒绝静态 schema 错误，并返回执行完成的 `Machine`，便于宿主读取最终状态。
+
+## Serde 值编组
+
+`to_value` 与 `from_value` 可以转换可序列化 DTO，而不会把原生对象加入 VM。每次转换都应用明确的 `MarshallingLimits`，限制节点数、集合深度与 UTF-8 字节数。Record 键保持稳定顺序，整数必须落在 `i64` 范围内，错误会指出具体字段或 List 下标。JSON `null` 和浮点数没有对应的 Velin 类型，因此会被拒绝。
 
 ## 宿主就是信任边界
 

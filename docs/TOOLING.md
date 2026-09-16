@@ -60,12 +60,13 @@ cargo build -p velin-lsp
 `velin-lsp` provides:
 
 - Live parser, lowering, type, and definite-assignment diagnostics.
-- Completion for keywords, built-ins, variables, and labels.
+- Completion for keywords, built-ins, variables, labels, and configured host commands.
 - Document symbols for labels.
-- Hover help for language names and go-to-definition/reference search for labels.
+- Hover help for language names, schema-backed host signature help/documentation, and go-to-definition/reference search for labels.
 - Standard JSON-RPC `MethodNotFound` responses for unsupported requests.
 
 The server limits JSON-RPC messages to 4 MiB and bounds header size before allocating the body.
+Embedders that launch the reusable Rust server can use `Server::with_host_schema`; the standalone stdio binary remains host-neutral.
 
 ## VS Code extension
 

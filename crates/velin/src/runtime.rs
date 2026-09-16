@@ -1,8 +1,10 @@
 //! Shared script instantiation and bounded host-effect driving.
 
+#[cfg(test)]
+use crate::Type;
 use crate::{
     CompiledScript, DEFAULT_RNG_SEED, EvalError, EvalErrorKind, ExecutionPolicy, HostSchema,
-    Machine, ProgramValidationError, SetVariableError, Type, Value, Yield,
+    Machine, ProgramValidationError, SetVariableError, Value, Yield,
 };
 use velin_bytecode::InitialFrame;
 
@@ -177,6 +179,12 @@ impl<'a> ScriptRunner<'a> {
     #[must_use]
     pub const fn machine(&self) -> &Machine {
         &self.machine
+    }
+
+    /// Consumes the runner and returns its final machine state.
+    #[must_use]
+    pub fn into_machine(self) -> Machine {
+        self.machine
     }
 
     /// Installs a value into a slot before running an independently compiled
@@ -414,34 +422,10 @@ impl<'a> ScriptRunner<'a> {
         let Some(schema) = self.schema else {
             return Ok(());
         };
-        let Some(signature) = schema.get(name) else {
-            return if schema.allows_unknown() {
-                Ok(())
-            } else {
-                Err(format!("command `{name}` is not declared"))
-            };
-        };
-        if !signature.accepts(values.len()) {
-            return Err(format!(
-                "command `{name}` does not accept {} argument(s)",
-                values.len()
-            ));
-        }
-        for (index, value) in values.iter().enumerate() {
-            let Some(expected) = signature.argument(index) else {
-                continue;
-            };
-            let actual = Type::from(value);
-            if !actual.could_be(expected) {
-                return Err(format!(
-                    "command `{name}` argument {} expects {}, found {}",
-                    index + 1,
-                    expected.name(),
-                    actual.name()
-                ));
-            }
-        }
-        Ok(())
+        schema
+            .validate_call(name, values)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     }
 
     fn validate_reply(&self, value: Option<&Value>) -> Result<(), ScriptRunError> {
@@ -450,24 +434,9 @@ impl<'a> ScriptRunner<'a> {
         else {
             return Ok(());
         };
-        let Some(signature) = schema.get(name) else {
-            return Ok(());
-        };
-        let Some(expected) = signature.returns() else {
-            return Err(ScriptRunError::HostContract(format!(
-                "command `{name}` does not return a value"
-            )));
-        };
-        let actual = Type::from(value);
-        if actual.could_be(expected) {
-            Ok(())
-        } else {
-            Err(ScriptRunError::HostContract(format!(
-                "command `{name}` returns {}, found {}",
-                expected.name(),
-                actual.name()
-            )))
-        }
+        schema
+            .validate_reply(name, Some(value))
+            .map_err(|error| ScriptRunError::HostContract(error.to_string()))
     }
 }
 

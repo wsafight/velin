@@ -31,7 +31,7 @@ const ran = JSON.parse(run(`perform say("hi")\n`, "[]"));
 | `say(values...)` | 向 `output` 追加一行 |
 | `ask(prompt...)` | 从 `repliesJson` 取下一个 JSON 值 |
 
-`repliesJson` 是整数、布尔或字符串的 JSON 数组，例如 `[1]` 或 `["east"]`。畸形 JSON 或任意不支持的项会返回失败的 `RunResult`，且不会执行脚本。其他命令名会写进 `output`，并无返回值地恢复，与 CLI 对未知命令的行为一致。
+`repliesJson` 是 Velin 值的 JSON 数组，可包含整数、布尔、字符串、List 或 Record。例如 `[1]`、`["east"]` 和 `[{"items":[1, 2]}]` 都有效；Record 会规范成稳定键顺序。null、浮点、越界、超预算或畸形值会返回失败的 `RunResult`，错误中包含失败项和嵌套路径，并且不会执行脚本。其他命令名会写进 `output`，并无返回值地恢复，与 CLI 对未知命令的行为一致。
 
 执行失败时（溢出、缺下标、回复用尽、fuel 预算或取消）`RunResult` 还会带 `error`。
 

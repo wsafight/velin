@@ -301,3 +301,79 @@ fn diagnostics_include_hints_and_warning_severity() {
             .contains("hint: delete it")
     );
 }
+
+#[test]
+fn configured_schema_reaches_every_host_editor_feature() {
+    let schema = HostSchema::new().declare(
+        velin::HostCommand::new(
+            "ask",
+            velin::HostSignature::exact(vec![velin::Type::String], Some(velin::Type::Integer)),
+        )
+        .description("Ask the player."),
+    );
+    let source = "answer = perform ask(\"Ready?\")\n";
+    let mut input = stream(&[
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": { "textDocument": {
+                "uri": "file:///host.velin",
+                "text": source,
+            } },
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 20,
+            "method": "textDocument/completion",
+            "params": { "textDocument": { "uri": "file:///host.velin" } },
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": { "uri": "file:///host.velin" },
+                "position": { "line": 0, "character": 19 },
+            },
+        }),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 22,
+            "method": "textDocument/signatureHelp",
+            "params": {
+                "textDocument": { "uri": "file:///host.velin" },
+                "position": { "line": 0, "character": 28 },
+            },
+        }),
+        json!({ "jsonrpc": "2.0", "id": 99, "method": "shutdown" }),
+        json!({ "jsonrpc": "2.0", "method": "exit" }),
+    ]);
+    let mut output = Vec::new();
+    Server::with_host_schema(&mut output, schema)
+        .run(&mut input)
+        .unwrap();
+    let messages = parse_all(output);
+    let response = |id| {
+        messages
+            .iter()
+            .find(|message| message.get("id") == Some(&json!(id)))
+            .unwrap()
+    };
+    assert!(
+        response(20)["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["label"] == "ask" && item["documentation"] == "Ask the player.")
+    );
+    assert!(
+        response(21)["result"]["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("Ask the player.")
+    );
+    assert_eq!(
+        response(22)["result"]["signatures"][0]["label"],
+        "ask(string) -> integer"
+    );
+}

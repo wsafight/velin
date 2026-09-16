@@ -76,25 +76,25 @@ Unknown commands are still valid Velin. The CLI prints them and continues; a pro
 
 ## Declare host contracts
 
-The core stays host-agnostic, but an embedder can supply a `HostSchema` at its boundary. A strict schema reports undeclared commands and checks arity, argument types, whether a bound command returns a value, and the type propagated from that return value.
+The core stays host-agnostic, but an embedder can supply a `HostSchema` at its boundary. A strict schema reports undeclared commands and checks arity, argument types, whether a bound command returns a value, and the type propagated from that return value. `HostCommand` adds the command name and optional documentation to that signature, making one declaration available to the checker, runtime drivers, and LSP.
 
 ```rust
-use velin::{HostSchema, HostSignature, Type, check_script_with_host_schema};
+use velin::{HostCommand, HostSchema, HostSignature, Type, check_script_with_host_schema};
 
 let schema = HostSchema::new()
-    .command(
+    .declare(HostCommand::new(
         "say",
         HostSignature::variadic(Vec::new(), Type::Unknown, None),
-    )
-    .command(
+    ).description("Write values to the conversation log."))
+    .declare(HostCommand::new(
         "ask",
         HostSignature::exact(vec![Type::String], Some(Type::Integer)),
-    );
+    ).description("Ask the player to choose an option."));
 
 let diagnostics = check_script_with_host_schema("rules.velin", &script, &schema);
 ```
 
-Use `.allow_unknown(true)` when a tool intentionally models only part of a host vocabulary. `ScriptRunner::configured` accepts the same schema for runtime argument and reply validation. A reply type error can be corrected and retried; an invalid call or exhausted effect budget is terminal for that runner.
+Use `.allow_unknown(true)` when a tool intentionally models only part of a host vocabulary. `ScriptRunner::configured` accepts the same schema for runtime argument and reply validation. `Server::with_host_schema` exposes its signatures and documentation through LSP diagnostics, completion, signature help, and hover. A reply type error can be corrected and retried; an invalid call or exhausted effect budget is terminal for that runner.
 
 `PureModule` uses a strict private schema with two terminating commands: `return(value)` produces the module result and `fail(message)` produces a controlled failure. No other `perform` command is accepted, and modules containing `random` or `chance` are rejected at compile time. Each `PureModule::invoke` starts from a fresh initial frame, so values and execution state never carry across calls.
 
@@ -109,45 +109,46 @@ The line-oriented reference host implements two names so examples can run withou
 
 CLI and Playground runs accept at most 1,000 host effects and 1 MiB of output. The Playground also caps reply JSON at 1 MiB. These caps are tooling limits, not language semantics.
 
-## A minimal Rust host
+## A schema-backed Rust host
 
 ```rust
-use velin::{ScriptRunner, ScriptYield, Value, compile};
-
-fn reply_for(name: &str, values: &[Value]) -> Result<Option<Value>, String> {
-    match name {
-        "say" => {
-            for (i, value) in values.iter().enumerate() {
-                if i > 0 {
-                    print!(" ");
-                }
-                print!("{}", value.try_to_display().map_err(|e| e.to_string())?);
-            }
-            println!();
-            Ok(None)
-        }
-        "ask" => Ok(Some(Value::Integer(1))),
-        other => Err(format!("unsupported effect: {other}")),
-    }
-}
+use velin::{HostCommand, HostSignature, SyncHostDriver, Type, Value, compile};
 
 fn drive(source: &str) -> Result<(), String> {
     let script = compile("rules.velin", source).map_err(|e| e.to_string())?;
-    let mut runner = ScriptRunner::new(&script).map_err(|e| e.to_string())?;
-    let mut outcome = runner.run().map_err(|e| e.to_string())?;
-    loop {
-        match outcome {
-            ScriptYield::Finished => return Ok(()),
-            ScriptYield::Host { name, values } => {
-                let reply = reply_for(&name, &values)?;
-                outcome = runner.resume(reply).map_err(|e| e.to_string())?;
-            }
-        }
-    }
+    let mut host = SyncHostDriver::<String>::new()
+        .command(
+            HostCommand::new(
+                "say",
+                HostSignature::variadic(Vec::new(), Type::Unknown, None),
+            ).description("Write values to the conversation log."),
+            |values| {
+                let rendered = values.iter()
+                    .map(Value::try_to_display)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(str::to_owned)?;
+                println!("{}", rendered.join(" "));
+                Ok(None)
+            },
+        )
+        .command(
+            HostCommand::new(
+                "ask",
+                HostSignature::exact(vec![Type::String], Some(Type::Integer)),
+            ).description("Ask the player to choose an option."),
+            |_| Ok(Some(Value::Integer(1))),
+        );
+    host.run("rules.velin", &script)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 ```
 
-Replace `reply_for` with UI, networking, or storage. Keep that logic out of the script.
+`AsyncHostDriver` provides the same registration and checks for handlers that return futures. Both drivers reject static schema errors before dispatch and return the completed `Machine` so the host can inspect final state.
+
+## Serde value marshalling
+
+`to_value` and `from_value` convert serializable DTOs without adding native objects to the VM. Every conversion applies explicit `MarshallingLimits` for node count, collection depth, and UTF-8 bytes. Records use stable key ordering, integers must fit `i64`, and failures identify the exact field or list index. JSON `null` and floating-point numbers are rejected because Velin has no matching value type.
 
 ## The host is the trust boundary
 

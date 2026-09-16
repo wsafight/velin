@@ -14,12 +14,8 @@
 //! [`analysis`], and the request loop in [`server`]. Point any LSP client at
 //! the `velin-lsp` binary (stdio transport) to use it.
 
-mod analysis;
-mod protocol;
-mod server;
-
-use server::Server;
 use std::io::{self, BufReader};
+use velin_lsp::Server;
 
 fn main() -> io::Result<()> {
     let stdin = io::stdin();

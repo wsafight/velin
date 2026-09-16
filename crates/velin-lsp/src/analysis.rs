@@ -7,7 +7,18 @@
 //! the script's labels. The server layer (`server.rs`) only has to translate
 //! these into LSP JSON — no language logic lives there.
 
-use velin::{Diagnostic, Stmt, check_script, compile, parse_program_recovering};
+use velin::{
+    Diagnostic, HostCommand, HostSchema, Stmt, check_script, check_script_with_host_schema,
+    compile, parse_program_recovering,
+};
+
+#[path = "analysis/cursor.rs"]
+mod cursor;
+#[path = "analysis/navigation.rs"]
+mod navigation;
+use cursor::{host_call_at, word_at};
+use navigation::label_occurrences;
+pub use navigation::{label_definition, label_references};
 
 /// The statement keywords the surface language recognises, offered as
 /// completions regardless of parse state.
@@ -35,7 +46,8 @@ pub enum CompletionKind {
 pub struct Completion {
     pub label: String,
     pub kind: CompletionKind,
-    pub detail: &'static str,
+    pub detail: String,
+    pub documentation: Option<String>,
 }
 
 /// A named jump target with the line it is defined on (1-based), for the
@@ -62,11 +74,13 @@ pub struct Hover {
     pub range: SourceRange,
 }
 
+/// Host-call signature information at a source position.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct LabelOccurrence {
-    name: String,
-    range: SourceRange,
-    declaration: bool,
+pub struct SignatureHelp {
+    pub label: String,
+    pub documentation: Option<String>,
+    pub parameters: Vec<String>,
+    pub active_parameter: usize,
 }
 
 /// Computes syntax, lowering, and static-check diagnostics for `text`.
@@ -74,6 +88,20 @@ struct LabelOccurrence {
 /// checks only run once the document is syntactically complete.
 #[must_use]
 pub fn diagnostics(file: &str, text: &str) -> Vec<Diagnostic> {
+    diagnostics_inner(file, text, None)
+}
+
+/// Computes diagnostics using the host application's command declarations.
+#[must_use]
+pub fn diagnostics_with_host_schema(
+    file: &str,
+    text: &str,
+    schema: &HostSchema,
+) -> Vec<Diagnostic> {
+    diagnostics_inner(file, text, Some(schema))
+}
+
+fn diagnostics_inner(file: &str, text: &str, schema: Option<&HostSchema>) -> Vec<Diagnostic> {
     let recovered = parse_program_recovering(text);
     if !recovered.errors.is_empty() {
         return recovered
@@ -83,7 +111,10 @@ pub fn diagnostics(file: &str, text: &str) -> Vec<Diagnostic> {
             .collect();
     }
     match compile(file, text) {
-        Ok(script) => check_script(file, &script),
+        Ok(script) => schema.map_or_else(
+            || check_script(file, &script),
+            |schema| check_script_with_host_schema(file, &script, schema),
+        ),
         Err(diagnostic) => vec![diagnostic],
     }
 }
@@ -92,19 +123,40 @@ pub fn diagnostics(file: &str, text: &str) -> Vec<Diagnostic> {
 /// vocabulary plus every variable and label recoverable from the current text.
 #[must_use]
 pub fn completions(text: &str) -> Vec<Completion> {
+    completions_inner(text, None)
+}
+
+/// Builds completions including every command in the supplied host schema.
+#[must_use]
+pub fn completions_with_host_schema(text: &str, schema: &HostSchema) -> Vec<Completion> {
+    completions_inner(text, Some(schema))
+}
+
+fn completions_inner(text: &str, schema: Option<&HostSchema>) -> Vec<Completion> {
     let mut items: Vec<Completion> = KEYWORDS
         .iter()
         .map(|keyword| Completion {
             label: (*keyword).to_owned(),
             kind: CompletionKind::Keyword,
-            detail: "keyword",
+            detail: "keyword".to_owned(),
+            documentation: None,
         })
         .chain(BUILTINS.iter().map(|name| Completion {
             label: (*name).to_owned(),
             kind: CompletionKind::Function,
-            detail: "builtin",
+            detail: "builtin".to_owned(),
+            documentation: None,
         }))
         .collect();
+
+    if let Some(schema) = schema {
+        items.extend(schema.commands().map(|command| Completion {
+            label: command.name().to_owned(),
+            kind: CompletionKind::Function,
+            detail: command.signature_label(),
+            documentation: command.documentation().map(str::to_owned),
+        }));
+    }
 
     let recovered = parse_program_recovering(text);
     let mut variables = Vec::new();
@@ -117,12 +169,14 @@ pub fn completions(text: &str) -> Vec<Completion> {
     items.extend(variables.into_iter().map(|name| Completion {
         label: name,
         kind: CompletionKind::Variable,
-        detail: "variable",
+        detail: "variable".to_owned(),
+        documentation: None,
     }));
     items.extend(labels.into_iter().map(|name| Completion {
         label: name,
         kind: CompletionKind::Label,
-        detail: "label",
+        detail: "label".to_owned(),
+        documentation: None,
     }));
 
     items
@@ -140,6 +194,26 @@ pub fn document_symbols(text: &str) -> Vec<LabelSymbol> {
 /// Returns concise language information for the identifier at `line`/`column`.
 #[must_use]
 pub fn hover(text: &str, line: usize, column: usize) -> Option<Hover> {
+    hover_inner(text, line, column, None)
+}
+
+/// Returns hover information enriched by the host application's schema.
+#[must_use]
+pub fn hover_with_host_schema(
+    text: &str,
+    line: usize,
+    column: usize,
+    schema: &HostSchema,
+) -> Option<Hover> {
+    hover_inner(text, line, column, Some(schema))
+}
+
+fn hover_inner(
+    text: &str,
+    line: usize,
+    column: usize,
+    schema: Option<&HostSchema>,
+) -> Option<Hover> {
     let (word, range) = word_at(text, line, column)?;
     let contents = if let Some(description) = keyword_description(word) {
         format!("`{word}` keyword\n\n{description}")
@@ -167,9 +241,16 @@ pub fn hover(text: &str, line: usize, column: usize) -> Option<Hover> {
                 let mut hosts = Vec::new();
                 collect_hosts(&recovered.statements, &mut hosts);
                 if hosts.iter().any(|name| name == word) {
-                    format!(
-                        "`{word}` host command\n\nBehavior and return type are supplied by the embedder."
-                    )
+                    schema
+                        .and_then(|schema| schema.command_info(word))
+                        .map_or_else(
+                            || {
+                                format!(
+                                    "`{word}` host command\n\nBehavior and return type are supplied by the embedder."
+                                )
+                            },
+                            host_hover,
+                        )
                 } else {
                     return None;
                 }
@@ -179,38 +260,44 @@ pub fn hover(text: &str, line: usize, column: usize) -> Option<Hover> {
     Some(Hover { contents, range })
 }
 
-/// Finds the declaration targeted by the label occurrence under the cursor.
+/// Returns schema-backed signature help for the host call at the cursor.
 #[must_use]
-pub fn label_definition(text: &str, line: usize, column: usize) -> Option<SourceRange> {
-    let lines: Vec<&str> = text.lines().collect();
-    let recovered = parse_program_recovering(text);
-    let occurrences = label_occurrences(&recovered.statements, &lines);
-    let selected = occurrence_at(&occurrences, line, column)?;
-    occurrences
-        .iter()
-        .find(|item| item.declaration && item.name == selected.name)
-        .map(|item| item.range)
-}
-
-/// Finds every use of the label occurrence under the cursor.
-#[must_use]
-pub fn label_references(
+pub fn signature_help(
     text: &str,
     line: usize,
     column: usize,
-    include_declaration: bool,
-) -> Vec<SourceRange> {
-    let lines: Vec<&str> = text.lines().collect();
-    let recovered = parse_program_recovering(text);
-    let occurrences = label_occurrences(&recovered.statements, &lines);
-    let Some(selected) = occurrence_at(&occurrences, line, column) else {
-        return Vec::new();
-    };
-    occurrences
+    schema: &HostSchema,
+) -> Option<SignatureHelp> {
+    let (name, active_parameter) = host_call_at(text, line, column)?;
+    let command = schema.command_info(&name)?;
+    let mut parameters: Vec<String> = command
+        .signature()
+        .arguments()
         .iter()
-        .filter(|item| item.name == selected.name && (include_declaration || !item.declaration))
-        .map(|item| item.range)
-        .collect()
+        .map(|argument| argument.name().to_owned())
+        .collect();
+    if let Some(variadic) = command.signature().variadic_type() {
+        parameters.push(format!("{}...", variadic.name()));
+    }
+    let active_parameter = active_parameter.min(parameters.len().saturating_sub(1));
+    Some(SignatureHelp {
+        label: command.signature_label(),
+        documentation: command.documentation().map(str::to_owned),
+        parameters,
+        active_parameter,
+    })
+}
+
+fn host_hover(command: &HostCommand) -> String {
+    let mut contents = format!(
+        "```velin\nperform {}\n```\n\nHost command.",
+        command.signature_label()
+    );
+    if let Some(documentation) = command.documentation() {
+        contents.push_str("\n\n");
+        contents.push_str(documentation);
+    }
+    contents
 }
 
 /// Walks the statement tree, gathering declared variable and label names.
@@ -291,144 +378,6 @@ fn collect_hosts(statements: &[Stmt], hosts: &mut Vec<String>) {
             Stmt::Default { .. } | Stmt::Set { .. } | Stmt::Jump { .. } => {}
         }
     }
-}
-
-fn label_occurrences(statements: &[Stmt], lines: &[&str]) -> Vec<LabelOccurrence> {
-    let mut occurrences = Vec::new();
-    collect_label_occurrences(statements, lines, &mut occurrences);
-    occurrences
-}
-
-fn collect_label_occurrences(
-    statements: &[Stmt],
-    lines: &[&str],
-    occurrences: &mut Vec<LabelOccurrence>,
-) {
-    for statement in statements {
-        match statement {
-            Stmt::Label { name, body, line } => {
-                if let Some(range) = statement_name_range(lines, *line, "label", name) {
-                    occurrences.push(LabelOccurrence {
-                        name: name.clone(),
-                        range,
-                        declaration: true,
-                    });
-                }
-                collect_label_occurrences(body, lines, occurrences);
-            }
-            Stmt::Jump { label, line } => {
-                if let Some(range) = statement_name_range(lines, *line, "jump", label) {
-                    occurrences.push(LabelOccurrence {
-                        name: label.clone(),
-                        range,
-                        declaration: false,
-                    });
-                }
-            }
-            Stmt::If {
-                branches,
-                otherwise,
-            } => {
-                for branch in branches {
-                    collect_label_occurrences(&branch.body, lines, occurrences);
-                }
-                if let Some(body) = otherwise {
-                    collect_label_occurrences(body, lines, occurrences);
-                }
-            }
-            Stmt::While { body, .. } => collect_label_occurrences(body, lines, occurrences),
-            Stmt::Default { .. } | Stmt::Set { .. } | Stmt::Perform { .. } => {}
-        }
-    }
-}
-
-fn statement_name_range(
-    lines: &[&str],
-    line: usize,
-    keyword: &str,
-    name: &str,
-) -> Option<SourceRange> {
-    let raw = lines.get(line.checked_sub(1)?)?;
-    let trimmed = raw.trim_start_matches(' ');
-    let indentation = raw[..raw.len() - trimmed.len()].chars().count();
-    let rest = trimmed.strip_prefix(keyword)?;
-    let spacing_bytes = rest.len() - rest.trim_start().len();
-    let spacing = rest[..spacing_bytes].chars().count();
-    let candidate = rest.trim_start();
-    if !candidate.starts_with(name)
-        || candidate
-            .chars()
-            .nth(name.chars().count())
-            .is_some_and(is_identifier_char)
-    {
-        return None;
-    }
-    let start_column = indentation + keyword.chars().count() + spacing + 1;
-    Some(SourceRange {
-        line,
-        start_column,
-        end_column: start_column + name.chars().count(),
-    })
-}
-
-fn occurrence_at(
-    occurrences: &[LabelOccurrence],
-    line: usize,
-    column: usize,
-) -> Option<&LabelOccurrence> {
-    occurrences.iter().find(|item| {
-        item.range.line == line
-            && column >= item.range.start_column
-            && column <= item.range.end_column
-    })
-}
-
-fn word_at(text: &str, line: usize, column: usize) -> Option<(&str, SourceRange)> {
-    let source_line = text.lines().nth(line.checked_sub(1)?)?;
-    let mut cursor = column.saturating_sub(1);
-    let char_count = source_line.chars().count();
-    if cursor > char_count {
-        return None;
-    }
-    if cursor == char_count
-        || !source_line
-            .chars()
-            .nth(cursor)
-            .is_some_and(is_identifier_char)
-    {
-        cursor = cursor.checked_sub(1)?;
-    }
-    if !source_line
-        .chars()
-        .nth(cursor)
-        .is_some_and(is_identifier_char)
-    {
-        return None;
-    }
-
-    let chars: Vec<(usize, char)> = source_line.char_indices().collect();
-    let mut start = cursor;
-    while start > 0 && is_identifier_char(chars[start - 1].1) {
-        start -= 1;
-    }
-    let mut end = cursor + 1;
-    while end < chars.len() && is_identifier_char(chars[end].1) {
-        end += 1;
-    }
-    let start_byte = chars[start].0;
-    let end_byte = chars.get(end).map_or(source_line.len(), |item| item.0);
-    Some((
-        &source_line[start_byte..end_byte],
-        SourceRange {
-            line,
-            start_column: start + 1,
-            end_column: end + 1,
-        },
-    ))
-}
-
-const fn is_identifier_char(character: char) -> bool {
-    character.is_ascii_alphanumeric() || character == '_'
 }
 
 fn keyword_description(keyword: &str) -> Option<&'static str> {

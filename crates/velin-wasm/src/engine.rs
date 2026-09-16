@@ -8,7 +8,10 @@
 
 use serde::Serialize;
 use std::fmt;
-use velin::{Diagnostic, ScriptRunner, ScriptYield, Value, check_script, compile};
+use velin::{
+    Diagnostic, MarshallingLimits, ScriptRunner, ScriptYield, Value, check_script, compile,
+    json_to_value,
+};
 
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 const MAX_REPLIES_JSON_BYTES: usize = 1024 * 1024;
@@ -18,7 +21,11 @@ const MAX_REPLIES_JSON_BYTES: usize = 1024 * 1024;
 pub enum ParseRepliesError {
     TooLarge,
     InvalidJson(String),
-    UnsupportedValue { index: usize },
+    UnsupportedValue {
+        index: usize,
+        path: String,
+        message: String,
+    },
 }
 
 impl fmt::Display for ParseRepliesError {
@@ -26,9 +33,13 @@ impl fmt::Display for ParseRepliesError {
         match self {
             Self::TooLarge => write!(formatter, "invalid replies: JSON exceeds 1 MiB"),
             Self::InvalidJson(message) => write!(formatter, "invalid replies JSON: {message}"),
-            Self::UnsupportedValue { index } => write!(
+            Self::UnsupportedValue {
+                index,
+                path,
+                message,
+            } => write!(
                 formatter,
-                "invalid replies: item {index} must be an integer, boolean, or string"
+                "invalid replies: item {index} at {path}: {message}"
             ),
         }
     }
@@ -245,20 +256,15 @@ pub fn parse_replies(replies_json: &str) -> Result<Vec<Value>, ParseRepliesError
         .iter()
         .enumerate()
         .map(|(index, value)| {
-            json_to_value(value).ok_or(ParseRepliesError::UnsupportedValue { index: index + 1 })
+            json_to_value(value, MarshallingLimits::default()).map_err(|error| {
+                ParseRepliesError::UnsupportedValue {
+                    index: index + 1,
+                    path: error.path().to_owned(),
+                    message: error.message().to_owned(),
+                }
+            })
         })
         .collect()
-}
-
-/// Maps a JSON scalar to a Velin [`Value`] (integers, booleans, strings only —
-/// Velin has no floats, so a non-integer number is dropped).
-fn json_to_value(value: &serde_json::Value) -> Option<Value> {
-    match value {
-        serde_json::Value::Bool(boolean) => Some(Value::Boolean(*boolean)),
-        serde_json::Value::Number(number) => number.as_i64().map(Value::Integer),
-        serde_json::Value::String(text) => Some(Value::String(text.clone().into())),
-        _ => None,
-    }
 }
 
 /// Runs the compile + static-check pass, returning flattened diagnostics.

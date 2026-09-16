@@ -31,7 +31,7 @@ const ran = JSON.parse(run(`perform say("hi")\n`, "[]"));
 | `say(values...)` | Appends a line to `output` |
 | `ask(prompt...)` | Consumes the next JSON value from `repliesJson` |
 
-`repliesJson` is a JSON array of integers, booleans, or strings, for example `[1]` or `["east"]`. Malformed JSON or any unsupported item returns a failed `RunResult` without executing the script. Other command names are printed into `output` and resumed without a value, matching the CLI’s unknown-command behavior.
+`repliesJson` is a JSON array of Velin values: integers, booleans, strings, lists, or records. For example, `[1]`, `["east"]`, or `[{"items":[1, 2]}]` are valid. Records are normalized to stable key order. Null, floating-point, out-of-range, over-budget, or malformed values return a failed `RunResult` with the failing item and nested path, without executing the script. Other command names are printed into `output` and resumed without a value, matching the CLI’s unknown-command behavior.
 
 A `RunResult` also carries `error` when execution fails (overflow, missing index, exhausted replies, fuel budget, or cancellation).
 
