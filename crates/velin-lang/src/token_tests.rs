@@ -11,25 +11,26 @@ fn line(content: &str) -> Line<'_> {
 }
 
 #[test]
-fn split_eq_skips_comparisons_and_reports_missing_assignment() {
+fn split_assignment_skips_comparisons_and_reports_missing_assignment() {
     let assigned = line("ok = hp != 3");
-    let (name, value, column) = split_eq(&assigned).unwrap();
+    let (name, value, column, operator) = split_assignment(&assigned).unwrap();
     assert_eq!(name, "ok");
     assert_eq!(value, " hp != 3");
     assert!(column > 1);
-    assert!(split_eq(&line("hp != 3")).is_err());
+    assert_eq!(operator, AssignmentOperator::Set);
+    assert!(split_assignment(&line("hp != 3")).is_err());
     assert!(
-        split_eq(&line("flag"))
+        split_assignment(&line("flag"))
             .unwrap_err()
             .message
             .contains("name = value")
     );
     let le = line("ok = hp <= 3");
-    let (name, value, _) = split_eq(&le).unwrap();
+    let (name, value, _, _) = split_assignment(&le).unwrap();
     assert_eq!(name, "ok");
     assert!(value.contains("<="));
     let ge = line("ok = hp >= 3");
-    let (name, value, _) = split_eq(&ge).unwrap();
+    let (name, value, _, _) = split_assignment(&ge).unwrap();
     assert_eq!(name, "ok");
     assert!(value.contains(">="));
 }

@@ -54,9 +54,32 @@ impl Parser<'_, '_> {
             .expect("statement called with a line present");
         let (keyword, rest) = split_keyword(line.content);
         match keyword {
+            "import" => self.recover_simple(Self::parse_import(line, rest), indent, errors),
+            "fn" => {
+                let result = self.parse_function(line, rest, indent, false);
+                self.recover_simple(result, indent, errors)
+            }
+            "export" => {
+                let result = self.parse_export(line, rest, indent);
+                self.recover_simple(result, indent, errors)
+            }
+            "return" => {
+                let result = Self::parse_return(line, rest, &self.source);
+                self.recover_simple(result, indent, errors)
+            }
             "label" => self.recovering_label(line, rest, indent, errors),
             "if" => self.recovering_if(line, rest, indent, errors),
             "while" => self.recovering_while(line, rest, indent, errors),
+            "for" => {
+                let result = self.parse_for(line, rest, indent);
+                self.recover_simple(result, indent, errors)
+            }
+            "break" => {
+                self.recover_simple(Self::parse_loop_control(line, rest, true), indent, errors)
+            }
+            "continue" => {
+                self.recover_simple(Self::parse_loop_control(line, rest, false), indent, errors)
+            }
             "default" => {
                 let result = Self::parse_binding(line, rest, true, &self.source);
                 self.recover_simple(result, indent, errors)

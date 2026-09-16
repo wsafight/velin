@@ -260,6 +260,31 @@ fn ownership_updates_are_emitted_only_for_the_assignment_target() {
 }
 
 #[test]
+fn for_break_continue_and_literals_execute_through_existing_bytecode() {
+    let script = compile(
+        r#"set total = 0
+for item in [1, 2, 3, 4]:
+    if item == 2:
+        continue
+    if item == 4:
+        break
+    total += item
+set data = {total: total}
+set answer = data["total"]
+"#,
+    );
+    assert!(script.check("test.velin").is_empty());
+    assert!(script.program.slots.get("answer").is_some());
+    assert!(
+        script
+            .program
+            .ops
+            .iter()
+            .any(|op| matches!(op, Op::Jump(_)))
+    );
+}
+
+#[test]
 fn labels_resolve_forward_and_backward_jumps() {
     let script = compile("jump ahead\nlabel ahead:\njump ahead\n");
     // Both jumps target the same recorded label Pc.

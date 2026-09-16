@@ -87,8 +87,17 @@ fn collect_label_occurrences(
                     collect_label_occurrences(body, lines, occurrences);
                 }
             }
-            Stmt::While { body, .. } => collect_label_occurrences(body, lines, occurrences),
-            Stmt::Default { .. } | Stmt::Set { .. } | Stmt::Perform { .. } => {}
+            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::Function { body, .. } => {
+                collect_label_occurrences(body, lines, occurrences);
+            }
+            Stmt::Default { .. }
+            | Stmt::Set { .. }
+            | Stmt::Perform { .. }
+            | Stmt::Import { .. }
+            | Stmt::Call { .. }
+            | Stmt::Return { .. }
+            | Stmt::Break { .. }
+            | Stmt::Continue { .. } => {}
         }
     }
 }

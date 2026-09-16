@@ -11,6 +11,15 @@ use crate::lines::Line;
 use velin_parse::parse_expression_with_source;
 use velin_syntax::{Expr, SharedString};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AssignmentOperator {
+    Set,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+}
+
 /// Parses an embedded expression, translating any diagnostic into a
 /// `ParseError` at the right location.
 pub(crate) fn parse_embedded(
@@ -39,26 +48,52 @@ pub(crate) fn split_keyword(content: &str) -> (&str, &str) {
     (&content[..end], content[end..].trim_start())
 }
 
-/// Splits `name = value` at the first top-level `=` that is not `==`/`!=` etc.,
-/// returning the trimmed name, the value text, and the value's source column.
-pub(crate) fn split_eq<'source>(
+/// Splits a top-level assignment, including `+=`, `-=`, `*=`, and `/=`.
+pub(crate) fn split_assignment<'source>(
     line: &Line<'source>,
-) -> Result<(String, &'source str, usize), ParseError> {
+) -> Result<(&'source str, &'source str, usize, AssignmentOperator), ParseError> {
     let content = &line.content;
     let bytes = content.as_bytes();
     let mut index = 0;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
     while index < bytes.len() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if bytes[index] == b'\\' {
+                escaped = true;
+            } else if bytes[index] == b'"' {
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        match bytes[index] {
+            b'"' => in_string = true,
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
         if bytes[index] == b'=' {
             let prev = index.checked_sub(1).map(|i| bytes[i]);
             let next = bytes.get(index + 1).copied();
             // Skip comparison/relational operators: ==, !=, <=, >=.
             let part_of_comparison =
                 next == Some(b'=') || matches!(prev, Some(b'!' | b'<' | b'>' | b'='));
-            if !part_of_comparison {
-                let name = expect_identifier(line, content[..index].trim())?;
+            if depth == 0 && !part_of_comparison {
+                let (target_end, operator) = match prev {
+                    Some(b'+') => (index - 1, AssignmentOperator::Add),
+                    Some(b'-') => (index - 1, AssignmentOperator::Subtract),
+                    Some(b'*') => (index - 1, AssignmentOperator::Multiply),
+                    Some(b'/') => (index - 1, AssignmentOperator::Divide),
+                    _ => (index, AssignmentOperator::Set),
+                };
+                let target = content[..target_end].trim();
                 let value = &content[index + 1..];
                 let value_column = line.column + content[..=index].chars().count();
-                return Ok((name, value, value_column));
+                return Ok((target, value, value_column, operator));
             }
         }
         index += 1;

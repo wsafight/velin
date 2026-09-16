@@ -36,6 +36,33 @@ if diagnostics.iter().any(velin::Diagnostic::is_error) {
 
 `check_script` runs CFG-aware type propagation and definite-assignment analysis. It does not mutate the program.
 
+Use `compile_modules` when an entry script contains imports or named pure functions. The host owns resolution, so module names never imply filesystem or network access:
+
+```rust
+use velin::{ModuleResolver, ResolvedModule, compile_modules};
+
+struct Resolver;
+impl ModuleResolver for Resolver {
+    fn resolve(&self, _importer: &str, name: &str) -> Result<ResolvedModule, String> {
+        match name {
+            "math" => Ok(ResolvedModule::new(
+                "math",
+                "export fn twice(value):\n    return value * 2\n",
+            )),
+            _ => Err(format!("unknown module `{name}`")),
+        }
+    }
+}
+
+let script = compile_modules(
+    "main",
+    "import math\nset result = call math.twice(21)\n",
+    &Resolver,
+)?;
+```
+
+Resolution and expansion happen only at compile time. The resulting `CompiledScript` and artifacts contain ordinary validated bytecode and need no resolver at runtime. Import cycles, private cross-module calls, recursive function graphs, effects or randomness inside functions, and module/call budget overruns are compile diagnostics.
+
 For a known host vocabulary, declare `HostCommand` values with `HostSignature::exact` or `HostSignature::variadic`, add them to a `HostSchema`, then call `check_script_with_host_schema`. The optional command description is also consumed by schema-aware LSP completion, signature help, and hover. This adds command-name, arity, argument, binding, and return-flow checks without putting host-specific names into the language.
 
 For value-in/value-out extensions, use `PureModule`. It compiles with an explicit input type map, permits only the `return(value)` and `fail(message)` control signals, rejects all other host commands and `random`/`chance`, and creates a fresh VM state for every invocation:

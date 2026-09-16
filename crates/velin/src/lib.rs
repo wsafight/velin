@@ -134,11 +134,11 @@ pub use velin_check::{
 pub use velin_lang::{
     ARTIFACT_MAGIC, ARTIFACT_VERSION, ArtifactError, BytecodeArtifact, CompiledScript, Condition,
     HostCommand, HostContractError, HostSchema, LowerError, MAX_ARTIFACT_BYTES, MAX_SOURCE_BYTES,
-    MAX_SOURCE_LINES, MAX_STATEMENT_DEPTH, ParseError, RecoveredProgram, Stmt, artifact_cache_key,
-    artifact_cache_path, check_script, check_script_with_bindings,
-    check_script_with_bindings_and_host_schema, check_script_with_host_schema, compile,
-    decode_artifact, encode_artifact, load_artifact_cache, parse_program, parse_program_recovering,
-    store_artifact_cache,
+    MAX_SOURCE_LINES, MAX_STATEMENT_DEPTH, ModuleResolver, ParseError, RecoveredProgram,
+    ResolvedModule, Stmt, artifact_cache_key, artifact_cache_path, check_script,
+    check_script_with_bindings, check_script_with_bindings_and_host_schema,
+    check_script_with_host_schema, compile, compile_modules, decode_artifact, encode_artifact,
+    load_artifact_cache, parse_program, parse_program_recovering, store_artifact_cache,
 };
 mod host_sdk;
 mod marshal;

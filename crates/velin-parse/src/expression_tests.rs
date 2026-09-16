@@ -43,6 +43,32 @@ fn parses_arithmetic_with_precedence() {
 }
 
 #[test]
+fn parses_collection_literals_and_postfix_indexes() {
+    let expression = parse_expression(
+        "[{name: \"Ada\"}, {\"name\": \"Lin\"}][1][\"name\"]",
+        "x",
+        1,
+        1,
+    )
+    .unwrap();
+    let Expr::Invoke {
+        function: Builtin::Get,
+        arguments,
+    } = expression.unspanned()
+    else {
+        panic!("expected outer index")
+    };
+    assert_eq!(arguments.len(), 2);
+    assert!(matches!(
+        arguments[0].unspanned(),
+        Expr::Invoke {
+            function: Builtin::Get,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn parses_builtin_calls_and_rejects_unknown() {
     assert!(parse("len(bag)").is_ok());
     assert!(parse("push(bag, \"x\")").is_ok());

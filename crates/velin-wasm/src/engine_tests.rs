@@ -36,6 +36,17 @@ fn run_answers_ask_from_the_reply_script() {
 }
 
 #[test]
+fn run_supports_p2_collection_and_loop_syntax() {
+    let result = run(
+        "p2.velin",
+        "set total = 0\nfor item in [1, 2, 3]:\n    total += item\nset row = {total: total}\nperform say(row[\"total\"])\n",
+        Vec::new(),
+    );
+    assert!(result.ok, "{result:?}");
+    assert_eq!(result.output, vec!["6"]);
+}
+
+#[test]
 fn run_reports_a_check_error_without_executing() {
     let result = run("t.velin", "set total = mystery + 1\n", Vec::new());
     assert!(!result.ok);

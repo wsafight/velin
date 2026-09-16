@@ -64,7 +64,7 @@ Yield::Finished
 | `velin-compile` | 源码表达式降级、常量传播与 `ProgramBuilder` |
 | `velin-vm` | 运行状态、寄存器表达式解释器、控制流循环、宿主挂起协议 |
 | `velin-check` | 类型推断、条件检查与确定赋值分析 |
-| `velin-lang` | 缩进敏感语句 AST、解析、降级、宿主名驻留 |
+| `velin-lang` | 缩进敏感语句 AST、模块解析、纯函数调用展开、降级与宿主名驻留 |
 | `velin` | 重导出稳定的嵌入 API，不实现新语义 |
 | `velin-cli` | 行式参考宿主和命令行体验 |
 | `velin-lsp` | 编辑器协议适配，不复制解析或检查逻辑 |
@@ -78,7 +78,7 @@ Yield::Finished
 
 表达式由 Pratt parser 解析，支持：
 
-- `i64` 整数、布尔、字符串、列表和记录值。
+- `i64` 整数、布尔、字符串、List/Record 字面量和集合索引。
 - 一元 `-`、`not`。
 - 算术、比较、相等以及短路 `and` / `or`。
 - 内置函数调用。
@@ -100,11 +100,21 @@ if condition:
 elif condition:
 else:
 while condition:
+for item in list:
+break
+continue
 label name:
 jump name
+import module
+fn name(parameters):
+export fn name(parameters):
+name = call module.function(arguments)
+return expression
 ```
 
 `default` 只能位于顶层，同名变量只能声明一次；其值在编译期求值，不能引用运行时变量。宿主命令名不是保留字：编译器将名称稳定驻留为 `u32 host_id`，并在 `CompiledScript` 中保留 ID 到名称的查找表。
+
+`compile_modules` 通过宿主持有的 `ModuleResolver` 获取每个 import，检查显式导出、import 环与函数调用环，再在普通语句 lowering 前以卫生方式展开纯函数调用。被导入模块只包含声明，函数体不能执行宿主效果或使用随机状态。生成的 `Program` 不含运行时调用栈、resolver 或模块对象，因此继续沿用现有字节码校验、artifact、快照以及 C/Wasm 运行时。
 
 ## 5. 值与确定性
 
@@ -224,6 +234,7 @@ Integer / Boolean / String / List / Record / Unknown
 | 层 | 边界 |
 | --- | --- |
 | 源码 | 1 MiB、10,000 个物理行、64 层语句嵌套 |
+| 模块编译 | 128 个模块、合计 4 MiB 源码、4,096 次展开调用 |
 | 表达式 | 单次 64 KiB / 512 token / 32 层括号；插值最多 32 层并共享 256 KiB 工作量与 2,048 token 预算 |
 | 值 | 每棵值树 4,096 个节点、16 层集合、1 MiB 文本 |
 | 程序字节码 | 100,000 个控制流 op、100,000 个 chunk、65,536 个槽位、100,000 个常量值节点、16 MiB 常量及槽位文本 |

@@ -325,8 +325,15 @@ fn collect_names(statements: &[Stmt], variables: &mut Vec<String>, labels: &mut 
                     collect_names(body, variables, labels);
                 }
             }
-            Stmt::While { body, .. } => collect_names(body, variables, labels),
-            Stmt::Jump { .. } => {}
+            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::Function { body, .. } => {
+                collect_names(body, variables, labels);
+            }
+            Stmt::Call { bind, .. } => variables.push(bind.clone()),
+            Stmt::Jump { .. }
+            | Stmt::Import { .. }
+            | Stmt::Return { .. }
+            | Stmt::Break { .. }
+            | Stmt::Continue { .. } => {}
         }
     }
 }
@@ -353,7 +360,9 @@ fn collect_labels(statements: &[Stmt], symbols: &mut Vec<LabelSymbol>) {
                     collect_labels(body, symbols);
                 }
             }
-            Stmt::While { body, .. } => collect_labels(body, symbols),
+            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::Function { body, .. } => {
+                collect_labels(body, symbols);
+            }
             _ => {}
         }
     }
@@ -362,7 +371,10 @@ fn collect_labels(statements: &[Stmt], symbols: &mut Vec<LabelSymbol>) {
 fn collect_hosts(statements: &[Stmt], hosts: &mut Vec<String>) {
     for statement in statements {
         match statement {
-            Stmt::Label { body, .. } | Stmt::While { body, .. } => collect_hosts(body, hosts),
+            Stmt::Label { body, .. }
+            | Stmt::While { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::Function { body, .. } => collect_hosts(body, hosts),
             Stmt::Perform { command, .. } => hosts.push(command.clone()),
             Stmt::If {
                 branches,
@@ -375,7 +387,14 @@ fn collect_hosts(statements: &[Stmt], hosts: &mut Vec<String>) {
                     collect_hosts(body, hosts);
                 }
             }
-            Stmt::Default { .. } | Stmt::Set { .. } | Stmt::Jump { .. } => {}
+            Stmt::Default { .. }
+            | Stmt::Set { .. }
+            | Stmt::Jump { .. }
+            | Stmt::Import { .. }
+            | Stmt::Call { .. }
+            | Stmt::Return { .. }
+            | Stmt::Break { .. }
+            | Stmt::Continue { .. } => {}
         }
     }
 }

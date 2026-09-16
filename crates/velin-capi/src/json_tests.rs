@@ -55,6 +55,23 @@ fn json_api_marshals_list_and_record_arguments_stably() {
 }
 
 #[test]
+fn c_artifact_executes_p2_collection_and_loop_syntax() {
+    let json = program_json(
+        "set total = 0\nfor item in [1, 2, 3]:\n    total += item\nperform emit({total: total})\n",
+    );
+    let loaded = load(&json);
+    let mut yielded = unsafe { velin_machine_run_json(loaded.machine) };
+    assert_eq!(yielded.kind, VELIN_YIELD_HOST);
+    let values = unsafe { std::slice::from_raw_parts(yielded.values, yielded.values_len) };
+    let text = unsafe { std::slice::from_raw_parts(values[0].text_ptr, values[0].text_len) };
+    assert_eq!(text, br#"{"total":6}"#);
+    unsafe {
+        velin_yield_free(&mut yielded);
+        free_loaded(loaded);
+    }
+}
+
+#[test]
 fn json_api_resumes_compounds_and_preserves_them_at_the_next_effect() {
     let json = program_json("answer = perform ask()\nperform emit(answer)\n");
     let loaded = load(&json);

@@ -14,6 +14,8 @@ Untrusted scripts fail inside published budgets. The core does not cap wall-cloc
 | One expression | 64 KiB, 512 tokens, 32 parenthesis levels |
 | Interpolation nesting | 32 levels |
 | Shared interpolation work | 256 KiB and 2,048 tokens |
+| Compile-time module graph | 128 modules, 4 MiB aggregate source |
+| Hygienically expanded calls | 4,096 |
 
 Tabs are rejected. Indentation is exactly four spaces per level.
 

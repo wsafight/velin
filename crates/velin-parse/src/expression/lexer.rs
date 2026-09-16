@@ -44,6 +44,26 @@ impl<'input, 'file> Lexer<'input, 'file> {
                     self.bump();
                     TokenKind::RightParen
                 }
+                '[' => {
+                    self.bump();
+                    TokenKind::LeftBracket
+                }
+                ']' => {
+                    self.bump();
+                    TokenKind::RightBracket
+                }
+                '{' => {
+                    self.bump();
+                    TokenKind::LeftBrace
+                }
+                '}' => {
+                    self.bump();
+                    TokenKind::RightBrace
+                }
+                ':' => {
+                    self.bump();
+                    TokenKind::Colon
+                }
                 ',' => {
                     self.bump();
                     TokenKind::Comma
@@ -118,13 +138,15 @@ impl<'input, 'file> Lexer<'input, 'file> {
                 }
             };
             match &kind {
-                TokenKind::LeftParen => {
+                TokenKind::LeftParen | TokenKind::LeftBracket | TokenKind::LeftBrace => {
                     depth += 1;
                     if depth > MAX_EXPRESSION_NESTING {
                         return Err(self.error_at(column, "expression nesting exceeds 32"));
                     }
                 }
-                TokenKind::RightParen => depth = depth.saturating_sub(1),
+                TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace => {
+                    depth = depth.saturating_sub(1);
+                }
                 _ => {}
             }
             tokens.push(Token { kind, column });

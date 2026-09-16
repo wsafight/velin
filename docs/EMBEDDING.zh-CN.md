@@ -36,6 +36,33 @@ if diagnostics.iter().any(velin::Diagnostic::is_error) {
 
 `check_script` 运行 CFG 感知的类型传播和确定赋值分析，不会修改程序。
 
+入口脚本包含 import 或命名纯函数时使用 `compile_modules`。解析完全由宿主控制，因此模块名不会隐式获得文件系统或网络访问：
+
+```rust
+use velin::{ModuleResolver, ResolvedModule, compile_modules};
+
+struct Resolver;
+impl ModuleResolver for Resolver {
+    fn resolve(&self, _importer: &str, name: &str) -> Result<ResolvedModule, String> {
+        match name {
+            "math" => Ok(ResolvedModule::new(
+                "math",
+                "export fn twice(value):\n    return value * 2\n",
+            )),
+            _ => Err(format!("unknown module `{name}`")),
+        }
+    }
+}
+
+let script = compile_modules(
+    "main",
+    "import math\nset result = call math.twice(21)\n",
+    &Resolver,
+)?;
+```
+
+解析与展开只发生在编译期。生成的 `CompiledScript` 和 artifact 只包含普通的已验证字节码，运行时不需要 resolver。import 环、跨模块调用私有函数、递归函数图、函数中的效果或随机性，以及超出模块/调用预算，都会产生编译诊断。
+
 宿主词汇已知时，用 `HostSignature::exact` 或 `HostSignature::variadic` 声明 `HostCommand`，加入 `HostSchema`，再调用 `check_script_with_host_schema`。命令的可选描述也会用于 schema 感知的 LSP 补全、签名帮助与 hover。这会增加命令名、参数数量、参数类型、绑定和返回值传播检查，同时不把宿主专用名称放进语言核心。
 
 对于“输入值 -> 输出值”的扩展，使用 `PureModule`。它在编译时接收明确的输入类型映射，只允许 `return(value)` 与 `fail(message)` 两种控制信号，拒绝其他宿主命令以及 `random`/`chance`，并为每次调用创建全新的 VM 状态：

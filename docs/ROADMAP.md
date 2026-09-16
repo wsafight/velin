@@ -89,9 +89,11 @@ Completion criteria: one host-command declaration drives checking, runtime dispa
 
 This phase addresses script reuse and organization without turning Velin into a general-purpose dynamic language. It depends on P0 resource boundaries and reuses the P1 host schema.
 
+**Status: complete in the current tree.** Modules resolve at compile time, pure calls are hygienically expanded over an acyclic graph, and the syntax additions lower to existing checked operations.
+
 ### Modules and pure functions
 
-Planned capabilities are:
+Delivered capabilities are:
 
 - Compile-time module imports through a host-controlled resolver.
 - Explicit exports and cyclic-dependency diagnostics.
@@ -102,7 +104,7 @@ Pure functions cannot execute `perform` or read clocks, system randomness, or ot
 
 ### Small syntax improvements
 
-Evaluate these high-value forms without adding new value semantics:
+The following forms are available without adding new value semantics:
 
 - `for`, `break`, and `continue`.
 - List and Record literals.

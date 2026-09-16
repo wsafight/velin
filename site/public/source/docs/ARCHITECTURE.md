@@ -64,7 +64,7 @@ Expressions also have a reference path: `velin-parse -> velin-eval`. It shares v
 | `velin-compile` | Source expression lowering, constant propagation, and `ProgramBuilder` |
 | `velin-vm` | Runtime state, register expression interpreter, control-flow loop, and host suspension protocol |
 | `velin-check` | Type inference, condition checking, and definite-assignment analysis |
-| `velin-lang` | Indentation-sensitive statement AST, parsing, lowering, and host-name interning |
+| `velin-lang` | Indentation-sensitive statement AST, module resolution, pure-call expansion, lowering, and host-name interning |
 | `velin` | Re-exports the stable embedding API without implementing new semantics |
 | `velin-cli` | Line-oriented reference host and command-line interface |
 | `velin-lsp` | Editor protocol adapter that does not duplicate parsing or checking logic |
@@ -78,7 +78,7 @@ Lower-level crates never depend back on higher-level tools. Domain behavior belo
 
 Expressions use a Pratt parser and support:
 
-- `i64` integers, booleans, strings, lists, and records.
+- `i64` integers, booleans, strings, List/Record literals, and collection indexing.
 - Unary `-` and `not`.
 - Arithmetic, comparisons, equality, and short-circuit `and` / `or`.
 - Built-in function calls.
@@ -100,11 +100,21 @@ if condition:
 elif condition:
 else:
 while condition:
+for item in list:
+break
+continue
 label name:
 jump name
+import module
+fn name(parameters):
+export fn name(parameters):
+name = call module.function(arguments)
+return expression
 ```
 
 `default` may only appear at the top level, and a name may be declared only once. Its value is evaluated at compile time and cannot reference runtime variables. Host command names are not reserved words: the compiler stably interns each name to a `u32 host_id`, while `CompiledScript` retains the ID-to-name lookup.
+
+`compile_modules` asks a host-owned `ModuleResolver` for every import, checks explicit exports and both import/function cycles, then hygienically expands pure calls before ordinary statement lowering. Imported modules contain declarations only. Function bodies cannot perform host effects or use random state. The resulting `Program` has no runtime call stack, resolver, or module object, so existing bytecode validation, artifacts, snapshots, and C/Wasm runtimes remain unchanged.
 
 ## 5. Values and determinism
 
@@ -224,6 +234,7 @@ Current built-in limits:
 | Layer | Limit |
 | --- | --- |
 | Source | 1 MiB, 10,000 physical lines, 64 nested statement blocks |
+| Module compilation | 128 modules, 4 MiB aggregate source, 4,096 expanded calls |
 | Expression | 64 KiB / 512 tokens / 32 parenthesis levels per expression; interpolation is limited to 32 levels and shares 256 KiB work and 2,048-token budgets |
 | Value | 4,096 nodes, 16 collection levels, and 1 MiB of text per value tree |
 | Program bytecode | 100,000 control-flow ops, 100,000 chunks, 65,536 slots, 100,000 constant-value nodes, and 16 MiB of constant/slot text |

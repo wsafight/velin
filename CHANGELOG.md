@@ -12,6 +12,8 @@ change source and Rust APIs between minor releases.
 - Layered source, Rust API, artifact, and C ABI compatibility policies with versioned source/artifact fixtures.
 - Typed host command declarations shared by static checking, runtime validation, synchronous/asynchronous host drivers, and schema-aware LSP completion, signature help, and hover.
 - Budget-aware, path-reporting Serde value marshalling plus complete List/Record JSON input and output for WebAssembly and the append-only C ABI extension.
+- Host-resolved compile-time modules with explicit exports, cycle diagnostics, named pure functions, and acyclic hygienic call expansion.
+- `for` / `break` / `continue`, List and Record literals, collection indexing and indexed assignment, and compound assignment sugar.
 
 ### Changed
 

@@ -1,5 +1,5 @@
 use super::*;
-use velin_syntax::{BinaryOp, Value};
+use velin_syntax::{BinaryOp, Builtin, Value};
 
 #[test]
 fn parses_label_default_and_set() {
@@ -80,6 +80,41 @@ fn parses_while_and_nested_block() {
         Stmt::While { body, .. } => assert_eq!(body.len(), 2),
         other => panic!("expected While, got {other:?}"),
     }
+}
+
+#[test]
+fn parses_for_loop_control_assignment_sugar_and_functions() {
+    let source = r#"import math
+export fn total(items):
+    set sum = 0
+    for item in items:
+        sum += item
+        continue
+    return sum
+set answer = call math.add([1, 2][0], {value: 3}["value"])
+"#;
+    let statements = parse(source).unwrap();
+    assert!(matches!(statements[0], Stmt::Import { .. }));
+    assert!(matches!(
+        statements[1],
+        Stmt::Function { exported: true, .. }
+    ));
+    assert!(matches!(statements[2], Stmt::Call { .. }));
+}
+
+#[test]
+fn indexed_assignment_lowers_to_put() {
+    let statements = parse("set items = [1, 2]\nitems[0] = 3\n").unwrap();
+    let Stmt::Set { value, .. } = &statements[1] else {
+        panic!("expected indexed assignment")
+    };
+    assert!(matches!(
+        value.unspanned(),
+        Expr::Invoke {
+            function: Builtin::Put,
+            ..
+        }
+    ));
 }
 
 #[test]

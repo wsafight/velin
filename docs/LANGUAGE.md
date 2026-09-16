@@ -32,8 +32,8 @@ Velin has five value types:
 | Integer | `0`, `-12`, `9223372036854775807` (`i64`) |
 | Boolean | `true`, `false` |
 | String | `"hello"`, `"HP: [hp]"` |
-| List | `list(1, 2, 3)` |
-| Record | `record("name", "Ada", "score", 10)` |
+| List | `[1, 2, 3]` or `list(1, 2, 3)` |
+| Record | `{name: "Ada", score: 10}` or `record("name", "Ada", "score", 10)` |
 
 Lists and records are persistent values. `push`, `put`, and `remove` return updated collections without mutating the input value. There is no `null` and no floating-point type.
 
@@ -53,7 +53,11 @@ default tags = list("new")
 ```velin
 set score = score + 10
 score = score + 10
+score += 10
+items[0] = "first"
 ```
+
+`+=`, `-=`, `*=`, and `/=` lower to the corresponding assignment expression. `value[key]` reads a list or record through `get`; assigning to one index lowers to `put` and stores the updated collection.
 
 Reading a variable that may not be assigned on every incoming control-flow path is reported by the static checker.
 
@@ -102,16 +106,44 @@ else:
 
 ## Loops
 
-`while` reevaluates its boolean condition before each iteration.
+`while` reevaluates its boolean condition before each iteration. `for` visits a list from index zero to its original end. `break` leaves the nearest loop and `continue` advances it.
 
 ```velin
 default n = 3
 while n > 0:
     perform say(n)
     set n = n - 1
+
+set total = 0
+for item in [1, 2, 3]:
+    if item == 2:
+        continue
+    total += item
 ```
 
 The default VM policy allows at most 10,000 immediate fuel units per execution call. A loop with no `perform` cannot occupy the caller indefinitely.
+
+## Modules and pure functions
+
+`compile_modules` loads `import` declarations through a host-controlled `ModuleResolver`. Imported files may contain imports, private `fn` declarations, and explicit `export fn` declarations. They cannot run top-level state-machine statements.
+
+```velin
+# math.velin
+export fn score(items):
+    set total = 0
+    for item in items:
+        total += item
+    return total * 2
+
+# main.velin
+import math
+set result = call math.score([1, 2, 3])
+perform publish(result)
+```
+
+Functions have parameters, local variables, and one final `return`. They cannot use `perform`, `default`, labels, jumps, `random`, `chance`, or hidden state. Calls within one module omit the qualifier: `set doubled = call twice(value)`. The call graph must be acyclic and imported functions must be exported.
+
+The compiler expands calls hygienically before ordinary checking and bytecode lowering. This keeps snapshots free of a runtime call stack while preserving the normal fuel, data, debug-location, artifact, Wasm, and C runtime rules. A module graph is limited to 128 modules and 4 MiB of source; expanded calls are limited to 4,096.
 
 ## Labels and jumps
 

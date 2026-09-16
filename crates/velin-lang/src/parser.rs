@@ -15,12 +15,14 @@ use crate::error::ParseError;
 use crate::limits::MAX_STATEMENT_DEPTH;
 use crate::lines::{self, Line};
 use crate::token::{
-    expect_bare_header, expect_colon_header, expect_header_name, expect_identifier, parse_embedded,
-    split_eq, split_keyword,
+    AssignmentOperator, expect_bare_header, expect_colon_header, expect_header_name,
+    expect_identifier, parse_embedded, split_assignment, split_keyword,
 };
 use velin_parse::parse_expression_list_with_source;
 use velin_syntax::{Expr, SharedString};
 
+mod assignments;
+mod declarations;
 mod recovery;
 
 /// A best-effort statement parse for editor tooling.
@@ -126,12 +128,19 @@ impl<'lines, 'source> Parser<'lines, 'source> {
             .expect("statement called with a line present");
         let (keyword, rest) = split_keyword(line.content);
         match keyword {
+            "import" => Self::parse_import(line, rest),
+            "fn" => self.parse_function(line, rest, indent, false),
+            "export" => self.parse_export(line, rest, indent),
+            "return" => Self::parse_return(line, rest, &self.source),
             "label" => self.parse_label(line, rest, indent),
             "default" => Self::parse_binding(line, rest, true, &self.source),
             "set" => Self::parse_binding(line, rest, false, &self.source),
             "perform" => Self::parse_perform(line, rest, None, &self.source),
             "if" => self.parse_if(line, rest, indent),
             "while" => self.parse_while(line, rest, indent),
+            "for" => self.parse_for(line, rest, indent),
+            "break" => Self::parse_loop_control(line, rest, true),
+            "continue" => Self::parse_loop_control(line, rest, false),
             "jump" => Self::parse_jump(line, rest),
             _ => Self::parse_bare_assign_or_bind(line, &self.source),
         }
@@ -165,6 +174,38 @@ impl<'lines, 'source> Parser<'lines, 'source> {
         is_default: bool,
         source: &SharedString,
     ) -> Result<Stmt, ParseError> {
+        if !is_default {
+            let rest_offset = line.content.len() - rest.len();
+            let synthetic = Line {
+                number: line.number,
+                indent: line.indent,
+                content: rest,
+                column: line.column + line.content[..rest_offset].chars().count(),
+            };
+            let (target, value_text, value_column, operator) = split_assignment(&synthetic)?;
+            let (name, index) = Self::parse_assignment_target(&synthetic, target, source)?;
+            let trimmed = value_text.trim_start();
+            let leading = value_text.len() - trimmed.len();
+            let (keyword, call_rest) = split_keyword(trimmed);
+            if keyword == "call" {
+                if operator != AssignmentOperator::Set || index.is_some() {
+                    return Err(ParseError::new(
+                        line.number,
+                        line.column,
+                        "a function result requires a simple variable assignment",
+                    ));
+                }
+                let (module, function, arguments) =
+                    Self::parse_function_call(line, call_rest, source, value_column + leading)?;
+                return Ok(Stmt::Call {
+                    module,
+                    function,
+                    arguments,
+                    bind: name,
+                    line: line.number,
+                });
+            }
+        }
         let (name, value) = Self::split_assignment(line, rest, source)?;
         if is_default {
             Ok(Stmt::Default {
@@ -194,36 +235,6 @@ impl<'lines, 'source> Parser<'lines, 'source> {
             command,
             arguments,
             bind,
-            line: line.number,
-        })
-    }
-
-    /// A line with no leading keyword: either `name = perform ...` (a bound
-    /// host effect) or `name = expr` (an assignment without the `set` keyword,
-    /// accepted as sugar).
-    fn parse_bare_assign_or_bind(
-        line: &Line<'_>,
-        source: &SharedString,
-    ) -> Result<Stmt, ParseError> {
-        let (name, rhs, rhs_column) = split_eq(line)?;
-        let leading = rhs[..rhs.len() - rhs.trim_start().len()].chars().count();
-        let rhs = rhs.trim_start();
-        let rhs_column = rhs_column + leading;
-        let (keyword, rest) = split_keyword(rhs);
-        if keyword == "perform" {
-            // Re-anchor the command portion at its real column.
-            let command_line = Line {
-                number: line.number,
-                indent: line.indent,
-                content: rhs,
-                column: rhs_column,
-            };
-            return Self::parse_perform(&command_line, rest, Some(name), source);
-        }
-        let value = parse_embedded(rhs, source, line.number, rhs_column)?;
-        Ok(Stmt::Set {
-            name,
-            value,
             line: line.number,
         })
     }
@@ -279,6 +290,53 @@ impl<'lines, 'source> Parser<'lines, 'source> {
         Ok(Stmt::While { condition, body })
     }
 
+    fn parse_for(
+        &mut self,
+        line: &Line<'_>,
+        rest: &str,
+        indent: usize,
+    ) -> Result<Stmt, ParseError> {
+        let (header, column) = expect_colon_header(line, rest)?;
+        let (name, collection) = header.split_once(" in ").ok_or_else(|| {
+            ParseError::new(
+                line.number,
+                line.column,
+                "expected `for name in collection:`",
+            )
+        })?;
+        let name = expect_identifier(line, name.trim())?;
+        let collection_offset = header.len() - collection.len();
+        let collection = parse_embedded(
+            collection,
+            &self.source,
+            line.number,
+            column + header[..collection_offset].chars().count(),
+        )?;
+        let body = self.body(indent, line)?;
+        Ok(Stmt::For {
+            name,
+            collection,
+            body,
+            line: line.number,
+        })
+    }
+
+    fn parse_loop_control(line: &Line<'_>, rest: &str, is_break: bool) -> Result<Stmt, ParseError> {
+        let keyword = if is_break { "break" } else { "continue" };
+        if !rest.is_empty() {
+            return Err(ParseError::new(
+                line.number,
+                line.column,
+                format!("`{keyword}` takes no value"),
+            ));
+        }
+        Ok(if is_break {
+            Stmt::Break { line: line.number }
+        } else {
+            Stmt::Continue { line: line.number }
+        })
+    }
+
     fn parse_jump(line: &Line<'_>, rest: &str) -> Result<Stmt, ParseError> {
         let label = expect_identifier(line, rest.trim())?;
         Ok(Stmt::Jump {
@@ -312,25 +370,6 @@ impl<'lines, 'source> Parser<'lines, 'source> {
                 "expected an indented block after this line",
             )),
         }
-    }
-
-    /// Splits `name = expr` at the top-level `=`, parsing the right side.
-    fn split_assignment(
-        line: &Line<'_>,
-        rest: &str,
-        source: &SharedString,
-    ) -> Result<(String, Expr), ParseError> {
-        let rest_offset = line.content.len() - rest.len();
-        let synthetic = Line {
-            number: line.number,
-            indent: line.indent,
-            content: rest,
-            // `rest` starts one keyword+space past the content column.
-            column: line.column + line.content[..rest_offset].chars().count(),
-        };
-        let (name, value_text, value_column) = split_eq(&synthetic)?;
-        let value = parse_embedded(value_text, source, line.number, value_column)?;
-        Ok((name, value))
     }
 
     /// Parses `cmd(arg, arg, ...)` into a command name and argument expressions.

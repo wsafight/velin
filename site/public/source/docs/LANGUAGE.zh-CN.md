@@ -32,8 +32,8 @@ Velin 包含五种值类型：
 | 整数 | `0`、`-12`、`9223372036854775807`（`i64`） |
 | 布尔值 | `true`、`false` |
 | 字符串 | `"hello"`、`"HP: [hp]"` |
-| 列表 | `list(1, 2, 3)` |
-| 记录 | `record("name", "Ada", "score", 10)` |
+| 列表 | `[1, 2, 3]` 或 `list(1, 2, 3)` |
+| 记录 | `{name: "Ada", score: 10}` 或 `record("name", "Ada", "score", 10)` |
 
 列表和记录是持久化值。`push`、`put` 和 `remove` 返回更新后的集合，不会修改输入值。没有 `null`，也没有浮点类型。
 
@@ -53,7 +53,11 @@ default tags = list("new")
 ```velin
 set score = score + 10
 score = score + 10
+score += 10
+items[0] = "first"
 ```
+
+`+=`、`-=`、`*=` 和 `/=` 会降级为对应的赋值表达式。`value[key]` 通过 `get` 读取 List 或 Record；对单个下标赋值会降级为 `put`，并把更新后的集合写回变量。
 
 如果变量并非在所有流入的控制流路径上都已赋值，静态检查器会报告读取错误。
 
@@ -102,16 +106,44 @@ else:
 
 ## 循环
 
-`while` 在每次迭代前重新计算布尔条件。
+`while` 在每次迭代前重新计算布尔条件。`for` 从下标零开始依次访问 List。`break` 离开最近的循环，`continue` 进入下一次迭代。
 
 ```velin
 default n = 3
 while n > 0:
     perform say(n)
     set n = n - 1
+
+set total = 0
+for item in [1, 2, 3]:
+    if item == 2:
+        continue
+    total += item
 ```
 
 默认 VM 策略允许每次执行调用最多 10,000 个立即 fuel 单位，因此不含 `perform` 的循环不能无限占用调用线程。
+
+## 模块与纯函数
+
+`compile_modules` 通过宿主控制的 `ModuleResolver` 加载 `import`。被导入文件只能包含 import、私有 `fn` 和显式 `export fn`，不能执行顶层状态机语句。
+
+```velin
+# math.velin
+export fn score(items):
+    set total = 0
+    for item in items:
+        total += item
+    return total * 2
+
+# main.velin
+import math
+set result = call math.score([1, 2, 3])
+perform publish(result)
+```
+
+函数拥有参数、局部变量和一个末尾 `return`。函数中不能使用 `perform`、`default`、标签、跳转、`random`、`chance` 或隐藏状态。同一模块内调用可省略限定名：`set doubled = call twice(value)`。调用图必须无环，跨模块调用的函数必须显式导出。
+
+编译器会在普通静态检查和字节码 lowering 前以卫生方式展开调用。因此快照不需要保存运行时调用栈，同时仍沿用现有 fuel、数据、调试位置、artifact、Wasm 和 C 运行时规则。模块图最多 128 个模块、4 MiB 源码，展开后的调用最多 4,096 次。
 
 ## 标签与跳转
 

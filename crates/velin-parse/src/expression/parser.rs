@@ -115,7 +115,23 @@ impl<'input> ExpressionParser<'input, '_, '_> {
             };
             return Ok(expression.spanned(self.span(column)));
         }
-        self.parse_primary()
+        self.parse_postfix()
+    }
+
+    fn parse_postfix(&mut self) -> Result<Expr, Diagnostic> {
+        let mut expression = self.parse_primary()?;
+        while let Some(column) = self.consume_column(&TokenKind::LeftBracket) {
+            let index = self.parse_or()?;
+            if !self.consume(&TokenKind::RightBracket) {
+                return Err(self.error("expected `]` after collection index"));
+            }
+            expression = Expr::Invoke {
+                function: Builtin::Get,
+                arguments: vec![expression, index],
+            }
+            .spanned(self.span(column));
+        }
+        Ok(expression)
     }
 
     fn parse_primary(&mut self) -> Result<Expr, Diagnostic> {
@@ -158,6 +174,8 @@ impl<'input> ExpressionParser<'input, '_, '_> {
                 }
                 Ok(expression)
             }
+            TokenKind::LeftBracket => self.parse_list(span),
+            TokenKind::LeftBrace => self.parse_record(span),
             _ => Err(Diagnostic::new(
                 self.file,
                 self.line,
@@ -165,6 +183,72 @@ impl<'input> ExpressionParser<'input, '_, '_> {
                 "expected a value, variable, or parenthesized expression",
             )),
         }
+    }
+
+    fn parse_list(&mut self, span: Span) -> Result<Expr, Diagnostic> {
+        let arguments = self.parse_delimited(&TokenKind::RightBracket, "]")?;
+        if !Builtin::List.accepts(arguments.len()) {
+            return Err(self.error("list literal exceeds 128 items"));
+        }
+        Ok(Expr::Invoke {
+            function: Builtin::List,
+            arguments,
+        }
+        .spanned(span))
+    }
+
+    fn parse_record(&mut self, span: Span) -> Result<Expr, Diagnostic> {
+        let mut arguments = Vec::new();
+        if !self.consume(&TokenKind::RightBrace) {
+            loop {
+                let token = self.advance();
+                let key_span = self.span(token.column);
+                let key = match token.kind {
+                    TokenKind::Identifier(value) => value.to_owned(),
+                    TokenKind::String(value) => value,
+                    _ => return Err(self.error("expected a record key")),
+                };
+                if !self.consume(&TokenKind::Colon) {
+                    return Err(self.error("expected `:` after record key"));
+                }
+                arguments.push(Expr::Value(Value::String(key.into())).spanned(key_span));
+                arguments.push(self.parse_or()?);
+                if self.consume(&TokenKind::RightBrace) {
+                    break;
+                }
+                if !self.consume(&TokenKind::Comma) {
+                    return Err(self.error("expected `,` or `}`"));
+                }
+            }
+        }
+        if !Builtin::Record.accepts(arguments.len()) {
+            return Err(self.error("record literal exceeds 64 entries"));
+        }
+        Ok(Expr::Invoke {
+            function: Builtin::Record,
+            arguments,
+        }
+        .spanned(span))
+    }
+
+    fn parse_delimited(
+        &mut self,
+        closing: &TokenKind<'_>,
+        closing_text: &str,
+    ) -> Result<Vec<Expr>, Diagnostic> {
+        let mut expressions = Vec::new();
+        if !self.consume(closing) {
+            loop {
+                expressions.push(self.parse_or()?);
+                if self.consume(closing) {
+                    break;
+                }
+                if !self.consume(&TokenKind::Comma) {
+                    return Err(self.error(format!("expected `,` or `{closing_text}`")));
+                }
+            }
+        }
+        Ok(expressions)
     }
 
     /// Builds an [`Expr::Interpolate`] from lexed raw parts, parsing each hole's

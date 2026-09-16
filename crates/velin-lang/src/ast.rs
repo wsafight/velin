@@ -31,6 +31,26 @@ pub struct Branch {
 /// with an optional bind destination; `If`/`While` become conditional jumps.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
+    /// `import name` — a compile-time module dependency resolved by the host.
+    Import { name: String, line: usize },
+    /// `fn name(args...):` or `export fn name(args...):` — a named pure function.
+    Function {
+        name: String,
+        parameters: Vec<String>,
+        body: Vec<Stmt>,
+        exported: bool,
+        line: usize,
+    },
+    /// `name = call [module.]function(args...)` — a pure function invocation.
+    Call {
+        module: Option<String>,
+        function: String,
+        arguments: Vec<Expr>,
+        bind: String,
+        line: usize,
+    },
+    /// `return expr` — the final value of a pure function.
+    Return { value: Expr, line: usize },
     /// `label name:` — a named jump target. The statements indented beneath it
     /// are its `body`; labels are positional markers, so the body is lowered
     /// inline (a `jump name` transfers to the first statement of the body).
@@ -73,6 +93,17 @@ pub enum Stmt {
         condition: Condition,
         body: Vec<Stmt>,
     },
+    /// `for item in collection:` — deterministic list iteration.
+    For {
+        name: String,
+        collection: Expr,
+        body: Vec<Stmt>,
+        line: usize,
+    },
+    /// `break` — leave the nearest enclosing loop.
+    Break { line: usize },
+    /// `continue` — advance the nearest enclosing loop.
+    Continue { line: usize },
     /// `jump label` — an unconditional transfer to a labelled statement.
     Jump { label: String, line: usize },
 }

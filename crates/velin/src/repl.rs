@@ -209,7 +209,10 @@ fn first_default(statements: &[Stmt]) -> Option<usize> {
     for statement in statements {
         match statement {
             Stmt::Default { line, .. } => return Some(*line),
-            Stmt::Label { body, .. } | Stmt::While { body, .. } => {
+            Stmt::Label { body, .. }
+            | Stmt::While { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::Function { body, .. } => {
                 if let Some(line) = first_default(body) {
                     return Some(line);
                 }
@@ -229,7 +232,14 @@ fn first_default(statements: &[Stmt]) -> Option<usize> {
                     return Some(line);
                 }
             }
-            Stmt::Set { .. } | Stmt::Perform { .. } | Stmt::Jump { .. } => {}
+            Stmt::Set { .. }
+            | Stmt::Perform { .. }
+            | Stmt::Jump { .. }
+            | Stmt::Import { .. }
+            | Stmt::Call { .. }
+            | Stmt::Return { .. }
+            | Stmt::Break { .. }
+            | Stmt::Continue { .. } => {}
         }
     }
     None

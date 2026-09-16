@@ -27,6 +27,8 @@ use velin_compile::ProgramBuilder;
 use velin_eval::{Variables, evaluate};
 use velin_syntax::{Diagnostic, Expr, Value};
 
+mod loops;
+
 /// A lowering failure with a source line.
 ///
 /// Distinct from a parse error: the statements were syntactically valid, but
@@ -78,6 +80,8 @@ struct Lowerer {
     /// `Op::Jump`s emitted before their target label's `Pc` was known, to
     /// back-patch once every label has been placed.
     pending: Vec<PendingJump>,
+    loops: Vec<LoopJumps>,
+    generated_slots: usize,
 }
 
 /// A forward (or backward) `jump` awaiting label resolution.
@@ -85,6 +89,12 @@ struct PendingJump {
     pc: Pc,
     label: String,
     line: usize,
+}
+
+#[derive(Default)]
+struct LoopJumps {
+    breaks: Vec<Pc>,
+    continues: Vec<Pc>,
 }
 
 impl Lowerer {
@@ -104,6 +114,13 @@ impl Lowerer {
 
     fn statement(&mut self, statement: Stmt, depth: usize) -> Result<(), LowerError> {
         match statement {
+            Stmt::Import { line, .. }
+            | Stmt::Function { line, .. }
+            | Stmt::Call { line, .. }
+            | Stmt::Return { line, .. } => Err(LowerError::new(
+                line,
+                "module syntax requires `compile_modules` and a host resolver",
+            )),
             Stmt::Label { name, body, line } => {
                 self.lower_label(name, line)?;
                 self.block(body, depth + 1)
@@ -135,6 +152,14 @@ impl Lowerer {
                 otherwise,
             } => self.lower_if(branches, otherwise, depth),
             Stmt::While { condition, body } => self.lower_while(condition, body, depth),
+            Stmt::For {
+                name,
+                collection,
+                body,
+                line,
+            } => self.lower_for(&name, collection, body, line, depth),
+            Stmt::Break { line } => self.lower_loop_jump(line, true),
+            Stmt::Continue { line } => self.lower_loop_jump(line, false),
             Stmt::Jump { label, line } => {
                 self.lower_jump(label, line);
                 Ok(())
@@ -317,30 +342,6 @@ impl Lowerer {
         Ok(())
     }
 
-    /// Lowers a `while` loop: guard at the top, back-edge at the bottom.
-    fn lower_while(
-        &mut self,
-        condition: crate::ast::Condition,
-        body: Vec<Stmt>,
-        depth: usize,
-    ) -> Result<(), LowerError> {
-        let start = self.builder.here();
-        let guard = self
-            .builder
-            .jump_if_false_op(&condition.expr, condition.line, Pc::MAX);
-        let exit = self.builder.push(guard);
-        self.type_sites.push(TypeCheckSite {
-            pc: exit as usize,
-            expression: condition.expr,
-            kind: TypeCheckKind::Condition,
-        });
-        self.block(body, depth + 1)?;
-        self.builder.push(Op::Jump(start));
-        let after = self.builder.here();
-        self.builder.patch_condition_target(exit, after);
-        Ok(())
-    }
-
     /// Emits a placeholder jump, deferring label resolution to [`Self::finish`].
     fn lower_jump(&mut self, label: String, line: usize) {
         let pc = self.builder.push(Op::Jump(Pc::MAX));
@@ -410,11 +411,18 @@ fn definitely_string(expression: &Expr) -> bool {
 fn statement_line(statement: Option<&Stmt>) -> usize {
     match statement {
         Some(
-            Stmt::Label { line, .. }
+            Stmt::Import { line, .. }
+            | Stmt::Function { line, .. }
+            | Stmt::Call { line, .. }
+            | Stmt::Return { line, .. }
+            | Stmt::Label { line, .. }
             | Stmt::Default { line, .. }
             | Stmt::Set { line, .. }
             | Stmt::Perform { line, .. }
-            | Stmt::Jump { line, .. },
+            | Stmt::Jump { line, .. }
+            | Stmt::For { line, .. }
+            | Stmt::Break { line }
+            | Stmt::Continue { line },
         ) => *line,
         Some(Stmt::If { branches, .. }) => {
             branches.first().map_or(0, |branch| branch.condition.line)

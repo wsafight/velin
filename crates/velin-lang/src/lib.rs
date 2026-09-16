@@ -44,6 +44,7 @@ mod host;
 mod limits;
 mod lines;
 mod lower;
+mod modules;
 mod parser;
 mod schema;
 mod token;
@@ -58,6 +59,7 @@ pub use error::ParseError;
 pub use host::CompiledScript;
 pub use limits::{MAX_SOURCE_BYTES, MAX_SOURCE_LINES, MAX_STATEMENT_DEPTH};
 pub use lower::LowerError;
+pub use modules::{ModuleResolver, ResolvedModule, compile_modules};
 pub use parser::RecoveredProgram;
 pub use schema::{HostCommand, HostContractError, HostSchema};
 
