@@ -119,7 +119,9 @@ Completion criteria: scripts can be organized as multi-file modules and reuse pu
 
 Build tooling last, using the analyzability of a small language and host schemas to provide a more precise experience than a general dynamic language. Cross-module features depend on the P2 module semantics.
 
-Planned capabilities include:
+**Status: complete in the current tree.** The CLI, LSP, debugger, Wasm bindings, and Playground now share the formatter, compiler metadata, and replayable VM state supplied by the core.
+
+Delivered capabilities are:
 
 - An official formatter with a deterministic check mode.
 - Semantic tokens, rename, signature help, code actions, and workspace symbols.

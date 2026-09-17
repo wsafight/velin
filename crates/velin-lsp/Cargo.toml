@@ -8,7 +8,7 @@ readme.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
-description = "Minimal Language Server for Velin: live diagnostics, keyword/builtin/variable completion, and label document symbols over stdio"
+description = "Language Server for Velin with diagnostics, semantic editing, and workspace navigation over stdio"
 
 [[bin]]
 name = "velin-lsp"

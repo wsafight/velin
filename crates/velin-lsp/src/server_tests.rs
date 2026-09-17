@@ -268,13 +268,122 @@ fn shutdown_unknown_methods_and_malformed_documents() {
     assert!(
         messages
             .iter()
-            .any(|m| m.get("id") == Some(&json!(3)) && m["error"]["code"] == -32601)
+            .any(|m| m.get("id") == Some(&json!(3)) && m["error"]["code"] == -32600)
     );
     let completion = messages
         .iter()
         .find(|m| m.get("id") == Some(&json!(4)))
         .expect("completion error");
     assert_eq!(completion["error"]["code"], -32600);
+}
+
+#[test]
+fn p3_requests_and_cross_module_navigation_use_workspace_documents() {
+    let main = "import math\nset result=call math.add(1,2)\n";
+    let module = "export fn add(left, right):\n    return left+right\n";
+    let mut input = stream(&[
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+        json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": { "uri": "file:///main.velin", "text": main } },
+        }),
+        json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen",
+            "params": { "textDocument": { "uri": "file:///math.velin", "text": module } },
+        }),
+        json!({
+            "jsonrpc": "2.0", "id": 30, "method": "textDocument/definition",
+            "params": { "textDocument": { "uri": "file:///main.velin" }, "position": { "line": 1, "character": 22 } },
+        }),
+        json!({
+            "jsonrpc": "2.0", "id": 31, "method": "textDocument/references",
+            "params": { "textDocument": { "uri": "file:///main.velin" }, "position": { "line": 1, "character": 22 }, "context": { "includeDeclaration": true } },
+        }),
+        json!({
+            "jsonrpc": "2.0", "id": 32, "method": "textDocument/rename",
+            "params": { "textDocument": { "uri": "file:///main.velin" }, "position": { "line": 1, "character": 22 }, "newName": "sum" },
+        }),
+        json!({
+            "jsonrpc": "2.0", "id": 33, "method": "textDocument/formatting",
+            "params": { "textDocument": { "uri": "file:///main.velin" }, "options": {} },
+        }),
+        json!({
+            "jsonrpc": "2.0", "id": 34, "method": "textDocument/semanticTokens/full",
+            "params": { "textDocument": { "uri": "file:///main.velin" } },
+        }),
+        json!({
+            "jsonrpc": "2.0", "id": 35, "method": "textDocument/codeAction",
+            "params": { "textDocument": { "uri": "file:///main.velin" }, "range": {}, "context": { "diagnostics": [] } },
+        }),
+        json!({ "jsonrpc": "2.0", "id": 36, "method": "workspace/symbol", "params": { "query": "add" } }),
+        json!({ "jsonrpc": "2.0", "id": 99, "method": "shutdown" }),
+        json!({ "jsonrpc": "2.0", "method": "exit" }),
+    ]);
+    let mut output = Vec::new();
+    Server::new(&mut output).run(&mut input).unwrap();
+    let messages = parse_all(output);
+    let response = |id| {
+        messages
+            .iter()
+            .find(|message| message.get("id") == Some(&json!(id)))
+            .unwrap()
+    };
+
+    assert_eq!(response(30)["result"]["uri"], "file:///math.velin");
+    assert_eq!(response(31)["result"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        response(32)["result"]["changes"]["file:///math.velin"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(response(33)["result"].as_array().unwrap().len(), 1);
+    assert!(
+        !response(34)["result"]["data"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(response(35)["result"].as_array().unwrap().len(), 1);
+    assert!(response(35)["result"][0]["edit"]["changes"]["file:///main.velin"].is_array());
+    assert!(
+        response(36)["result"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| {
+                item["name"] == "add" && item["location"]["uri"] == "file:///math.velin"
+            })
+    );
+    let latest_main_diagnostics = messages
+        .iter()
+        .rev()
+        .find(|message| {
+            message["method"] == "textDocument/publishDiagnostics"
+                && message["params"]["uri"] == "file:///main.velin"
+        })
+        .unwrap();
+    assert!(
+        latest_main_diagnostics["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn module_dependency_diagnostics_report_missing_and_cycles_at_imports() {
+    let mut documents = HashMap::new();
+    documents.insert("file:///a.velin".to_owned(), "import b\n".to_owned());
+    let missing = module_diagnostics("file:///a.velin", "import b\n", &documents);
+    assert!(missing[0].message.contains("cannot resolve module `b`"));
+
+    documents.insert("file:///b.velin".to_owned(), "import a\n".to_owned());
+    let cycle = module_diagnostics("file:///a.velin", "import b\n", &documents);
+    assert!(cycle[0].message.contains("cyclic module import"));
+    assert_eq!(cycle[0].line, 1);
+    assert_eq!(cycle[0].column, 8);
 }
 
 #[test]

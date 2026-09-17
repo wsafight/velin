@@ -79,6 +79,17 @@
               <input id="replies" type="text" value="[1]" aria-label="ask replies as a JSON array" />
             </label>
           </div>
+          <div class="debug-controls" aria-label="Debugger controls">
+            <button id="debug-start" type="button"><span class="i18n-en">Start debug</span><span class="i18n-zh">开始调试</span></button>
+            <button id="debug-resume" type="button" disabled><span class="i18n-en">Resume</span><span class="i18n-zh">继续</span></button>
+            <button id="debug-step" type="button" disabled><span class="i18n-en">Step</span><span class="i18n-zh">单步</span></button>
+            <button id="debug-snapshot" type="button" disabled><span class="i18n-en">Snapshot</span><span class="i18n-zh">快照</span></button>
+            <label class="snapshot-picker">
+              <span class="i18n-en">Branch</span><span class="i18n-zh">分支</span>
+              <select id="debug-snapshots" aria-label="Saved snapshots" disabled></select>
+            </label>
+            <button id="debug-restore" type="button" disabled><span class="i18n-en">Restore</span><span class="i18n-zh">恢复</span></button>
+          </div>
         </section>
 
         <section class="results" aria-live="polite">
@@ -89,6 +100,11 @@
           <div class="result-block output-block">
             <h2><span class="i18n-en">Output</span><span class="i18n-zh">输出</span></h2>
             <pre id="output" class="output"></pre>
+          </div>
+          <div class="result-block debug-block">
+            <h2><span class="i18n-en">Debug state</span><span class="i18n-zh">调试状态</span></h2>
+            <p id="debug-status" class="debug-status"><span class="i18n-en">Not started</span><span class="i18n-zh">尚未开始</span></p>
+            <pre id="debug-variables" class="debug-variables">{}</pre>
           </div>
         </section>
       </div>

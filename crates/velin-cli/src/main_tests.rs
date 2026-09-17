@@ -19,14 +19,26 @@ fn parse_args_accepts_check_and_run_and_rejects_the_rest() {
             assert_eq!(path, "a.velin");
             assert!(json);
         }
-        Ok(Command::Run(_) | Command::Compile { .. } | Command::Help | Command::Version) => {
+        Ok(
+            Command::Run(_)
+            | Command::Format { .. }
+            | Command::Compile { .. }
+            | Command::Help
+            | Command::Version,
+        ) => {
             panic!("expected check")
         }
         Err(message) => panic!("expected check, got error {message}"),
     }
     match parse_args(["run".into(), "b.velin".into()].into_iter()) {
         Ok(Command::Run(path)) => assert_eq!(path, "b.velin"),
-        Ok(Command::Check { .. } | Command::Compile { .. } | Command::Help | Command::Version) => {
+        Ok(
+            Command::Check { .. }
+            | Command::Format { .. }
+            | Command::Compile { .. }
+            | Command::Help
+            | Command::Version,
+        ) => {
             panic!("expected run")
         }
         Err(message) => panic!("expected run, got error {message}"),
@@ -43,6 +55,37 @@ fn parse_args_accepts_check_and_run_and_rejects_the_rest() {
     assert!(parse_args(["check".into()].into_iter()).is_err());
     assert!(parse_args(["check".into(), "a".into(), "extra".into()].into_iter()).is_err());
     assert!(parse_args(["build".into(), "a.velin".into()].into_iter()).is_err());
+    assert!(matches!(
+        parse_args(["fmt".into(), "--check".into(), "a.velin".into()].into_iter()),
+        Ok(Command::Format { check: true, .. })
+    ));
+}
+
+#[test]
+fn format_command_writes_and_checks_canonical_source() {
+    let path = temp_script("set value=1+2\n");
+    assert_eq!(
+        run(Command::Format {
+            path: path.clone(),
+            check: true,
+        }),
+        ExitCode::FAILURE
+    );
+    assert_eq!(
+        run(Command::Format {
+            path: path.clone(),
+            check: false,
+        }),
+        ExitCode::SUCCESS
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "set value = 1 + 2\n"
+    );
+    assert_eq!(
+        run(Command::Format { path, check: true }),
+        ExitCode::SUCCESS
+    );
 }
 #[test]
 fn check_and_execute_cover_success_and_failure_paths() {

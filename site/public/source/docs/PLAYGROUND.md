@@ -15,13 +15,14 @@ Open `/playground/` from the header. The sample is a shortened `adventure.velin`
 3. Set replies to `[0]` and run again. The script takes the other branch.
 4. Introduce a type error (for example `if 1:`) and click **Check only** to see a diagnostic without executing.
 
-The page has three surfaces:
+The page has four surfaces:
 
 | Surface | Role |
 | --- | --- |
 | Script | A textarea of Velin source. The sample is a shortened `adventure.velin`. |
 | Diagnostics | Parser, type, and definite-assignment messages, or “No problems.” |
 | Output | Lines produced by `say` (and unknown commands) after **Run**. |
+| Debug state | The current source line and visible variables for a debug session. |
 
 Buttons:
 
@@ -29,7 +30,13 @@ Buttons:
 - **Check only** compiles and analyses without running.
 - **Stop** terminates the current Worker request. The next action starts a fresh Worker.
 
-The `ask` replies field is a JSON array consumed in order. The sample drinks the potion when the field is `[1]`. Use `[0]` to take the other branch. Strings and booleans are also valid entries: `["east"]`, `[true]`. Malformed JSON or one unsupported item rejects the entire list, so later answers cannot shift to the wrong `ask`.
+Debugger controls:
+
+- **Start debug** checks the source and creates a persistent session paused before execution.
+- **Resume** runs to the next host-effect boundary or completion; **Step** executes one bytecode operation and reports its source line.
+- **Snapshot** saves the complete replay state and current output. Select a saved branch and choose **Restore** to return to it, change the replies, and deterministically explore another branch.
+
+The `ask` replies field is a JSON array consumed in order by a normal run. The debugger stops at each effect boundary and uses the first current reply for that boundary, which lets a restored snapshot take a different branch. The sample drinks the potion when the field is `[1]`. Use `[0]` to take the other branch. Strings and booleans are also valid entries: `["east"]`, `[true]`. Malformed JSON or one unsupported item rejects the entire list, so later answers cannot shift to the wrong `ask`.
 
 Language follows the site (`?lang=zh` or the header toggle). Theme follows `velin-theme` in `localStorage`.
 

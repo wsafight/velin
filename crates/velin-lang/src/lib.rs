@@ -40,6 +40,7 @@
 mod artifact;
 mod ast;
 mod error;
+mod format;
 mod host;
 mod limits;
 mod lines;
@@ -56,6 +57,7 @@ pub use artifact::{
 };
 pub use ast::{Condition, Stmt};
 pub use error::ParseError;
+pub use format::format_source;
 pub use host::CompiledScript;
 pub use limits::{MAX_SOURCE_BYTES, MAX_SOURCE_LINES, MAX_STATEMENT_DEPTH};
 pub use lower::LowerError;

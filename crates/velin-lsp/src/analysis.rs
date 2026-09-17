@@ -16,14 +16,21 @@ use velin::{
 mod cursor;
 #[path = "analysis/navigation.rs"]
 mod navigation;
+#[path = "analysis/tooling.rs"]
+mod tooling;
 use cursor::{host_call_at, word_at};
 use navigation::label_occurrences;
 pub use navigation::{label_definition, label_references};
+pub use tooling::{
+    NamedSymbol, SemanticToken, SemanticTokenKind, SymbolKind, definition, identifier_at,
+    identifier_occurrences, semantic_tokens, symbols, valid_rename,
+};
 
 /// The statement keywords the surface language recognises, offered as
 /// completions regardless of parse state.
 pub const KEYWORDS: &[&str] = &[
-    "label", "default", "set", "perform", "if", "elif", "else", "while", "jump",
+    "import", "export", "fn", "call", "return", "label", "default", "set", "perform", "if", "elif",
+    "else", "while", "for", "break", "continue", "jump",
 ];
 
 /// Every built-in function name, offered as a completion.
@@ -325,7 +332,19 @@ fn collect_names(statements: &[Stmt], variables: &mut Vec<String>, labels: &mut 
                     collect_names(body, variables, labels);
                 }
             }
-            Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::Function { body, .. } => {
+            Stmt::While { body, .. } => collect_names(body, variables, labels),
+            Stmt::For { name, body, .. } => {
+                variables.push(name.clone());
+                collect_names(body, variables, labels);
+            }
+            Stmt::Function {
+                name,
+                parameters,
+                body,
+                ..
+            } => {
+                labels.push(name.clone());
+                variables.extend(parameters.iter().cloned());
                 collect_names(body, variables, labels);
             }
             Stmt::Call { bind, .. } => variables.push(bind.clone()),

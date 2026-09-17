@@ -19,6 +19,14 @@ const elements = {
   run: document.getElementById('run'),
   check: document.getElementById('check'),
   stop: document.getElementById('stop'),
+  debugStart: document.getElementById('debug-start'),
+  debugResume: document.getElementById('debug-resume'),
+  debugStep: document.getElementById('debug-step'),
+  debugSnapshot: document.getElementById('debug-snapshot'),
+  debugSnapshots: document.getElementById('debug-snapshots'),
+  debugRestore: document.getElementById('debug-restore'),
+  debugStatus: document.getElementById('debug-status'),
+  debugVariables: document.getElementById('debug-variables'),
   language: document.getElementById('language'),
   theme: document.getElementById('theme'),
   menu: document.getElementById('mobile-menu'),
@@ -102,6 +110,7 @@ class EngineWorker {
 }
 
 const engine = new EngineWorker(new URL('./worker.js', import.meta.url));
+let debugEnabled = false;
 
 function currentLang() {
   return document.documentElement.dataset.lang === 'zh' ? 'zh' : 'en';
@@ -150,7 +159,79 @@ function busy(active, stoppable = false) {
   elements.run.disabled = active;
   elements.check.disabled = active;
   elements.stop.disabled = !stoppable;
+  for (const control of [elements.debugStart, elements.debugResume, elements.debugStep, elements.debugSnapshot, elements.debugRestore]) {
+    if (active) control.disabled = true;
+  }
+  if (!active) elements.debugStart.disabled = false;
   document.body.classList.toggle('is-busy', active);
+}
+
+function setDebugEnabled(enabled) {
+  debugEnabled = enabled;
+  elements.debugResume.disabled = !enabled;
+  elements.debugStep.disabled = !enabled;
+  elements.debugSnapshot.disabled = !enabled;
+  elements.debugRestore.disabled = !enabled || !elements.debugSnapshots.value;
+}
+
+function renderDebug(result) {
+  renderDiagnostics(result.diagnostics ?? []);
+  renderOutput(result.output ?? []);
+  const labels = {
+    paused: currentLang() === 'zh' ? '已暂停' : 'Paused',
+    effect: currentLang() === 'zh' ? '效果边界' : 'Effect boundary',
+    finished: currentLang() === 'zh' ? '已完成' : 'Finished',
+    error: currentLang() === 'zh' ? '错误' : 'Error',
+  };
+  const status = labels[result.status] ?? String(result.status ?? 'paused');
+  elements.debugStatus.textContent = result.line ? `${status} · ${currentLang() === 'zh' ? '第' : 'line '}${result.line}${currentLang() === 'zh' ? ' 行' : ''}` : status;
+  elements.debugVariables.textContent = JSON.stringify(result.variables ?? {}, null, 2);
+  if (result.error) renderOutput([...(result.output ?? []), `Error: ${result.error}`]);
+  if (Number.isInteger(result.snapshot)) {
+    const option = document.createElement('option');
+    option.value = String(result.snapshot);
+    option.textContent = `${currentLang() === 'zh' ? '快照' : 'Snapshot'} ${result.snapshot}`;
+    elements.debugSnapshots.append(option);
+    elements.debugSnapshots.value = option.value;
+    elements.debugSnapshots.disabled = false;
+  }
+  setDebugEnabled(result.ok && result.status !== 'finished' && result.status !== 'error');
+}
+
+async function debugRequest(operation, payload = {}) {
+  busy(true, true);
+  try {
+    const result = await engine.request(operation, payload);
+    renderDebug(result);
+  } catch (error) {
+    renderOutput([`Error: ${String(error.message || error)}`]);
+  } finally {
+    busy(false);
+    elements.debugStart.disabled = false;
+    setDebugEnabled(debugEnabled);
+  }
+}
+
+function onDebugStart() {
+  elements.debugSnapshots.replaceChildren();
+  elements.debugSnapshots.disabled = true;
+  debugRequest('debug-start', {source: elements.source.value});
+}
+
+function onDebugResume() {
+  debugRequest('debug-resume', {replies: elements.replies.value});
+}
+
+function onDebugStep() {
+  debugRequest('debug-step', {replies: elements.replies.value});
+}
+
+function onDebugSnapshot() {
+  debugRequest('debug-snapshot');
+}
+
+function onDebugRestore() {
+  debugRequest('debug-restore', {snapshot: Number(elements.debugSnapshots.value)});
 }
 
 async function onCheck() {
@@ -233,6 +314,14 @@ async function main() {
   elements.run.addEventListener('click', onRun);
   elements.check.addEventListener('click', onCheck);
   elements.stop.addEventListener('click', onStop);
+  elements.debugStart.addEventListener('click', onDebugStart);
+  elements.debugResume.addEventListener('click', onDebugResume);
+  elements.debugStep.addEventListener('click', onDebugStep);
+  elements.debugSnapshot.addEventListener('click', onDebugSnapshot);
+  elements.debugRestore.addEventListener('click', onDebugRestore);
+  elements.debugSnapshots.addEventListener('change', () => {
+    elements.debugRestore.disabled = !elements.debugSnapshots.value;
+  });
   onCheck();
 }
 

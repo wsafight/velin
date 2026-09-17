@@ -7,10 +7,11 @@
 //! the same source + replies always produce the same transcript.
 
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::fmt;
 use velin::{
-    Diagnostic, MarshallingLimits, ScriptRunner, ScriptYield, Value, check_script, compile,
-    json_to_value,
+    DebugEvent, DebugSession, DebugSnapshot, Diagnostic, MarshallingLimits, ScriptRunner,
+    ScriptYield, Value, check_script, compile, debug_script, json_to_value,
 };
 
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
@@ -65,12 +66,217 @@ pub struct RunResult {
 }
 
 /// A diagnostic flattened to the fields the web UI renders.
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct WireDiagnostic {
     pub severity: String,
     pub line: usize,
     pub column: usize,
     pub message: String,
+}
+
+/// Serializable state for the interactive Playground debugger.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct DebugResult {
+    pub ok: bool,
+    pub status: String,
+    pub line: usize,
+    pub diagnostics: Vec<WireDiagnostic>,
+    pub output: Vec<String>,
+    pub variables: BTreeMap<String, Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BranchSnapshot {
+    machine: DebugSnapshot,
+    output: Vec<String>,
+    output_bytes: usize,
+}
+
+/// Persistent deterministic execution used by the Playground's debug controls.
+pub struct InteractiveSession {
+    script: velin::CompiledScript,
+    debugger: DebugSession,
+    output: Vec<String>,
+    output_bytes: usize,
+    snapshots: BTreeMap<u32, BranchSnapshot>,
+    next_snapshot: u32,
+    last_line: usize,
+    status: &'static str,
+}
+
+impl InteractiveSession {
+    pub fn new(file: &str, source: &str) -> Result<Self, Box<DebugResult>> {
+        let script = compile(file, source).map_err(|diagnostic| {
+            Box::new(DebugResult {
+                ok: false,
+                status: "error".to_owned(),
+                line: diagnostic.line,
+                diagnostics: vec![WireDiagnostic::from(&diagnostic)],
+                output: Vec::new(),
+                variables: BTreeMap::new(),
+                snapshot: None,
+                error: None,
+            })
+        })?;
+        let diagnostics: Vec<_> = check_script(file, &script)
+            .iter()
+            .map(WireDiagnostic::from)
+            .collect();
+        if diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == "error")
+        {
+            return Err(Box::new(DebugResult {
+                ok: false,
+                status: "error".to_owned(),
+                line: 0,
+                diagnostics,
+                output: Vec::new(),
+                variables: BTreeMap::new(),
+                snapshot: None,
+                error: None,
+            }));
+        }
+        let debugger = debug_script(&script).map_err(|error| {
+            Box::new(DebugResult {
+                ok: false,
+                status: "error".to_owned(),
+                line: 0,
+                diagnostics: diagnostics.clone(),
+                output: Vec::new(),
+                variables: BTreeMap::new(),
+                snapshot: None,
+                error: Some(error.to_string()),
+            })
+        })?;
+        Ok(Self {
+            script,
+            debugger,
+            output: Vec::new(),
+            output_bytes: 0,
+            snapshots: BTreeMap::new(),
+            next_snapshot: 1,
+            last_line: 1,
+            status: "paused",
+        })
+    }
+
+    pub fn continue_execution(&mut self, replies: Vec<Value>) -> DebugResult {
+        self.advance(false, replies)
+    }
+
+    pub fn step(&mut self, replies: Vec<Value>) -> DebugResult {
+        self.advance(true, replies)
+    }
+
+    pub fn snapshot(&mut self) -> DebugResult {
+        let id = self.next_snapshot;
+        self.next_snapshot = self.next_snapshot.saturating_add(1);
+        self.snapshots.insert(
+            id,
+            BranchSnapshot {
+                machine: self.debugger.snapshot(),
+                output: self.output.clone(),
+                output_bytes: self.output_bytes,
+            },
+        );
+        self.result(true, Some(id), None)
+    }
+
+    pub fn restore(&mut self, id: u32) -> DebugResult {
+        let Some(snapshot) = self.snapshots.get(&id).cloned() else {
+            return self.result(false, None, Some(format!("unknown snapshot {id}")));
+        };
+        self.debugger.restore(&snapshot.machine);
+        self.output = snapshot.output;
+        self.output_bytes = snapshot.output_bytes;
+        self.last_line = self
+            .debugger
+            .location()
+            .map_or(0, |location| location.line as usize);
+        self.status = "paused";
+        self.result(true, Some(id), None)
+    }
+
+    pub fn state(&self) -> DebugResult {
+        self.result(true, None, None)
+    }
+
+    fn advance(&mut self, single_step: bool, replies: Vec<Value>) -> DebugResult {
+        let event = if single_step {
+            self.debugger.step()
+        } else {
+            self.debugger.continue_execution()
+        };
+        match event {
+            Ok(DebugEvent::Paused { location, .. }) => {
+                self.last_line = location.line as usize;
+                self.status = "paused";
+                self.result(true, None, None)
+            }
+            Ok(DebugEvent::Host {
+                host_id,
+                values,
+                location,
+            }) => {
+                self.last_line = location.line as usize;
+                let Some(name) = self.script.host_name(host_id).map(str::to_owned) else {
+                    return self.result(
+                        false,
+                        None,
+                        Some(format!("bytecode yielded unknown host id {host_id}")),
+                    );
+                };
+                let mut replies = replies.into_iter();
+                let reply = match perform(
+                    &name,
+                    &values,
+                    &mut self.output,
+                    &mut self.output_bytes,
+                    &mut replies,
+                ) {
+                    Ok(reply) => reply,
+                    Err(message) => return self.result(false, None, Some(message.to_owned())),
+                };
+                if let Err(error) = self.debugger.resume(reply) {
+                    return self.result(false, None, Some(error.to_string()));
+                }
+                self.status = "effect";
+                self.result(true, None, None)
+            }
+            Ok(DebugEvent::Finished) => {
+                self.status = "finished";
+                self.result(true, None, None)
+            }
+            Err(error) => self.result(false, None, Some(error.to_string())),
+        }
+    }
+
+    fn result(&self, ok: bool, snapshot: Option<u32>, error: Option<String>) -> DebugResult {
+        DebugResult {
+            ok,
+            status: if error.is_some() {
+                "error".to_owned()
+            } else {
+                self.status.to_owned()
+            },
+            line: self.last_line,
+            diagnostics: Vec::new(),
+            output: self.output.clone(),
+            variables: self
+                .debugger
+                .variables()
+                .into_iter()
+                .map(|variable| (variable.name, variable.value))
+                .collect(),
+            snapshot,
+            error,
+        }
+    }
 }
 
 impl WireDiagnostic {

@@ -221,7 +221,7 @@ Static checking never changes bytecode or runtime behavior. The CLI and other ho
 
 ## 9. Execution and resource limits
 
-`Machine` holds an immutable `Program` through `Arc` and owns an independent variable frame, program counter, suspended effect, completion flag, and reusable register value/metric files. Construction is fallible; only a validated program can enter runtime state. Frame slots retain their measured data footprints, and expression/built-in evaluation returns metrics with its value, avoiding a second recursive resource scan during assignment or host-payload accounting.
+`Machine` holds an immutable `Program` through `Arc` and owns an independent variable frame, program counter, suspended effect, completion flag, and reusable register value/metric files. Construction is fallible; only a validated program can enter runtime state. Frame slots retain their measured data footprints, and expression/built-in evaluation returns metrics with its value, avoiding a second recursive resource scan during assignment or host-payload accounting. `DebugSession` layers source breakpoints, stepping, visible variables, effect-boundary pauses, replayable snapshots, and line-attributed execution profiles over the program's `DebugTable`.
 
 `ExecutionPolicy` is shared by `Machine`, `ScriptRunner`, `MachineInvoker`, and `PureModule`. The default policy allows 10,000,000 cumulative fuel, 10,000 immediate fuel units per `run` / `resume` / batch call, 1,000 host effects, a call depth of 64, and the published value, machine, payload, and queue data budgets. A progress callback can report fuel and request cooperative cancellation; wall-clock deadlines remain host policy.
 
@@ -239,7 +239,7 @@ Current built-in limits:
 | Value | 4,096 nodes, 16 collection levels, and 1 MiB of text per value tree |
 | Program bytecode | 100,000 control-flow ops, 100,000 chunks, 65,536 slots, 100,000 constant-value nodes, and 16 MiB of constant/slot text |
 | Expression bytecode | 4,096 ops and 1,024 registers per chunk; 128 arguments per host instruction |
-| Tooling | 1 MiB CLI/Playground output; 1,000 CLI/Playground host effects; 1 MiB Playground reply JSON and 5-second Worker request; 4 MiB LSP JSON body, 64 KiB headers, and 8 KiB per header line |
+| Tooling | 1 MiB CLI/Playground output; 1,000 CLI/Playground host effects; 1 MiB Playground reply JSON and 5-second Worker request; 4 MiB LSP JSON body, 64 KiB headers, 8 KiB per header line, and workspace indexing capped at 128 files / 4 MiB / 32 directory levels |
 
 CLI, WebAssembly, and other hosts should add time, effect permission, and external resource limits appropriate to their own risk models. Those are host-layer concerns and cannot be unified by the language core.
 
@@ -247,17 +247,17 @@ CLI, WebAssembly, and other hosts should add time, effect permission, and extern
 
 ### CLI
 
-`velin check` compiles and statically checks a file or stdin source, with optional JSON diagnostics. `velin run` uses a bounded line-oriented reference host intended only for examples. That host implements `say` and `ask`; other effects are printed by name and arguments.
+`velin check` compiles and statically checks a file or stdin source, with optional JSON diagnostics. `velin fmt` applies the AST-based canonical formatter or checks formatting without writing. `velin run` uses a bounded line-oriented reference host intended only for examples. That host implements `say` and `ask`; other effects are printed by name and arguments.
 
 ### LSP and VS Code
 
-`velin-lsp` speaks JSON-RPC over stdio and provides recovering multi-error diagnostics, completion, signature help, label document symbols, hover, and label definition/reference navigation. An embedding editor can construct `Server::with_host_schema` so host diagnostics, completion details, signatures, and documentation all come from the runtime's `HostSchema`. It directly calls `velin-lang` and `velin-check` instead of maintaining a second set of language semantics. Unknown requests return the standard `MethodNotFound` response.
+`velin-lsp` speaks JSON-RPC over stdio and provides recovering multi-error and module diagnostics, completion, signature help, semantic tokens, formatting, code actions, rename, document/workspace symbols, hover, and cross-document definition/reference navigation. It indexes bounded `.velin` sources under the workspace roots during initialization, while open buffers override their disk copies. An embedding editor can construct `Server::with_host_schema` so host diagnostics, completion details, signatures, and documentation all come from the runtime's `HostSchema`. It directly calls the core language crates instead of maintaining a second set of language semantics. Unknown requests return the standard `MethodNotFound` response.
 
 The VS Code extension registers `.velin` files, provides TextMate highlighting, and launches the LSP. Platform release VSIX packages bundle the matching native server; explicit configuration can override it.
 
 ### WebAssembly
 
-`velin-wasm` exposes `check(source)` and `run(source, replies_json)`. The binding layer only handles bounded strings and strictly validated JSON; the facade crate still performs parsing, checking, and execution. The Playground runs it in a terminable Worker so the UI remains responsive. Output is rendered incrementally against the remaining budget without allocating a complete intermediate string.
+`velin-wasm` exposes `check(source)`, `run(source, replies_json)`, and a persistent `PlaygroundSession` debugger. The binding layer only handles bounded strings and strictly validated JSON; the facade crate still performs parsing, checking, and execution. The Playground runs it in a terminable Worker so the UI remains responsive, and exposes stepping, variable inspection, snapshots, and deterministic branch replay. Output is rendered incrementally against the remaining budget without allocating a complete intermediate string.
 
 `#[wasm_bindgen]` generates `unsafe` glue, so the Wasm shim cannot inherit the workspace's `unsafe_code = "forbid"`. All handwritten Wasm code remains safe Rust, and core crates retain the prohibition.
 

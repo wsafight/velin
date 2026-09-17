@@ -55,6 +55,98 @@ pub fn run(source: &str, replies_json: &str) -> String {
     to_json(&result)
 }
 
+/// Persistent Playground debugger with pause, resume, stepping, snapshots and replay.
+#[cfg(feature = "source")]
+#[wasm_bindgen]
+pub struct PlaygroundSession {
+    session: Option<engine::InteractiveSession>,
+    initial: engine::DebugResult,
+}
+
+#[cfg(feature = "source")]
+#[wasm_bindgen]
+impl PlaygroundSession {
+    #[wasm_bindgen(constructor)]
+    #[must_use]
+    pub fn new(source: &str) -> PlaygroundSession {
+        match engine::InteractiveSession::new("playground.velin", source) {
+            Ok(session) => {
+                let initial = session.state();
+                Self {
+                    session: Some(session),
+                    initial,
+                }
+            }
+            Err(initial) => Self {
+                session: None,
+                initial: *initial,
+            },
+        }
+    }
+
+    #[must_use]
+    pub fn state(&self) -> String {
+        self.session.as_ref().map_or_else(
+            || to_json(&self.initial),
+            |session| to_json(&session.state()),
+        )
+    }
+
+    #[must_use]
+    pub fn resume(&mut self, replies_json: &str) -> String {
+        self.with_replies(replies_json, false)
+    }
+
+    #[must_use]
+    pub fn step(&mut self, replies_json: &str) -> String {
+        self.with_replies(replies_json, true)
+    }
+
+    #[must_use]
+    pub fn snapshot(&mut self) -> String {
+        self.session.as_mut().map_or_else(
+            || to_json(&self.initial),
+            |session| to_json(&session.snapshot()),
+        )
+    }
+
+    #[must_use]
+    pub fn restore(&mut self, snapshot: u32) -> String {
+        self.session.as_mut().map_or_else(
+            || to_json(&self.initial),
+            |session| to_json(&session.restore(snapshot)),
+        )
+    }
+
+    fn with_replies(&mut self, replies_json: &str, step: bool) -> String {
+        let replies = match engine::parse_replies(replies_json) {
+            Ok(replies) => replies,
+            Err(error) => {
+                return to_json(&engine::DebugResult {
+                    ok: false,
+                    status: "error".to_owned(),
+                    line: 0,
+                    diagnostics: Vec::new(),
+                    output: Vec::new(),
+                    variables: std::collections::BTreeMap::new(),
+                    snapshot: None,
+                    error: Some(error.to_string()),
+                });
+            }
+        };
+        self.session.as_mut().map_or_else(
+            || to_json(&self.initial),
+            |session| {
+                if step {
+                    to_json(&session.step(replies))
+                } else {
+                    to_json(&session.continue_execution(replies))
+                }
+            },
+        )
+    }
+}
+
 /// A persistent runtime-only machine for hosts that already have bytecode.
 #[cfg(feature = "runtime")]
 #[wasm_bindgen]

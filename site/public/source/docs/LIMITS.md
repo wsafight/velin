@@ -74,6 +74,7 @@ These are not language semantics. They apply to specific tools:
 | Playground Worker request | 5 seconds |
 | LSP JSON-RPC body | 4 MiB |
 | LSP headers | 64 KiB total, 8 KiB per line |
+| LSP workspace index | 128 `.velin` files, 4 MiB total, 32 directory levels |
 
 ## What the host must still limit
 

@@ -112,7 +112,7 @@ main {width: min(calc(100% - (var(--page-gutter) * 2)), 1280px); margin-inline: 
 .intro > p:last-child {margin: 0; color: var(--page-muted); font-size: 16px; line-height: 1.7;}
 
 .workspace {display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(300px, .7fr); min-height: 570px; overflow: hidden; border: 1px solid var(--page-line); border-radius: 20px; background: var(--page-raised);}
-.editor {display: grid; grid-template-rows: 46px minmax(380px, 1fr) auto; min-width: 0; border-right: 1px solid var(--page-line);}
+.editor {display: grid; grid-template-rows: 46px minmax(380px, 1fr) auto auto; min-width: 0; border-right: 1px solid var(--page-line);}
 .panel-heading {display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--page-line);}
 .panel-heading label {font-weight: 560;}
 .panel-heading > span {color: var(--page-muted); font: 11px var(--mono);}
@@ -127,8 +127,14 @@ textarea:focus {outline: 0; box-shadow: inset 0 0 0 2px var(--signal);}
 .replies {display: flex; align-items: center; justify-content: flex-end; gap: 9px; color: var(--page-muted); font-size: 11px;}
 .replies code {color: var(--page-fg); font-family: var(--mono);}
 .replies input {width: 105px; height: 36px; padding: 0 9px; border: 1px solid var(--page-line); border-radius: 6px; background: var(--page-bg); color: var(--page-fg); font: 12px var(--mono);}
+.debug-controls {display: grid; grid-template-columns: repeat(4, auto) minmax(120px, 1fr) auto; align-items: center; gap: 8px; min-height: 56px; padding: 8px 13px; border-top: 1px solid var(--page-line);}
+.debug-controls button {height: 36px; padding: 0 12px; border: 1px solid var(--page-line); border-radius: 6px; font-size: 12px; font-weight: 560;}
+.debug-controls button:hover {border-color: var(--teal);}
+.debug-controls button:disabled {cursor: not-allowed; opacity: .45;}
+.snapshot-picker {display: flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--page-muted); font-size: 11px;}
+.snapshot-picker select {width: 112px; height: 34px; border: 1px solid var(--page-line); border-radius: 6px; background: var(--page-bg); color: var(--page-fg); font: 11px var(--mono);}
 
-.results {display: grid; grid-template-rows: minmax(190px, .7fr) minmax(260px, 1fr); min-width: 0;}
+.results {display: grid; grid-template-rows: minmax(150px, .6fr) minmax(220px, 1fr) minmax(130px, .55fr); min-width: 0;}
 .result-block {min-height: 0; padding: 19px; overflow: auto;}
 .result-block + .result-block {border-top: 1px solid var(--page-line);}
 .results h2 {margin: 0 0 15px; color: var(--page-muted); font: 500 11px var(--mono); letter-spacing: 0.04em; text-transform: uppercase;}
@@ -144,6 +150,9 @@ textarea:focus {outline: 0; box-shadow: inset 0 0 0 2px var(--signal);}
 .output[data-empty='true']::after {content: '(no output yet)'; color: #e7e2d866;}
 html[data-lang='zh'] .output[data-empty='true']::after {content: '（暂无输出）';}
 .banner {margin: 0 0 20px; padding: 12px 14px; border: 1px solid #d9ac86; border-radius: 8px; background: #fff4e8; color: #83401f; font-size: 13px;}
+.debug-block {background: var(--page-bg);}
+.debug-status {margin: 0 0 10px; color: var(--teal); font: 12px var(--mono);}
+.debug-variables {min-height: 54px; margin: 0; color: var(--page-fg); font: 12px/1.5 var(--mono); white-space: pre-wrap;}
 
 footer {width: min(calc(100% - (var(--page-gutter) * 2)), 1280px); margin: 0 auto; padding: 28px 0 40px; border-top: 1px solid var(--page-line); color: var(--page-muted); font-size: 12px;}
 footer p {margin: 0;}
@@ -159,6 +168,7 @@ footer code {font-family: var(--mono); color: var(--page-fg);}
   .workspace {grid-template-columns: 1fr;}
   .editor {border-right: 0; border-bottom: 1px solid var(--page-line);}
   .results {grid-template-columns: 1fr 1fr; grid-template-rows: minmax(240px, auto);}
+  .debug-block {grid-column: 1 / -1; border-top: 1px solid var(--page-line) !important; border-left: 0 !important;}
   .result-block + .result-block {border-top: 0; border-left: 1px solid var(--page-line);}
 }
 
@@ -167,10 +177,13 @@ footer code {font-family: var(--mono); color: var(--page-fg);}
   main {padding-top: 38px;}
   .intro h1 {font-size: 33px;}
   .workspace {min-height: 0;}
-  .editor {grid-template-rows: 44px 410px auto;}
+  .editor {grid-template-rows: 44px 410px auto auto;}
   textarea {padding: 17px; font-size: 12px;}
   .controls {grid-template-columns: 1fr 1fr;}
   .replies {grid-column: 1 / -1; justify-content: space-between; padding-top: 4px;}
+  .debug-controls {grid-template-columns: repeat(2, 1fr);}
+  .snapshot-picker {grid-column: 1 / -1; justify-content: space-between;}
+  .snapshot-picker select {width: 150px;}
   .results {grid-template-columns: 1fr; grid-template-rows: minmax(160px, auto) 230px;}
   .result-block + .result-block {border-left: 0; border-top: 1px solid var(--page-line);}
 }

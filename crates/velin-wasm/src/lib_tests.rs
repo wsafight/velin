@@ -19,6 +19,12 @@ fn wasm_bindings_return_json() {
     );
     assert!(shifted.contains("item 2"), "{shifted}");
     assert!(!shifted.contains("first\""), "{shifted}");
+
+    let mut session = super::PlaygroundSession::new("perform say(\"debug\")\n");
+    assert!(session.state().contains("\"status\":\"paused\""));
+    assert!(session.snapshot().contains("\"snapshot\":1"));
+    assert!(session.resume("[]").contains("debug"));
+    assert!(session.restore(1).contains("\"status\":\"paused\""));
 }
 
 #[cfg(feature = "runtime")]

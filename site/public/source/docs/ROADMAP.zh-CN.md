@@ -119,7 +119,9 @@ P0 的边界稳定后，在不把原生对象放入 VM 的前提下，让宿主�
 
 最后建设工具链，利用小型语言和宿主 schema 的可分析性，提供比通用动态语言更准确的体验。跨模块能力依赖 P2 的模块语义。
 
-计划能力包括：
+**状态：当前代码树已完成。** CLI、LSP、调试器、Wasm bindings 和 Playground 现在共用核心提供的 formatter、编译器元数据与可回放 VM 状态。
+
+已交付能力包括：
 
 - 官方 formatter 和确定性的格式检查模式。
 - semantic tokens、rename、signature help、code actions 和 workspace symbols。

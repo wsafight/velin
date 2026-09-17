@@ -158,6 +158,11 @@ impl Machine {
     /// # Errors
     /// Propagates evaluation errors from continued execution.
     pub fn resume(&mut self, value: Option<Value>) -> Result<Yield, EvalError> {
+        self.resume_pending(value)?;
+        self.run()
+    }
+
+    pub(super) fn resume_pending(&mut self, value: Option<Value>) -> Result<(), EvalError> {
         if let Some(error) = &self.pending_batch_error {
             return Err(error.clone());
         }
@@ -177,7 +182,7 @@ impl Machine {
             self.assign(slot, value, pending.line)?;
         }
         self.pending_host = None;
-        self.run()
+        Ok(())
     }
 
     /// Executes one op. Returns `Some(Yield::Host)` if it yielded, `None`

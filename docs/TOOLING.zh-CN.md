@@ -31,7 +31,14 @@ cargo run -p velin-cli -- check examples/adventure.velin
 
 `check` 会打印解析、降级、类型和确定赋值诊断。存在 error 时退出码为 1；只有 warning 不会导致命令失败。
 
-使用 `velin check --json <file>` 可得到稳定的 `{ ok, diagnostics, error }` JSON 结果。两个子命令都接受 `-` 作为源码路径，从 stdin 读取 UTF-8 源码；`velin --help` 与 `velin --version` 会打印命令信息并成功退出。
+原地格式化文件，或只检查源码是否为规范格式而不写入：
+
+```sh
+cargo run -p velin-cli -- fmt examples/adventure.velin
+cargo run -p velin-cli -- fmt --check examples/adventure.velin
+```
+
+formatter 是确定性的，并保留空行、独立行注释和行尾注释。`fmt -` 从 stdin 读取并把格式化结果写到 stdout。使用 `velin check --json <file>` 可得到稳定的 `{ ok, diagnostics, error }` JSON 结果。`check`、`fmt` 和 `run` 都接受 `-` 作为源码路径；`velin --help` 与 `velin --version` 会打印命令信息并成功退出。
 
 通过行式参考宿主运行：
 
@@ -59,13 +66,14 @@ cargo build -p velin-lsp
 
 `velin-lsp` 提供：
 
-- 实时解析、降级、类型与确定赋值诊断。
-- 关键字、内置函数、变量、标签以及已配置宿主命令的补全。
-- 标签文档符号。
-- 语言名称悬停说明、schema 驱动的宿主签名帮助/文档，以及标签定义跳转与引用查找。
+- 实时解析、降级、类型、确定赋值与模块依赖诊断。
+- 语言名称及 schema 驱动宿主命令的补全、悬停说明与签名帮助。
+- semantic tokens、文档格式化、格式化 code action，以及 prepare-rename/rename。
+- 文档符号，以及模块、函数、变量和标签的 workspace symbols。
+- 在已加载模块文档间跳转定义和查找引用。
 - 对不支持的请求返回标准 JSON-RPC `MethodNotFound`。
 
-服务器将 JSON-RPC 消息限制为 4 MiB，并在分配正文前检查头部预算。
+初始化时，服务器会索引给定 workspace roots 下的 `.velin` 文件，上限为 128 个文件、合计 4 MiB 源码和 32 层目录；打开的缓冲区覆盖对应磁盘副本。服务器将 JSON-RPC 消息限制为 4 MiB，并在分配正文前检查头部预算。
 启动可复用 Rust 服务器的嵌入方可以使用 `Server::with_host_schema`；独立 stdio 二进制仍保持宿主中立。
 
 ## VS Code 扩展

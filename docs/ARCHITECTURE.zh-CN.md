@@ -221,7 +221,7 @@ Integer / Boolean / String / List / Record / Unknown
 
 ## 9. 执行与资源限制
 
-`Machine` 通过 `Arc` 持有不可变 `Program`，并拥有独立的变量帧、程序计数器、挂起效果、完成标记和可复用寄存器值/指标数组。构造函数是可失败的，只有验证后的程序才能进入执行状态。帧槽位保留已经测得的数据占用量，表达式和 built-in 求值同时返回值与指标，赋值及宿主载荷统计不再进行第二次递归扫描。
+`Machine` 通过 `Arc` 持有不可变 `Program`，并拥有独立的变量帧、程序计数器、挂起效果、完成标记和可复用寄存器值/指标数组。构造函数是可失败的，只有验证后的程序才能进入执行状态。帧槽位保留已经测得的数据占用量，表达式和 built-in 求值同时返回值与指标，赋值及宿主载荷统计不再进行第二次递归扫描。`DebugSession` 基于程序的 `DebugTable` 提供源码断点、单步、可见变量、效果边界暂停、可回放快照和按源码行归因的执行 profile。
 
 `ExecutionPolicy` 由 `Machine`、`ScriptRunner`、`MachineInvoker` 和 `PureModule` 共享。默认策略允许累计 10,000,000 fuel、每次 `run` / `resume` / batch 10,000 个立即 fuel 单位、1,000 次宿主效果、64 层调用深度，以及已公布的单值、整机、宿主载荷和宿主队列数据预算。进度回调可以报告 fuel 并请求协作式取消；墙钟截止时间仍属于宿主策略。
 
@@ -239,7 +239,7 @@ Integer / Boolean / String / List / Record / Unknown
 | 值 | 每棵值树 4,096 个节点、16 层集合、1 MiB 文本 |
 | 程序字节码 | 100,000 个控制流 op、100,000 个 chunk、65,536 个槽位、100,000 个常量值节点、16 MiB 常量及槽位文本 |
 | 表达式字节码 | 每个 chunk 4,096 个 op、1,024 个寄存器；每条宿主指令最多 128 个参数 |
-| 工具层 | CLI / Playground 输出 1 MiB、宿主效果 1,000 次；Playground 回复 JSON 1 MiB、Worker 请求 5 秒；LSP JSON 正文 4 MiB、头部 64 KiB、单行头部 8 KiB |
+| 工具层 | CLI / Playground 输出 1 MiB、宿主效果 1,000 次；Playground 回复 JSON 1 MiB、Worker 请求 5 秒；LSP JSON 正文 4 MiB、头部 64 KiB、单行头部 8 KiB，workspace 索引最多 128 个文件 / 4 MiB / 32 层目录 |
 
 CLI、WebAssembly 或其他宿主仍应按自己的风险模型增加时间、效果权限和外部资源预算；这些限制属于宿主层，不能由语言核心统一决定。
 
@@ -247,17 +247,17 @@ CLI、WebAssembly 或其他宿主仍应按自己的风险模型增加时间、�
 
 ### CLI
 
-`velin check` 对文件或 stdin 源码运行编译与静态检查，并可输出 JSON 诊断；`velin run` 使用有界、仅供示例的行式宿主。参考宿主对 `say` 和 `ask` 提供行为，其他效果按名称和参数回显。
+`velin check` 对文件或 stdin 源码运行编译与静态检查，并可输出 JSON 诊断；`velin fmt` 应用基于 AST 的规范 formatter，或只检查格式而不写入；`velin run` 使用有界、仅供示例的行式宿主。参考宿主对 `say` 和 `ask` 提供行为，其他效果按名称和参数回显。
 
 ### LSP 与 VS Code
 
-`velin-lsp` 使用 stdio JSON-RPC，提供可恢复的多错误诊断、补全、签名帮助、标签文档符号、悬停说明，以及标签定义/引用导航。嵌入式编辑器可以构造 `Server::with_host_schema`，让宿主诊断、补全详情、签名与文档全部来自运行时的 `HostSchema`。它直接调用 `velin-lang` 和 `velin-check`，不维护第二套语言语义；未知请求返回标准 `MethodNotFound`。
+`velin-lsp` 使用 stdio JSON-RPC，提供可恢复的多错误与模块诊断、补全、签名帮助、semantic tokens、格式化、code actions、rename、文档/workspace symbols、悬停说明，以及跨文档定义/引用导航。初始化时，它会有界索引 workspace roots 下的 `.velin` 源码；打开的缓冲区覆盖对应磁盘副本。嵌入式编辑器可以构造 `Server::with_host_schema`，让宿主诊断、补全详情、签名与文档全部来自运行时的 `HostSchema`。它直接调用核心语言 crate，不维护第二套语言语义；未知请求返回标准 `MethodNotFound`。
 
 VS Code 扩展负责 `.velin` 文件注册、TextMate 高亮和启动 LSP。各平台发布的 VSIX 内置对应原生服务器，也允许用显式配置覆盖。
 
 ### WebAssembly
 
-`velin-wasm` 暴露 `check(source)` 和 `run(source, replies_json)`。绑定层只处理有界字符串与严格校验的 JSON；解析、检查和执行仍由门面 crate 完成。Playground 在可终止 Worker 中运行它，保证 UI 可响应。输出按剩余预算增量渲染，不先分配一份完整的中间字符串。
+`velin-wasm` 暴露 `check(source)`、`run(source, replies_json)` 和持久化 `PlaygroundSession` 调试器。绑定层只处理有界字符串与严格校验的 JSON；解析、检查和执行仍由门面 crate 完成。Playground 在可终止 Worker 中运行它，保证 UI 可响应，并提供单步、变量查看、快照与确定性分支回放。输出按剩余预算增量渲染，不先分配一份完整的中间字符串。
 
 `#[wasm_bindgen]` 会生成 `unsafe` 胶水，因此 wasm shim 无法继承 workspace 的 `unsafe_code = "forbid"`。所有手写 wasm 代码保持安全 Rust，核心 crate 继续执行 forbid 门禁。
 

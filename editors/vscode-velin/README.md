@@ -5,15 +5,15 @@ scripts, backed by the `velin-lsp` language server.
 
 ## Features
 
-- **Syntax highlighting** — keywords (`label`/`default`/`set`/`perform`/`if`/
-  `elif`/`else`/`while`/`jump`), built-in functions, strings, integers,
+- **Syntax highlighting** — state-machine, module, function, and loop keywords;
+  built-in functions, strings, integers,
   booleans, operators, and `#` comments (TextMate grammar, works with no server).
-- **Live diagnostics** — parse, lower, and static-check errors as you type
-  (definite-assignment and type inference from `velin-check`).
-- **Completion** — keywords, built-ins, and the variables/labels the current
-  script declares.
-- **Outline** — the script's `label`s as document symbols.
-- **Navigation** — hover help plus definition and reference lookup for labels.
+- **Live diagnostics** — parse, lower, type, definite-assignment, and module
+  dependency errors as you type.
+- **Editing** — completion, semantic tokens, formatting, code actions, hover,
+  signature help, and rename.
+- **Navigation** — document/workspace symbols plus cross-module definition and
+  reference lookup over the bounded workspace index.
 
 ## Language server
 

@@ -1,17 +1,9 @@
-//! `velin` — the command-line front-end for the Velin language.
+//! Command-line front-end for checking, formatting, compiling, and running Velin.
 //!
-//! Two subcommands, both taking a single `.velin` file path:
-//!
-//! * `velin check <file>` — parse, lower, and statically check the script,
-//!   printing every diagnostic. Exit code 0 when there are no *errors*
-//!   (warnings alone still pass), 1 otherwise.
-//! * `velin run <file>` — check first (compile errors abort), then execute the
-//!   script against the line-based reference host in [`host`]: `say` prints,
-//!   `ask` reads a line of stdin, other commands echo.
-//!
-//! The compiler never invents a host command, so the runner's vocabulary lives
-//! entirely in `host.rs`; the CLI is a thin shell around the `velin` library.
+//! Execution uses the line-based reference host in [`host`]. The CLI remains a
+//! thin shell around the `velin` library and does not add language semantics.
 
+mod format;
 mod host;
 
 use std::io::{self, Read, Write};
@@ -26,6 +18,7 @@ use velin::{
 /// Parsed command line: a verb and the script path it applies to.
 enum Command {
     Check { path: String, json: bool },
+    Format { path: String, check: bool },
     Run(String),
     Compile { input: String, output: String },
     Help,
@@ -56,6 +49,7 @@ Velin deterministic scripting language
 
 usage:
     velin check [--json] <file.velin|->    parse + static-check a script
+    velin fmt [--check]  <file.velin|->    format source or verify canonical formatting
     velin run            <file.velin|.velinc|->  check/run against the reference host
     velin compile        <file.velin> -o <file.velinc>  write a reusable bytecode artifact
     velin --help                              show this help
@@ -75,6 +69,9 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Command, String>
     }
     match verb.as_str() {
         "check" => parse_check_args(args),
+        "fmt" | "format" => {
+            format::parse_args(args).map(|(path, check)| Command::Format { path, check })
+        }
         "run" => parse_path_arg("run", args).map(Command::Run),
         "compile" => parse_compile_args(args),
         other => Err(format!("unknown subcommand `{other}`")),
@@ -147,6 +144,7 @@ fn parse_path_arg(verb: &str, mut args: impl Iterator<Item = String>) -> Result<
 fn run(command: Command) -> ExitCode {
     match command {
         Command::Check { path, json } => check(&path, json),
+        Command::Format { path, check } => format::run(&path, check),
         Command::Run(path) => execute(&path),
         Command::Compile { input, output } => compile_artifact(&input, &output),
         Command::Help | Command::Version => ExitCode::SUCCESS,

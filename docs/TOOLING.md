@@ -31,7 +31,14 @@ cargo run -p velin-cli -- check examples/adventure.velin
 
 `check` prints parsing, lowering, type, and definite-assignment diagnostics. It exits with status 1 when any error is present; warnings alone do not fail the command.
 
-Use `velin check --json <file>` for a stable `{ ok, diagnostics, error }` JSON result. Both subcommands accept `-` as the source path to read UTF-8 source from stdin; `velin --help` and `velin --version` print command metadata and exit successfully.
+Format a file in place, or verify canonical formatting without writing it:
+
+```sh
+cargo run -p velin-cli -- fmt examples/adventure.velin
+cargo run -p velin-cli -- fmt --check examples/adventure.velin
+```
+
+The formatter is deterministic and preserves blank lines, full-line comments, and trailing comments. `fmt -` reads stdin and writes the formatted source to stdout. Use `velin check --json <file>` for a stable `{ ok, diagnostics, error }` JSON result. `check`, `fmt`, and `run` accept `-` as the source path; `velin --help` and `velin --version` print command metadata and exit successfully.
 
 Run through the line-oriented reference host:
 
@@ -59,13 +66,14 @@ cargo build -p velin-lsp
 
 `velin-lsp` provides:
 
-- Live parser, lowering, type, and definite-assignment diagnostics.
-- Completion for keywords, built-ins, variables, labels, and configured host commands.
-- Document symbols for labels.
-- Hover help for language names, schema-backed host signature help/documentation, and go-to-definition/reference search for labels.
+- Live parser, lowering, type, definite-assignment, and module-dependency diagnostics.
+- Completion, hover, and signature help for language names and schema-backed host commands.
+- Semantic tokens, document formatting, a formatting code action, and prepare-rename/rename.
+- Document symbols plus workspace symbols for modules, functions, variables, and labels.
+- Definition and reference navigation across loaded module documents.
 - Standard JSON-RPC `MethodNotFound` responses for unsupported requests.
 
-The server limits JSON-RPC messages to 4 MiB and bounds header size before allocating the body.
+At initialization the server indexes `.velin` files under the supplied workspace roots, bounded to 128 files, 4 MiB total source, and 32 directory levels; open buffers override their disk copies. The server limits JSON-RPC messages to 4 MiB and bounds header size before allocating the body.
 Embedders that launch the reusable Rust server can use `Server::with_host_schema`; the standalone stdio binary remains host-neutral.
 
 ## VS Code extension

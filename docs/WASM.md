@@ -35,6 +35,24 @@ const ran = JSON.parse(run(`perform say("hi")\n`, "[]"));
 
 A `RunResult` also carries `error` when execution fails (overflow, missing index, exhausted replies, fuel budget, or cancellation).
 
+## Persistent Playground debugging
+
+`PlaygroundSession` keeps one checked execution alive across calls. Its methods return the same JSON debug shape: `status`, one-based `line`, `variables`, `output`, diagnostics, and an optional `error` or snapshot ID.
+
+```js
+import init, { PlaygroundSession } from "./pkg/velin_wasm.js";
+
+await init();
+const session = new PlaygroundSession(source);
+console.log(JSON.parse(session.state()));
+console.log(JSON.parse(session.step("[]")));
+const saved = JSON.parse(session.snapshot()).snapshot;
+console.log(JSON.parse(session.resume("[1]")));
+console.log(JSON.parse(session.restore(saved)));
+```
+
+`resume(repliesJson)` runs to the next host-effect boundary or completion; `step(repliesJson)` advances one bytecode operation. Snapshots include VM, RNG, budget, and output state, so restoring one and supplying another reply produces a deterministic branch from the same checkpoint.
+
 The runtime-only `RuntimeMachine::run_batch(limit)` returns consecutive
 side-effect-only host events in one call:
 

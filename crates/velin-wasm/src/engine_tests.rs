@@ -185,3 +185,25 @@ fn output_budget_is_enforced() {
             .is_some_and(|message| message.contains("output exceeds 1 MiB"))
     );
 }
+
+#[test]
+fn interactive_session_pauses_steps_snapshots_and_replays_branches() {
+    let source = "default hp = 10\nchoice = perform ask(\"heal?\")\nif choice == 1:\n    set hp = hp + 5\nperform say(hp)\n";
+    let mut session = InteractiveSession::new("debug.velin", source).unwrap();
+    assert_eq!(session.state().status, "paused");
+
+    let snapshot = session.snapshot().snapshot.unwrap();
+    let mut result = session.continue_execution(vec![Value::Integer(1)]);
+    assert_eq!(result.status, "effect");
+    while result.status != "finished" {
+        result = session.continue_execution(Vec::new());
+    }
+    assert_eq!(result.output.last().map(String::as_str), Some("15"));
+
+    assert!(session.restore(snapshot).ok);
+    let mut replay = session.continue_execution(vec![Value::Integer(0)]);
+    while replay.status != "finished" {
+        replay = session.continue_execution(Vec::new());
+    }
+    assert_eq!(replay.output.last().map(String::as_str), Some("10"));
+}

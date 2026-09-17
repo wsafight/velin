@@ -7,17 +7,29 @@
 //! JSON-RPC and converts between Velin's 1-based line/column diagnostics and
 //! LSP's 0-based positions.
 
-use crate::analysis::{self, CompletionKind};
+use crate::analysis;
 use crate::protocol::{read_message, write_message};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, Write};
-use velin::{Diagnostic, HostSchema};
+#[cfg(test)]
+use velin::Diagnostic;
+use velin::HostSchema;
+
+mod support;
+mod workspace;
+use support::{
+    completion_item_kind, document_diagnostics, document_uri, full_document_edit,
+    initialize_result, is_known_method, line_range, lsp_diagnostic, lsp_source_range,
+    module_diagnostics, request_position, semantic_token_data, workspace_occurrences,
+    workspace_symbol_values,
+};
 
 /// A running server instance: the open documents keyed by URI, plus the output
 /// stream diagnostics and responses are written to.
 pub struct Server<W: Write> {
     documents: HashMap<String, String>,
+    workspace_uris: HashSet<String>,
     output: W,
     initialized: bool,
     shutdown: bool,
@@ -29,6 +41,7 @@ impl<W: Write> Server<W> {
     pub fn new(output: W) -> Self {
         Self {
             documents: HashMap::new(),
+            workspace_uris: HashSet::new(),
             output,
             initialized: false,
             shutdown: false,
@@ -40,6 +53,7 @@ impl<W: Write> Server<W> {
     pub fn with_host_schema(output: W, host_schema: HostSchema) -> Self {
         Self {
             documents: HashMap::new(),
+            workspace_uris: HashSet::new(),
             output,
             initialized: false,
             shutdown: false,
@@ -80,6 +94,9 @@ impl<W: Write> Server<W> {
                 self.respond_error(message, -32600, "server is already initialized")
             }
             "initialize" => {
+                let workspace = workspace::load_documents(message);
+                self.workspace_uris.extend(workspace.keys().cloned());
+                self.documents.extend(workspace);
                 self.initialized = true;
                 self.respond(message, &initialize_result())
             }
@@ -99,6 +116,12 @@ impl<W: Write> Server<W> {
             "textDocument/signatureHelp" => self.signature_help(message),
             "textDocument/definition" => self.definition(message),
             "textDocument/references" => self.references(message),
+            "textDocument/formatting" => self.formatting(message),
+            "textDocument/semanticTokens/full" => self.semantic_tokens(message),
+            "textDocument/prepareRename" => self.prepare_rename(message),
+            "textDocument/rename" => self.rename(message),
+            "textDocument/codeAction" => self.code_actions(message),
+            "workspace/symbol" => self.workspace_symbols(message),
             // Unknown notifications are ignored; requests receive the JSON-RPC
             // MethodNotFound error required by the protocol.
             _ if message.get("id").is_some() => {
@@ -118,7 +141,7 @@ impl<W: Write> Server<W> {
             return Ok(());
         };
         self.documents.insert(uri.to_owned(), text.to_owned());
-        self.publish_diagnostics(uri)
+        self.publish_all_diagnostics()
     }
 
     /// Applies a full-text change (the only sync mode we advertise) and
@@ -137,7 +160,7 @@ impl<W: Write> Server<W> {
         {
             self.documents.insert(uri.to_owned(), text.to_owned());
         }
-        self.publish_diagnostics(uri)
+        self.publish_all_diagnostics()
     }
 
     /// Forgets a closed document and clears its diagnostics.
@@ -146,13 +169,14 @@ impl<W: Write> Server<W> {
             .get("uri")
             .and_then(Value::as_str)
         {
-            self.documents.remove(uri);
+            workspace::restore_closed_document(uri, &mut self.documents, &mut self.workspace_uris);
             let cleared = json!({
                 "jsonrpc": "2.0",
                 "method": "textDocument/publishDiagnostics",
                 "params": { "uri": uri, "diagnostics": [] },
             });
             let _ = write_message(&mut self.output, &cleared);
+            let _ = self.publish_all_diagnostics();
         }
     }
 
@@ -240,30 +264,147 @@ impl<W: Write> Server<W> {
             let uri = document_uri(message)?;
             let (line, column) = request_position(message, text)?;
             let lines: Vec<&str> = text.lines().collect();
-            let range = analysis::label_definition(text, line, column)?;
-            Some(json!({ "uri": uri, "range": lsp_source_range(range, &lines) }))
+            if let Some(range) = analysis::label_definition(text, line, column) {
+                return Some(json!({ "uri": uri, "range": lsp_source_range(range, &lines) }));
+            }
+            let (name, _) = analysis::identifier_at(text, line, column)?;
+            if let Some(range) = analysis::definition(text, line, column) {
+                return Some(json!({ "uri": uri, "range": lsp_source_range(range, &lines) }));
+            }
+            self.documents.iter().find_map(|(target_uri, target)| {
+                let symbol = analysis::symbols(target)
+                    .into_iter()
+                    .find(|symbol| symbol.name == name)?;
+                let target_lines: Vec<&str> = target.lines().collect();
+                Some(json!({
+                    "uri": target_uri,
+                    "range": lsp_source_range(symbol.range, &target_lines),
+                }))
+            })
         });
         self.respond(message, &result.unwrap_or(Value::Null))
     }
 
     fn references(&mut self, message: &Value) -> std::io::Result<()> {
         let result = if let Some(text) = self.document_for(message) {
-            let uri = document_uri(message).unwrap_or_default();
             let position = request_position(message, text);
             let include_declaration = message["params"]["context"]["includeDeclaration"]
                 .as_bool()
                 .unwrap_or(true);
-            let lines: Vec<&str> = text.lines().collect();
             position.map_or_else(Vec::new, |(line, column)| {
-                analysis::label_references(text, line, column, include_declaration)
-                    .into_iter()
-                    .map(|range| json!({ "uri": uri, "range": lsp_source_range(range, &lines) }))
-                    .collect()
+                let Some((name, _)) = analysis::identifier_at(text, line, column) else {
+                    return Vec::new();
+                };
+                workspace_occurrences(&self.documents, &name, include_declaration)
             })
         } else {
             Vec::new()
         };
         self.respond(message, &Value::Array(result))
+    }
+
+    fn formatting(&mut self, message: &Value) -> std::io::Result<()> {
+        let edits = self.document_for(message).map_or_else(Vec::new, |text| {
+            velin::format_source(text).map_or_else(
+                |_| Vec::new(),
+                |formatted| {
+                    if formatted == text {
+                        Vec::new()
+                    } else {
+                        vec![full_document_edit(text, &formatted)]
+                    }
+                },
+            )
+        });
+        self.respond(message, &Value::Array(edits))
+    }
+
+    fn semantic_tokens(&mut self, message: &Value) -> std::io::Result<()> {
+        let data = self
+            .document_for(message)
+            .map(semantic_token_data)
+            .unwrap_or_default();
+        self.respond(message, &json!({ "data": data }))
+    }
+
+    fn prepare_rename(&mut self, message: &Value) -> std::io::Result<()> {
+        let result = self.document_for(message).and_then(|text| {
+            let (line, column) = request_position(message, text)?;
+            let (name, range) = analysis::identifier_at(text, line, column)?;
+            analysis::valid_rename(&name).then(|| {
+                let lines: Vec<&str> = text.lines().collect();
+                json!({ "range": lsp_source_range(range, &lines), "placeholder": name })
+            })
+        });
+        self.respond(message, &result.unwrap_or(Value::Null))
+    }
+
+    fn rename(&mut self, message: &Value) -> std::io::Result<()> {
+        let new_name = message["params"]["newName"].as_str().unwrap_or_default();
+        if !analysis::valid_rename(new_name) {
+            return self.respond_error(message, -32602, "new name is not a valid Velin identifier");
+        }
+        let Some(text) = self.document_for(message) else {
+            return self.respond(message, &Value::Null);
+        };
+        let Some((line, column)) = request_position(message, text) else {
+            return self.respond(message, &Value::Null);
+        };
+        let Some((name, _)) = analysis::identifier_at(text, line, column) else {
+            return self.respond(message, &Value::Null);
+        };
+        if !analysis::valid_rename(&name) {
+            return self.respond(message, &Value::Null);
+        }
+        let mut changes = serde_json::Map::new();
+        for (uri, source) in &self.documents {
+            let lines: Vec<&str> = source.lines().collect();
+            let edits: Vec<Value> = analysis::identifier_occurrences(source, &name)
+                .into_iter()
+                .map(|range| {
+                    json!({
+                        "range": lsp_source_range(range, &lines),
+                        "newText": new_name,
+                    })
+                })
+                .collect();
+            if !edits.is_empty() {
+                changes.insert(uri.clone(), Value::Array(edits));
+            }
+        }
+        self.respond(message, &json!({ "changes": changes }))
+    }
+
+    fn code_actions(&mut self, message: &Value) -> std::io::Result<()> {
+        let actions = self.document_for(message).map_or_else(Vec::new, |text| {
+            let uri = document_uri(message).unwrap_or_default();
+            velin::format_source(text).map_or_else(
+                |_| Vec::new(),
+                |formatted| {
+                    if formatted == text {
+                        return Vec::new();
+                    }
+                    let mut changes = serde_json::Map::new();
+                    changes.insert(
+                        uri.to_owned(),
+                        Value::Array(vec![full_document_edit(text, &formatted)]),
+                    );
+                    vec![json!({
+                        "title": "Format Velin document",
+                        "kind": "source.fixAll.velin",
+                        "edit": { "changes": changes },
+                    })]
+                },
+            )
+        });
+        self.respond(message, &Value::Array(actions))
+    }
+
+    fn workspace_symbols(&mut self, message: &Value) -> std::io::Result<()> {
+        self.respond(
+            message,
+            &Value::Array(workspace_symbol_values(&self.documents, message)),
+        )
     }
 
     /// Runs diagnostics for `uri`'s current text and pushes them to the client.
@@ -272,10 +413,16 @@ impl<W: Write> Server<W> {
             return Ok(());
         };
         let lines: Vec<&str> = text.lines().collect();
-        let analyzed = self.host_schema.as_ref().map_or_else(
-            || analysis::diagnostics(uri, text),
-            |schema| analysis::diagnostics_with_host_schema(uri, text, schema),
-        );
+        let mut analyzed =
+            document_diagnostics(uri, text, &self.documents, self.host_schema.as_ref());
+        for diagnostic in module_diagnostics(uri, text, &self.documents) {
+            if !analyzed
+                .iter()
+                .any(|existing| existing.message == diagnostic.message)
+            {
+                analyzed.push(diagnostic);
+            }
+        }
         let diagnostics: Vec<Value> = analyzed
             .iter()
             .map(|diagnostic| lsp_diagnostic(diagnostic, &lines))
@@ -286,6 +433,14 @@ impl<W: Write> Server<W> {
             "params": { "uri": uri, "diagnostics": diagnostics },
         });
         write_message(&mut self.output, &notification)
+    }
+
+    fn publish_all_diagnostics(&mut self) -> std::io::Result<()> {
+        let uris: Vec<String> = self.documents.keys().cloned().collect();
+        for uri in uris {
+            self.publish_diagnostics(&uri)?;
+        }
+        Ok(())
     }
 
     /// Looks up the document a request targets by its `textDocument.uri`.
@@ -316,146 +471,9 @@ impl<W: Write> Server<W> {
     }
 }
 
-fn is_known_method(method: &str) -> bool {
-    matches!(
-        method,
-        "initialize"
-            | "initialized"
-            | "shutdown"
-            | "textDocument/didOpen"
-            | "textDocument/didChange"
-            | "textDocument/didClose"
-            | "textDocument/completion"
-            | "textDocument/documentSymbol"
-            | "textDocument/hover"
-            | "textDocument/signatureHelp"
-            | "textDocument/definition"
-            | "textDocument/references"
-    )
-}
-
-/// The server capabilities advertised in the `initialize` response.
-fn initialize_result() -> Value {
-    json!({
-        "capabilities": {
-            "textDocumentSync": 1, // full document sync
-            "completionProvider": { "triggerCharacters": [] },
-            "signatureHelpProvider": { "triggerCharacters": ["(", ","] },
-            "documentSymbolProvider": true,
-            "hoverProvider": true,
-            "definitionProvider": true,
-            "referencesProvider": true,
-        },
-        "serverInfo": { "name": "velin-lsp", "version": env!("CARGO_PKG_VERSION") },
-    })
-}
-
-/// Converts a Velin [`Diagnostic`] (1-based Unicode-scalar line/column) into an
-/// LSP diagnostic (0-based UTF-16 positions, numeric severity).
-fn lsp_diagnostic(diagnostic: &Diagnostic, lines: &[&str]) -> Value {
-    let line = diagnostic.line.saturating_sub(1);
-    let scalar_offset = diagnostic.column.saturating_sub(1);
-    let source_line = lines.get(line).copied().unwrap_or_default();
-    let character: usize = source_line
-        .chars()
-        .take(scalar_offset)
-        .map(char::len_utf16)
-        .sum();
-    let width = source_line
-        .chars()
-        .nth(scalar_offset)
-        .map_or(0, char::len_utf16);
-    let mut message = diagnostic.message.clone();
-    if let Some(hint) = &diagnostic.hint {
-        message.push_str("\nhint: ");
-        message.push_str(hint);
-    }
-    json!({
-        "range": {
-            "start": { "line": line, "character": character },
-            "end": { "line": line, "character": character + width },
-        },
-        "severity": if diagnostic.is_error() { 1 } else { 2 },
-        "source": "velin",
-        "message": message,
-    })
-}
-
-/// A whole-line LSP range for a 1-based `line`, used for label symbols.
-fn line_range(line: usize, lines: &[&str]) -> Value {
-    let zero = line.saturating_sub(1);
-    let width: usize = lines
-        .get(zero)
-        .copied()
-        .unwrap_or_default()
-        .chars()
-        .map(char::len_utf16)
-        .sum();
-    json!({
-        "start": { "line": zero, "character": 0 },
-        "end": { "line": zero, "character": width },
-    })
-}
-
-fn document_uri(message: &Value) -> Option<&str> {
-    message["params"]["textDocument"]
-        .get("uri")
-        .and_then(Value::as_str)
-}
-
-/// Converts an LSP UTF-16 position to Velin's 1-based Unicode-scalar position.
-fn request_position(message: &Value, text: &str) -> Option<(usize, usize)> {
-    let line = usize::try_from(message["params"]["position"]["line"].as_u64()?).ok()?;
-    let requested = usize::try_from(message["params"]["position"]["character"].as_u64()?).ok()?;
-    let source_line = text.lines().nth(line)?;
-    let mut utf16 = 0;
-    let mut scalars = 0;
-    for character in source_line.chars() {
-        if utf16 >= requested {
-            break;
-        }
-        let width = character.len_utf16();
-        if utf16 + width > requested {
-            break;
-        }
-        utf16 += width;
-        scalars += 1;
-    }
-    if requested > utf16 && utf16 == source_line.encode_utf16().count() {
-        return None;
-    }
-    Some((line + 1, scalars + 1))
-}
-
-fn lsp_source_range(range: analysis::SourceRange, lines: &[&str]) -> Value {
-    let line = range.line.saturating_sub(1);
-    let source_line = lines.get(line).copied().unwrap_or_default();
-    let start: usize = source_line
-        .chars()
-        .take(range.start_column.saturating_sub(1))
-        .map(char::len_utf16)
-        .sum();
-    let end: usize = source_line
-        .chars()
-        .take(range.end_column.saturating_sub(1))
-        .map(char::len_utf16)
-        .sum();
-    json!({
-        "start": { "line": line, "character": start },
-        "end": { "line": line, "character": end },
-    })
-}
-
-/// Maps our [`CompletionKind`] to the LSP `CompletionItemKind` numbers.
-fn completion_item_kind(kind: CompletionKind) -> u8 {
-    match kind {
-        CompletionKind::Keyword => 14, // Keyword
-        CompletionKind::Function => 3, // Function
-        CompletionKind::Variable => 6, // Variable
-        CompletionKind::Label => 12,   // Value (closest for a jump target)
-    }
-}
-
 #[cfg(test)]
 #[path = "server_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "server/workspace_tests.rs"]
+mod workspace_tests;

@@ -37,7 +37,7 @@
       }
     },
     "keywords": {
-      "match": "\\b(label|default|set|perform|if|elif|else|while|jump)\\b",
+      "match": "\\b(import|export|fn|call|return|label|default|set|perform|if|elif|else|while|for|in|break|continue|jump)\\b",
       "name": "keyword.control.velin"
     },
     "builtins": {

@@ -18,9 +18,13 @@ use velin_eval::EvalError;
 use velin_syntax::{BinaryOp, DataFootprint, DataMetrics, MAX_DATA_DEPTH, Value};
 
 mod budget;
+mod debug;
 mod invoker;
 mod policy;
 mod types;
+pub use debug::{
+    DebugEvent, DebugPauseReason, DebugSession, DebugSnapshot, DebugVariable, SourceProfileHit,
+};
 pub use invoker::MachineInvoker;
 pub use policy::{DEFAULT_MAX_FUEL, ExecutionPolicy, ExecutionProgress, ProgressCallback};
 pub use types::{ExecutionProfile, FastYield, HostEffect, SetVariableError, Yield};
@@ -362,6 +366,12 @@ impl Machine {
     pub fn variable(&self, name: &str) -> Option<&Value> {
         let slot = self.program.slots.get(name)?;
         self.frame.values[slot as usize].as_ref()
+    }
+
+    /// Returns the next bytecode operation's program counter.
+    #[must_use]
+    pub const fn program_counter(&self) -> usize {
+        self.pc
     }
 }
 

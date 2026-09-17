@@ -20,12 +20,12 @@
     ["\"", "\""]
   ],
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*(label|if|elif|else|while)\\b.*:\\s*$",
+    "increaseIndentPattern": "^\\s*(?:export\\s+)?(label|fn|if|elif|else|while|for)\\b.*:\\s*$",
     "decreaseIndentPattern": "^\\s*(elif|else)\\b.*:\\s*$"
   },
   "onEnterRules": [
     {
-      "beforeText": "^\\s*(label|if|elif|else|while)\\b.*:\\s*$",
+      "beforeText": "^\\s*(?:export\\s+)?(label|fn|if|elif|else|while|for)\\b.*:\\s*$",
       "action": { "indent": "indent" }
     }
   ]

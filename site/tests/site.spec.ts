@@ -159,6 +159,27 @@ test('Playground rejects invalid replies without shifting later answers', async 
   await expect(page.locator('#output')).not.toContainText('You feel restored.');
 });
 
+test('Playground debugger restores and replays a saved branch', async ({page}) => {
+  await page.goto(playground);
+  const start = page.getByRole('button', {name: 'Start debug'});
+  await expect(start).toBeEnabled({timeout: 30000});
+  await start.click();
+  await expect(page.locator('#debug-status')).toContainText('Paused');
+
+  await page.getByRole('button', {name: 'Snapshot'}).click();
+  await expect(page.locator('#debug-snapshots')).toHaveValue('1');
+
+  await page.locator('#replies').fill('[0]');
+  await page.getByRole('button', {name: 'Resume'}).click();
+  await expect(page.locator('#debug-variables')).toContainText('"choice": 0');
+
+  await page.getByRole('button', {name: 'Restore'}).click();
+  await expect(page.locator('#debug-variables')).not.toContainText('"choice"');
+  await page.locator('#replies').fill('[1]');
+  await page.getByRole('button', {name: 'Resume'}).click();
+  await expect(page.locator('#debug-variables')).toContainText('"choice": 1');
+});
+
 test('Playground links to every main documentation area', async ({page}, testInfo) => {
   await page.goto(playground);
   await expect(page.getByRole('link', {name: 'Velin home'})).toHaveAttribute('href', '../');

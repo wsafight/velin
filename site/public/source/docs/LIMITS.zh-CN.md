@@ -74,6 +74,7 @@
 | Playground Worker 请求 | 5 秒 |
 | LSP JSON-RPC 正文 | 4 MiB |
 | LSP 头 | 合计 64 KiB，每行 8 KiB |
+| LSP workspace 索引 | 128 个 `.velin` 文件、合计 4 MiB、32 层目录 |
 
 ## 宿主仍须限制的
 

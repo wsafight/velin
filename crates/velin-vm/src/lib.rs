@@ -16,10 +16,11 @@ mod machine;
 
 pub use chunk::{Frame, eval_chunk};
 pub use machine::{
-    DEFAULT_MAX_FUEL, DEFAULT_RNG_SEED, ExecutionPolicy, ExecutionProfile, ExecutionProgress,
-    FastYield, HostEffect, MAX_HOST_PAYLOAD_TEXT_BYTES, MAX_HOST_PAYLOAD_VALUES,
-    MAX_IMMEDIATE_STEPS, MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES, Machine, MachineInvoker,
-    ProgressCallback, SetVariableError, Yield,
+    DEFAULT_MAX_FUEL, DEFAULT_RNG_SEED, DebugEvent, DebugPauseReason, DebugSession, DebugSnapshot,
+    DebugVariable, ExecutionPolicy, ExecutionProfile, ExecutionProgress, FastYield, HostEffect,
+    MAX_HOST_PAYLOAD_TEXT_BYTES, MAX_HOST_PAYLOAD_VALUES, MAX_IMMEDIATE_STEPS,
+    MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES, Machine, MachineInvoker, ProgressCallback,
+    SetVariableError, SourceProfileHit, Yield,
 };
 
 #[cfg(test)]

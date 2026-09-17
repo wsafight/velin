@@ -200,3 +200,42 @@ fn host_schema_drives_diagnostics_completion_hover_and_signature_help() {
     let help = signature_help(quoted_keyword, 1, 40, &schema).unwrap();
     assert_eq!(help.active_parameter, 1);
 }
+
+#[test]
+fn semantic_tokens_symbols_and_rename_ranges_share_one_lexer() {
+    let source =
+        "import math\nexport fn add(value):\n    return value + 1\nset result = call math.add(2)\n";
+    let tokens = semantic_tokens(source);
+    assert!(
+        tokens
+            .iter()
+            .any(|token| token.kind == SemanticTokenKind::Keyword)
+    );
+    assert!(
+        tokens
+            .iter()
+            .any(|token| token.kind == SemanticTokenKind::Function)
+    );
+    assert!(
+        tokens
+            .iter()
+            .any(|token| token.kind == SemanticTokenKind::Namespace)
+    );
+
+    let found = symbols(source);
+    assert!(
+        found
+            .iter()
+            .any(|symbol| { symbol.name == "math" && symbol.kind == SymbolKind::Module })
+    );
+    assert!(
+        found
+            .iter()
+            .any(|symbol| { symbol.name == "add" && symbol.kind == SymbolKind::Function })
+    );
+    assert_eq!(identifier_occurrences(source, "add").len(), 2);
+    assert_eq!(definition(source, 4, 24).unwrap().line, 2);
+    assert!(valid_rename("sum_total"));
+    assert!(!valid_rename("while"));
+    assert!(!valid_rename("two words"));
+}

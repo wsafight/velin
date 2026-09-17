@@ -114,10 +114,11 @@ pub use velin_bytecode::{
 pub use velin_compile::{ProgramBuilder, compile_expression};
 
 pub use velin_vm::{
-    DEFAULT_MAX_FUEL, DEFAULT_RNG_SEED, ExecutionPolicy, ExecutionProfile, ExecutionProgress,
-    FastYield, HostEffect, MAX_HOST_PAYLOAD_TEXT_BYTES, MAX_HOST_PAYLOAD_VALUES,
-    MAX_IMMEDIATE_STEPS, MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES, Machine, MachineInvoker,
-    ProgressCallback, SetVariableError, Yield,
+    DEFAULT_MAX_FUEL, DEFAULT_RNG_SEED, DebugEvent, DebugPauseReason, DebugSession, DebugSnapshot,
+    DebugVariable, ExecutionPolicy, ExecutionProfile, ExecutionProgress, FastYield, HostEffect,
+    MAX_HOST_PAYLOAD_TEXT_BYTES, MAX_HOST_PAYLOAD_VALUES, MAX_IMMEDIATE_STEPS,
+    MAX_MACHINE_DATA_VALUES, MAX_MACHINE_TEXT_BYTES, Machine, MachineInvoker, ProgressCallback,
+    SetVariableError, SourceProfileHit, Yield,
 };
 
 pub use runtime::{
@@ -138,7 +139,8 @@ pub use velin_lang::{
     ResolvedModule, Stmt, artifact_cache_key, artifact_cache_path, check_script,
     check_script_with_bindings, check_script_with_bindings_and_host_schema,
     check_script_with_host_schema, compile, compile_modules, decode_artifact, encode_artifact,
-    load_artifact_cache, parse_program, parse_program_recovering, store_artifact_cache,
+    format_source, load_artifact_cache, parse_program, parse_program_recovering,
+    store_artifact_cache,
 };
 mod host_sdk;
 mod marshal;
@@ -152,3 +154,15 @@ pub use marshal::{
 };
 pub use pure::{PureModule, PureModuleError, PureModuleInvoker};
 pub use repl::{ReplError, ReplSession};
+
+/// Creates a source debugger initialized with a compiled script's defaults.
+///
+/// # Errors
+/// Returns the same initialization failures as [`ScriptRunner::new`].
+pub fn debug_script(script: &CompiledScript) -> Result<DebugSession, ScriptRunError> {
+    let machine = ScriptRunner::new(script)?.into_machine();
+    Ok(DebugSession::from_machine(
+        machine,
+        script.program.debug_table(),
+    ))
+}

@@ -35,6 +35,24 @@ const ran = JSON.parse(run(`perform say("hi")\n`, "[]"));
 
 执行失败时（溢出、缺下标、回复用尽、fuel 预算或取消）`RunResult` 还会带 `error`。
 
+## 持久化 Playground 调试
+
+`PlaygroundSession` 在多次调用间保留一份已经检查的执行状态。各方法返回相同的调试 JSON 结构：`status`、从 1 开始的 `line`、`variables`、`output`、诊断，以及可选的 `error` 或快照 ID。
+
+```js
+import init, { PlaygroundSession } from "./pkg/velin_wasm.js";
+
+await init();
+const session = new PlaygroundSession(source);
+console.log(JSON.parse(session.state()));
+console.log(JSON.parse(session.step("[]")));
+const saved = JSON.parse(session.snapshot()).snapshot;
+console.log(JSON.parse(session.resume("[1]")));
+console.log(JSON.parse(session.restore(saved)));
+```
+
+`resume(repliesJson)` 运行到下一个宿主效果边界或结束；`step(repliesJson)` 前进一条字节码操作。快照包含 VM、RNG、预算与输出状态，所以恢复后提供另一份回复，会从同一检查点确定性地产生另一条分支。
+
 runtime-only 的 `RuntimeMachine::run_batch(limit)` 可一次返回连续的无返回值 Host 事件：
 
 ```json

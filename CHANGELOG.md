@@ -14,6 +14,10 @@ change source and Rust APIs between minor releases.
 - Budget-aware, path-reporting Serde value marshalling plus complete List/Record JSON input and output for WebAssembly and the append-only C ABI extension.
 - Host-resolved compile-time modules with explicit exports, cycle diagnostics, named pure functions, and acyclic hygienic call expansion.
 - `for` / `break` / `continue`, List and Record literals, collection indexing and indexed assignment, and compound assignment sugar.
+- An official source formatter exposed through `velin fmt`, `velin fmt --check`, the Rust facade, and LSP formatting/code actions.
+- LSP semantic tokens, rename, formatting/code actions, bounded workspace indexing, cross-document navigation, workspace symbols, and module-dependency diagnostics.
+- Source-level VM debugging with breakpoints, stepping, variable inspection, effect-boundary pauses, replayable snapshots, and source-mapped profiles.
+- A persistent Wasm `PlaygroundSession` and Playground controls for stepping, resuming, inspecting state, and deterministic branch replay.
 
 ### Changed
 
