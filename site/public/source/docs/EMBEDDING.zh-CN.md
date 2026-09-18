@@ -88,6 +88,10 @@ assert_eq!(result, Value::Integer(42));
 
 对于可序列化的应用 DTO，`to_value` 与 `from_value` 提供带明确 `MarshallingLimits` 的 Serde 转换。转换保持 `i64` 整数范围和稳定 Record 顺序，拒绝 null 与浮点数据，并报告具体失败字段或 List 下标。C ABI 保留原有仅展示的复合值 tag，另增使用 `VELIN_VALUE_JSON` 的 `*_json` run/resume/batch/restart 函数，使 ABI 版本 1 宿主可以按需接入 List/Record 输入输出而不改变旧调用。
 
+C 宿主可以调用 `velin_execution_policy_default()` 获取默认值，再把修改后的 `VelinExecutionPolicy` 传给追加式 `velin_machine_new_with_policy`。它覆盖 fuel、调用深度、值/机器/宿主载荷/队列预算和宿主效果数量；`velin_machine_cancel` 与 `velin_machine_clear_cancellation` 用于跨 C 调用协作式取消。旧的 `velin_machine_new` 继续使用默认策略。
+
+Wasm 宿主使用 `run_with_policy`、`PlaygroundSession.new_with_policy` 或 runtime-only 的 `RuntimeMachine.new_with_policy` 传入同一组 JSON 字段。默认构造函数保持不变，JavaScript 侧可以用 `cancel()` 和 `clear_cancellation()` 控制执行。
+
 ## 创建机器
 
 `Machine::new` 会在执行前验证完整程序。新建帧后需要应用脚本的全部默认值：

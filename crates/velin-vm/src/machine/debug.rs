@@ -98,6 +98,16 @@ impl DebugSession {
             .extend(lines.into_iter().filter(|line| *line != 0));
     }
 
+    /// Requests cooperative cancellation at the next VM fuel checkpoint.
+    pub fn cancel(&mut self) {
+        self.machine.cancel();
+    }
+
+    /// Clears a previous cooperative cancellation request.
+    pub fn clear_cancellation(&mut self) {
+        self.machine.clear_cancellation();
+    }
+
     /// Returns the current source location, if the next op has one.
     #[must_use]
     pub fn location(&self) -> Option<DebugLocation> {

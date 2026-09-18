@@ -25,6 +25,13 @@ int main(void) {
 
     VelinMachine *machine = velin_machine_new(program, 0, &error, &error_len, &error_capacity);
     assert(machine != NULL);
+    VelinExecutionPolicy policy = velin_execution_policy_default();
+    VelinMachine *policy_machine = velin_machine_new_with_policy(
+        program, 0, &policy, &error, &error_len, &error_capacity);
+    assert(policy_machine != NULL);
+    velin_machine_cancel(policy_machine);
+    velin_machine_clear_cancellation(policy_machine);
+    velin_machine_free(policy_machine);
     VelinYield result = velin_machine_run(machine);
     assert(result.kind == VELIN_YIELD_FINISHED);
     velin_yield_free(&result);

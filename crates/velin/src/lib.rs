@@ -160,7 +160,18 @@ pub use repl::{ReplError, ReplSession};
 /// # Errors
 /// Returns the same initialization failures as [`ScriptRunner::new`].
 pub fn debug_script(script: &CompiledScript) -> Result<DebugSession, ScriptRunError> {
-    let machine = ScriptRunner::new(script)?.into_machine();
+    debug_script_with_policy(script, ExecutionPolicy::default())
+}
+
+/// Creates a source debugger with an explicit execution policy.
+///
+/// # Errors
+/// Returns the same initialization failures as [`ScriptRunner::configured_with_policy`].
+pub fn debug_script_with_policy(
+    script: &CompiledScript,
+    policy: ExecutionPolicy,
+) -> Result<DebugSession, ScriptRunError> {
+    let machine = ScriptRunner::configured_with_policy(script, 0, policy, None)?.into_machine();
     Ok(DebugSession::from_machine(
         machine,
         script.program.debug_table(),

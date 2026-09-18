@@ -35,6 +35,8 @@ The development order is **P0 -> P1 -> P2 -> P3**. Performance and size evidence
 
 Stabilize runtime boundaries before expanding the language. P0 is the prerequisite for every later capability.
 
+**Status: complete in the current tree.** Rust, C, and Wasm high-level entry points share one execution policy; compatibility policies, versioned fixtures, migration procedures, and CI gates are in place.
+
 ### Configurable execution budgets
 
 Introduce one execution policy shared by `Machine`, `ScriptRunner`, invokers, and pure modules. It should cover at least:
@@ -64,6 +66,8 @@ Completion criteria: every public boundary has a written compatibility policy, C
 ## P1: typed host SDK
 
 Once P0 boundaries are stable, make host-command integration feel close to ordinary Rust calls without placing native objects inside the VM.
+
+**Status: complete in the current tree.** One host declaration drives checking, runtime dispatch, and editor metadata; Serde, C, and Wasm compound-value marshalling share the same budgeted value semantics.
 
 ### One schema source
 
@@ -135,6 +139,8 @@ Completion criteria: normal editing, refactoring, and debugging do not require r
 ## Cross-phase work: performance and size evidence
 
 Performance work starts at P0 and spans every phase instead of becoming a final optimization sprint. Benchmarks have three groups:
+
+**Status: continuously enforced.** The repository stores a reproducible historical baseline; CI runs representative Rust/C/Wasm benchmarks and checks native and Wasm artifact sizes, while every release appends a full snapshot.
 
 1. **Shared language capabilities**: integers, booleans, strings, lists, records, conditions, and loops.
 2. **Embedding costs**: cold compilation, artifact loading, warm execution, host round trips, effect batching, and machine restart.

@@ -67,7 +67,27 @@ typedef struct VelinBatch {
     size_t error_capacity;
 } VelinBatch;
 
+/* Numeric execution limits. The C ABI uses explicit cancellation functions
+ * instead of embedding a host callback in this structure. */
+typedef struct VelinExecutionPolicy {
+    uint64_t max_fuel;
+    uint64_t max_immediate_fuel;
+    size_t max_host_effects;
+    size_t max_call_depth;
+    size_t max_value_values;
+    size_t max_value_text_bytes;
+    size_t max_machine_values;
+    size_t max_machine_text_bytes;
+    size_t max_host_payload_values;
+    size_t max_host_payload_text_bytes;
+    size_t max_host_queue_events;
+    size_t max_host_queue_values;
+    size_t max_host_queue_text_bytes;
+    uint64_t progress_interval;
+} VelinExecutionPolicy;
+
 uint32_t velin_c_api_version(void);
+VelinExecutionPolicy velin_execution_policy_default(void);
 
 VelinProgram *velin_program_load_json(const uint8_t *bytes, size_t len,
                                       uint8_t **error_ptr, size_t *error_len,
@@ -77,7 +97,15 @@ void velin_program_free(VelinProgram *program);
 VelinMachine *velin_machine_new(const VelinProgram *program, int64_t seed,
                                 uint8_t **error_ptr, size_t *error_len,
                                 size_t *error_capacity);
+VelinMachine *velin_machine_new_with_policy(const VelinProgram *program,
+                                            int64_t seed,
+                                            const VelinExecutionPolicy *policy,
+                                            uint8_t **error_ptr,
+                                            size_t *error_len,
+                                            size_t *error_capacity);
 void velin_machine_free(VelinMachine *machine);
+void velin_machine_cancel(VelinMachine *machine);
+void velin_machine_clear_cancellation(VelinMachine *machine);
 VelinYield velin_machine_run(VelinMachine *machine);
 VelinBatch velin_machine_run_batch(VelinMachine *machine, size_t limit);
 VelinYield velin_machine_resume(VelinMachine *machine, const VelinValue *value);

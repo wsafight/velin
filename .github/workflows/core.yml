@@ -44,6 +44,7 @@ jobs:
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
       - run: cargo bench --workspace --all-features --no-run
       - run: cargo bench -p velin-wasm --features runtime --bench runtime --no-run
+      - run: bash scripts/check-performance.sh
       - run: cargo build -p velin-wasm --target wasm32-unknown-unknown
       - run: bash scripts/test-c-api.sh
       - run: cargo package --workspace

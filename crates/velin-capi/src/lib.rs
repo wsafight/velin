@@ -25,7 +25,7 @@ use result::{
 use std::slice;
 use std::sync::Arc;
 use velin_bytecode::{InitialFrame, Program, ValidatedProgram};
-use velin_vm::Machine;
+use velin_vm::{ExecutionPolicy, Machine};
 
 pub use result::{
     VELIN_BATCH_EFFECTS, VELIN_BATCH_EMPTY, VELIN_BATCH_ERROR, VELIN_YIELD_ERROR,
@@ -38,6 +38,78 @@ pub use value::{
 
 /// Version of the exported C data structures and function contract.
 pub const VELIN_C_API_VERSION: u32 = 1;
+
+/// Numeric execution limits accepted by the append-only policy constructor.
+///
+/// The C boundary cannot carry a Rust progress callback. Hosts can request
+/// cancellation explicitly with [`velin_machine_cancel`] between calls.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct VelinExecutionPolicy {
+    pub max_fuel: u64,
+    pub max_immediate_fuel: u64,
+    pub max_host_effects: usize,
+    pub max_call_depth: usize,
+    pub max_value_values: usize,
+    pub max_value_text_bytes: usize,
+    pub max_machine_values: usize,
+    pub max_machine_text_bytes: usize,
+    pub max_host_payload_values: usize,
+    pub max_host_payload_text_bytes: usize,
+    pub max_host_queue_events: usize,
+    pub max_host_queue_values: usize,
+    pub max_host_queue_text_bytes: usize,
+    pub progress_interval: u64,
+}
+
+impl From<ExecutionPolicy> for VelinExecutionPolicy {
+    fn from(policy: ExecutionPolicy) -> Self {
+        Self {
+            max_fuel: policy.max_fuel,
+            max_immediate_fuel: policy.max_immediate_fuel,
+            max_host_effects: policy.max_host_effects,
+            max_call_depth: policy.max_call_depth,
+            max_value_values: policy.max_value_values,
+            max_value_text_bytes: policy.max_value_text_bytes,
+            max_machine_values: policy.max_machine_values,
+            max_machine_text_bytes: policy.max_machine_text_bytes,
+            max_host_payload_values: policy.max_host_payload_values,
+            max_host_payload_text_bytes: policy.max_host_payload_text_bytes,
+            max_host_queue_events: policy.max_host_queue_events,
+            max_host_queue_values: policy.max_host_queue_values,
+            max_host_queue_text_bytes: policy.max_host_queue_text_bytes,
+            progress_interval: policy.progress_interval,
+        }
+    }
+}
+
+impl From<&VelinExecutionPolicy> for ExecutionPolicy {
+    fn from(policy: &VelinExecutionPolicy) -> Self {
+        Self {
+            max_fuel: policy.max_fuel,
+            max_immediate_fuel: policy.max_immediate_fuel,
+            max_host_effects: policy.max_host_effects,
+            max_call_depth: policy.max_call_depth,
+            max_value_values: policy.max_value_values,
+            max_value_text_bytes: policy.max_value_text_bytes,
+            max_machine_values: policy.max_machine_values,
+            max_machine_text_bytes: policy.max_machine_text_bytes,
+            max_host_payload_values: policy.max_host_payload_values,
+            max_host_payload_text_bytes: policy.max_host_payload_text_bytes,
+            max_host_queue_events: policy.max_host_queue_events,
+            max_host_queue_values: policy.max_host_queue_values,
+            max_host_queue_text_bytes: policy.max_host_queue_text_bytes,
+            progress_interval: policy.progress_interval.max(1),
+            progress_callback: None,
+        }
+    }
+}
+
+/// Returns the default numeric execution policy for a new machine.
+#[unsafe(no_mangle)]
+pub extern "C" fn velin_execution_policy_default() -> VelinExecutionPolicy {
+    ExecutionPolicy::default().into()
+}
 
 /// Returns the C ABI contract version compiled into the library.
 #[unsafe(no_mangle)]
@@ -122,6 +194,26 @@ pub unsafe extern "C" fn velin_machine_new(
     error_len: *mut usize,
     error_capacity: *mut usize,
 ) -> *mut VelinMachine {
+    let policy = velin_execution_policy_default();
+    unsafe {
+        velin_machine_new_with_policy(program, seed, &policy, error_ptr, error_len, error_capacity)
+    }
+}
+
+/// Creates a machine with an explicit numeric execution policy.
+///
+/// The policy is copied during construction and may be released immediately.
+/// Progress callbacks are not part of the C ABI; use the cancellation
+/// functions between calls when a host needs cooperative cancellation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn velin_machine_new_with_policy(
+    program: *const VelinProgram,
+    seed: i64,
+    policy: *const VelinExecutionPolicy,
+    error_ptr: *mut *mut u8,
+    error_len: *mut usize,
+    error_capacity: *mut usize,
+) -> *mut VelinMachine {
     clear_error(error_ptr, error_len, error_capacity);
     let Some(program) = (unsafe { program.as_ref() }) else {
         write_error(
@@ -132,9 +224,22 @@ pub unsafe extern "C" fn velin_machine_new(
         );
         return std::ptr::null_mut();
     };
-    let machine =
-        Machine::from_validated_with_seed_and_frame(&program.program, seed, &program.initial)
-            .expect("the empty initial frame matches the validated program");
+    let Some(policy) = (unsafe { policy.as_ref() }) else {
+        write_error(
+            "execution policy pointer is null",
+            error_ptr,
+            error_len,
+            error_capacity,
+        );
+        return std::ptr::null_mut();
+    };
+    let machine = Machine::from_validated_with_seed_and_frame_and_policy(
+        &program.program,
+        seed,
+        &program.initial,
+        ExecutionPolicy::from(policy),
+    )
+    .expect("the empty initial frame matches the validated program");
     Box::into_raw(Box::new(VelinMachine {
         machine,
         initial: program.initial.clone(),
@@ -146,6 +251,22 @@ pub unsafe extern "C" fn velin_machine_new(
 pub unsafe extern "C" fn velin_machine_free(machine: *mut VelinMachine) {
     if !machine.is_null() {
         drop(unsafe { Box::from_raw(machine) });
+    }
+}
+
+/// Requests cooperative cancellation at the next VM fuel checkpoint.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn velin_machine_cancel(machine: *mut VelinMachine) {
+    if let Some(machine) = unsafe { machine.as_mut() } {
+        machine.machine.cancel();
+    }
+}
+
+/// Clears a previous cooperative cancellation request.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn velin_machine_clear_cancellation(machine: *mut VelinMachine) {
+    if let Some(machine) = unsafe { machine.as_mut() } {
+        machine.machine.clear_cancellation();
     }
 }
 

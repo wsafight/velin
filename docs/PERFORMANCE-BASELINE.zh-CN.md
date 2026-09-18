@@ -129,3 +129,14 @@ cargo bench -p velin-wasm --features runtime --bench runtime -- --noplot --sampl
 ```
 
 发布级比较应使用 Criterion 默认的 sample size 和 measurement time，保存具名 baseline，并在同一台机器和同一工具链上重复运行。只有同时记录环境和源码版本，baseline 才有意义。
+
+## CI 门禁
+
+仓库中的 `benchmarks/performance-baseline.json` 保存代表性 0.4.0 中位数和发布产物体积上限。
+使用以下命令运行与 CI 相同的延迟、C ABI、Wasm 和体积门禁：
+
+```sh
+bash scripts/check-performance.sh
+```
+
+门禁默认使用较短的 Criterion 采样（10 个样本、0.1 秒预热、0.2 秒测量），并允许跨主机的 5 倍延迟浮动；它用于拦截严重回退，不替代发布级性能采集。可以通过 `VELIN_PERF_SAMPLE_SIZE`、`VELIN_PERF_WARMUP_TIME` 和 `VELIN_PERF_MEASUREMENT_TIME` 调整采样，正式发布仍应按本页前述方法追加带环境和版本的历史快照。

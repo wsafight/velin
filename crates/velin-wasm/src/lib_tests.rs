@@ -4,6 +4,12 @@ fn wasm_bindings_return_json() {
     assert!(checked.contains("\"ok\":true"), "{checked}");
     let ran = super::run("perform say(\"hi\")\n", "[]");
     assert!(ran.contains("hi"), "{ran}");
+    let bounded = super::run_with_policy(
+        "while true:\n    set value = 1\n",
+        "[]",
+        r#"{"max_fuel":8,"max_immediate_fuel":8}"#,
+    );
+    assert!(bounded.contains("fuel"), "{bounded}");
     let replies = super::run(
         "choice = perform ask(\"go?\")\nperform say(choice)\n",
         "[1]",
@@ -25,6 +31,12 @@ fn wasm_bindings_return_json() {
     assert!(session.snapshot().contains("\"snapshot\":1"));
     assert!(session.resume("[]").contains("debug"));
     assert!(session.restore(1).contains("\"status\":\"paused\""));
+    let mut bounded_session = super::PlaygroundSession::new_with_policy(
+        "while true:\n    set value = 1\n",
+        r#"{"max_fuel":8}"#,
+    );
+    assert!(bounded_session.cancel().contains("\"ok\":true"));
+    assert!(bounded_session.resume("[]").contains("cancelled"));
 }
 
 #[cfg(feature = "runtime")]
@@ -47,4 +59,20 @@ fn runtime_binding_accepts_compounds_and_caps_resume_json() {
     let _ = machine.run();
     let oversized = " ".repeat(super::MAX_RUNTIME_VALUE_JSON_BYTES + 1);
     assert!(machine.resume(&oversized).contains("JSON exceeds 1 MiB"));
+
+    let mut bounded = super::RuntimeMachine::new_with_policy(
+        &serde_json::to_string(
+            &*velin::compile(
+                "runtime.velin",
+                "set counter = 0\nwhile true:\n    set counter = counter + 1\n",
+            )
+            .unwrap()
+            .program,
+        )
+        .unwrap(),
+        r#"{"max_fuel":8,"max_immediate_fuel":8}"#,
+    )
+    .unwrap();
+    let bounded_result = bounded.run();
+    assert!(bounded_result.contains("fuel"), "{bounded_result}");
 }

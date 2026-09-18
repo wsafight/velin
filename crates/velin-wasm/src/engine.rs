@@ -8,43 +8,18 @@
 
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::fmt;
 use velin::{
-    DebugEvent, DebugSession, DebugSnapshot, Diagnostic, MarshallingLimits, ScriptRunner,
-    ScriptYield, Value, check_script, compile, debug_script, json_to_value,
+    DebugEvent, DebugSession, DebugSnapshot, Diagnostic, ExecutionPolicy, ScriptRunner,
+    ScriptYield, Value, check_script, compile, debug_script_with_policy,
 };
 
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
-const MAX_REPLIES_JSON_BYTES: usize = 1024 * 1024;
 
-/// A caller error in the scripted replies supplied to the Playground host.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ParseRepliesError {
-    TooLarge,
-    InvalidJson(String),
-    UnsupportedValue {
-        index: usize,
-        path: String,
-        message: String,
-    },
-}
-
-impl fmt::Display for ParseRepliesError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::TooLarge => write!(formatter, "invalid replies: JSON exceeds 1 MiB"),
-            Self::InvalidJson(message) => write!(formatter, "invalid replies JSON: {message}"),
-            Self::UnsupportedValue {
-                index,
-                path,
-                message,
-            } => write!(
-                formatter,
-                "invalid replies: item {index} at {path}: {message}"
-            ),
-        }
-    }
-}
+#[path = "engine/replies.rs"]
+mod replies;
+pub use replies::parse_replies;
+#[cfg(test)]
+use replies::{MAX_REPLIES_JSON_BYTES, ParseRepliesError};
 
 /// The result of [`check`]: whether the script is error-free plus every
 /// diagnostic (errors and warnings), pre-flattened for the browser.
@@ -109,7 +84,16 @@ pub struct InteractiveSession {
 }
 
 impl InteractiveSession {
+    #[allow(dead_code)]
     pub fn new(file: &str, source: &str) -> Result<Self, Box<DebugResult>> {
+        Self::new_with_policy(file, source, ExecutionPolicy::default())
+    }
+
+    pub fn new_with_policy(
+        file: &str,
+        source: &str,
+        policy: ExecutionPolicy,
+    ) -> Result<Self, Box<DebugResult>> {
         let script = compile(file, source).map_err(|diagnostic| {
             Box::new(DebugResult {
                 ok: false,
@@ -141,7 +125,7 @@ impl InteractiveSession {
                 error: None,
             }));
         }
-        let debugger = debug_script(&script).map_err(|error| {
+        let debugger = debug_script_with_policy(&script, policy).map_err(|error| {
             Box::new(DebugResult {
                 ok: false,
                 status: "error".to_owned(),
@@ -200,6 +184,16 @@ impl InteractiveSession {
             .map_or(0, |location| location.line as usize);
         self.status = "paused";
         self.result(true, Some(id), None)
+    }
+
+    pub fn cancel(&mut self) -> DebugResult {
+        self.debugger.cancel();
+        self.result(true, None, None)
+    }
+
+    pub fn clear_cancellation(&mut self) -> DebugResult {
+        self.debugger.clear_cancellation();
+        self.result(true, None, None)
     }
 
     pub fn state(&self) -> DebugResult {
@@ -306,8 +300,20 @@ pub fn check(file: &str, source: &str) -> CheckResult {
 
 /// Checks `source`, then (if it has no errors) runs it against the scripted
 /// host, answering `ask` effects from `replies` in order.
+#[allow(dead_code)]
 #[must_use]
 pub fn run(file: &str, source: &str, replies: Vec<Value>) -> RunResult {
+    run_with_policy(file, source, replies, ExecutionPolicy::default())
+}
+
+/// Checks and runs source with an explicit execution policy.
+#[must_use]
+pub fn run_with_policy(
+    file: &str,
+    source: &str,
+    replies: Vec<Value>,
+    policy: ExecutionPolicy,
+) -> RunResult {
     let script = match compile(file, source) {
         Ok(script) => script,
         Err(diagnostic) => {
@@ -333,7 +339,7 @@ pub fn run(file: &str, source: &str, replies: Vec<Value>) -> RunResult {
         };
     }
 
-    let mut runner = match ScriptRunner::new(&script) {
+    let mut runner = match ScriptRunner::configured_with_policy(&script, 0, policy, None) {
         Ok(runner) => runner,
         Err(error) => {
             return RunResult {
@@ -446,31 +452,6 @@ fn push_line_text(output: &mut String, text: &str, limit: usize) -> Result<(), &
     }
     output.push_str(text);
     Ok(())
-}
-
-/// Parses the caller's JSON reply array into Velin values.
-///
-/// The entire input is rejected if any item is unsupported. Silently dropping
-/// an item would shift every subsequent answer to the wrong `ask` effect.
-pub fn parse_replies(replies_json: &str) -> Result<Vec<Value>, ParseRepliesError> {
-    if replies_json.len() > MAX_REPLIES_JSON_BYTES {
-        return Err(ParseRepliesError::TooLarge);
-    }
-    let parsed = serde_json::from_str::<Vec<serde_json::Value>>(replies_json)
-        .map_err(|error| ParseRepliesError::InvalidJson(error.to_string()))?;
-    parsed
-        .iter()
-        .enumerate()
-        .map(|(index, value)| {
-            json_to_value(value, MarshallingLimits::default()).map_err(|error| {
-                ParseRepliesError::UnsupportedValue {
-                    index: index + 1,
-                    path: error.path().to_owned(),
-                    message: error.message().to_owned(),
-                }
-            })
-        })
-        .collect()
 }
 
 /// Runs the compile + static-check pass, returning flattened diagnostics.

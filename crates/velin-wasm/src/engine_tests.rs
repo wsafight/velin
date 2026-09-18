@@ -36,6 +36,20 @@ fn run_answers_ask_from_the_reply_script() {
 }
 
 #[test]
+fn explicit_policy_bounds_source_execution() {
+    let result = run_with_policy(
+        "bounded.velin",
+        "default counter = 0\nwhile true:\n    set counter = counter + 1\n",
+        Vec::new(),
+        ExecutionPolicy::default()
+            .with_max_fuel(8)
+            .with_max_immediate_fuel(8),
+    );
+    assert!(!result.ok);
+    assert!(result.error.unwrap().contains("fuel"));
+}
+
+#[test]
 fn run_supports_p2_collection_and_loop_syntax() {
     let result = run(
         "p2.velin",
@@ -206,4 +220,18 @@ fn interactive_session_pauses_steps_snapshots_and_replays_branches() {
         replay = session.continue_execution(Vec::new());
     }
     assert_eq!(replay.output.last().map(String::as_str), Some("10"));
+}
+
+#[test]
+fn interactive_session_accepts_policy_and_cancellation() {
+    let mut session = InteractiveSession::new_with_policy(
+        "cancel.velin",
+        "while true:\n    set value = 1\n",
+        ExecutionPolicy::default().with_max_fuel(100),
+    )
+    .unwrap();
+    assert!(session.cancel().ok);
+    let result = session.continue_execution(Vec::new());
+    assert!(!result.ok);
+    assert!(result.error.unwrap().contains("cancelled"));
 }

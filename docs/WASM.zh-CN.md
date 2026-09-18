@@ -11,7 +11,7 @@
 `wasm-pack` 之后（见[工具链](TOOLING.zh-CN.md)）：
 
 ```js
-import init, { check, run } from "./pkg/velin_wasm.js";
+import init, { check, run, run_with_policy } from "./pkg/velin_wasm.js";
 
 await init();
 
@@ -20,6 +20,12 @@ const checked = JSON.parse(check(`default n = 1\nperform say(n)\n`));
 
 const ran = JSON.parse(run(`perform say("hi")\n`, "[]"));
 // { ok: true, diagnostics: [], output: ["hi"] }
+
+const bounded = JSON.parse(run_with_policy(
+    `while true:\n    set value = 1\n`,
+    "[]",
+    JSON.stringify({ max_fuel: 10_000, max_immediate_fuel: 10_000 }),
+));
 ```
 
 `check(source)` 编译并静态检查。返回 `{ ok, diagnostics }`，每条诊断含 `severity`、`line`、`column` 和 `message`。有任何错误诊断时 `ok` 为 false。
@@ -34,6 +40,8 @@ const ran = JSON.parse(run(`perform say("hi")\n`, "[]"));
 `repliesJson` 是 Velin 值的 JSON 数组，可包含整数、布尔、字符串、List 或 Record。例如 `[1]`、`["east"]` 和 `[{"items":[1, 2]}]` 都有效；Record 会规范成稳定键顺序。null、浮点、越界、超预算或畸形值会返回失败的 `RunResult`，错误中包含失败项和嵌套路径，并且不会执行脚本。其他命令名会写进 `output`，并无返回值地恢复，与 CLI 对未知命令的行为一致。
 
 执行失败时（溢出、缺下标、回复用尽、fuel 预算或取消）`RunResult` 还会带 `error`。
+
+`run_with_policy(source, repliesJson, policyJson)` 接受一个 JSON 对象，省略的字段使用默认值。可配置 `max_fuel`、`max_immediate_fuel`、`max_host_effects`、`max_call_depth`、值/机器/宿主载荷/队列的数据预算，以及 `progress_interval`。`PlaygroundSession.new_with_policy` 和 runtime-only 的 `RuntimeMachine.new_with_policy` 使用相同格式；对应对象也提供 `cancel()` 与 `clear_cancellation()`。策略 JSON 限制为 64 KiB，未知字段会被拒绝。
 
 ## 持久化 Playground 调试
 
@@ -52,6 +60,8 @@ console.log(JSON.parse(session.restore(saved)));
 ```
 
 `resume(repliesJson)` 运行到下一个宿主效果边界或结束；`step(repliesJson)` 前进一条字节码操作。快照包含 VM、RNG、预算与输出状态，所以恢复后提供另一份回复，会从同一检查点确定性地产生另一条分支。
+
+需要限制调试会话时，使用 `PlaygroundSession.new_with_policy(source, policyJson)`。
 
 runtime-only 的 `RuntimeMachine::run_batch(limit)` 可一次返回连续的无返回值 Host 事件：
 

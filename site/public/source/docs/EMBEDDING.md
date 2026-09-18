@@ -88,6 +88,18 @@ For consecutive commands without a return value, use `ScriptRunner::run_effect_b
 
 For serializable application DTOs, `to_value` and `from_value` provide Serde conversion with explicit `MarshallingLimits`. They preserve the `i64` integer range and stable record order, reject null and floating-point data, and report the exact failing field or list index. The C ABI retains its original display-only compound tag and adds opt-in `*_json` run/resume/batch/restart functions using `VELIN_VALUE_JSON`, so ABI version 1 hosts can adopt List/Record input and output without changing existing calls.
 
+C hosts can call `velin_execution_policy_default()` and pass a modified
+`VelinExecutionPolicy` to the append-only `velin_machine_new_with_policy`
+constructor. It covers fuel, call depth, value/machine/host-payload/queue
+budgets, and host-effect count; `velin_machine_cancel` and
+`velin_machine_clear_cancellation` provide cooperative cancellation between C
+calls. The existing `velin_machine_new` keeps default-policy behavior.
+
+Wasm hosts use `run_with_policy`, `PlaygroundSession.new_with_policy`, or the
+runtime-only `RuntimeMachine.new_with_policy` with the same JSON field names.
+Default constructors remain unchanged, and JavaScript can control cancellation
+with `cancel()` and `clear_cancellation()`.
+
 ## Create a machine
 
 `Machine::new` validates the complete program before execution. Apply every script default to the new frame:

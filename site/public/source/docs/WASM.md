@@ -11,7 +11,7 @@ The Playground on this site is one consumer of that package. A game page or edit
 After `wasm-pack` (see [Tooling](TOOLING.md)):
 
 ```js
-import init, { check, run } from "./pkg/velin_wasm.js";
+import init, { check, run, run_with_policy } from "./pkg/velin_wasm.js";
 
 await init();
 
@@ -20,6 +20,12 @@ const checked = JSON.parse(check(`default n = 1\nperform say(n)\n`));
 
 const ran = JSON.parse(run(`perform say("hi")\n`, "[]"));
 // { ok: true, diagnostics: [], output: ["hi"] }
+
+const bounded = JSON.parse(run_with_policy(
+  `while true:\n    set value = 1\n`,
+  "[]",
+  JSON.stringify({ max_fuel: 10_000, max_immediate_fuel: 10_000 }),
+));
 ```
 
 `check(source)` compiles and statically checks. It returns `{ ok, diagnostics }` where each diagnostic has `severity`, `line`, `column`, and `message`. `ok` is false when any diagnostic is an error.
@@ -34,6 +40,8 @@ const ran = JSON.parse(run(`perform say("hi")\n`, "[]"));
 `repliesJson` is a JSON array of Velin values: integers, booleans, strings, lists, or records. For example, `[1]`, `["east"]`, or `[{"items":[1, 2]}]` are valid. Records are normalized to stable key order. Null, floating-point, out-of-range, over-budget, or malformed values return a failed `RunResult` with the failing item and nested path, without executing the script. Other command names are printed into `output` and resumed without a value, matching the CLI’s unknown-command behavior.
 
 A `RunResult` also carries `error` when execution fails (overflow, missing index, exhausted replies, fuel budget, or cancellation).
+
+`run_with_policy(source, repliesJson, policyJson)` accepts a JSON object; omitted fields use defaults. The object can configure `max_fuel`, `max_immediate_fuel`, `max_host_effects`, `max_call_depth`, value/machine/host-payload/queue data budgets, and `progress_interval`. `PlaygroundSession.new_with_policy` and the runtime-only `RuntimeMachine.new_with_policy` use the same format; both objects also expose `cancel()` and `clear_cancellation()`. Policy JSON is capped at 64 KiB and unknown fields are rejected.
 
 ## Persistent Playground debugging
 
@@ -52,6 +60,8 @@ console.log(JSON.parse(session.restore(saved)));
 ```
 
 `resume(repliesJson)` runs to the next host-effect boundary or completion; `step(repliesJson)` advances one bytecode operation. Snapshots include VM, RNG, budget, and output state, so restoring one and supplying another reply produces a deterministic branch from the same checkpoint.
+
+Use `PlaygroundSession.new_with_policy(source, policyJson)` when a debug session needs explicit limits.
 
 The runtime-only `RuntimeMachine::run_batch(limit)` returns consecutive
 side-effect-only host events in one call:

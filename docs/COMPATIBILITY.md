@@ -38,6 +38,12 @@ Within ABI version 1:
 
 The P1 compound-value extension follows that append-only rule: legacy calls still return `VELIN_VALUE_COMPOUND` display text, while the new `velin_machine_*_json` functions return List/Record payloads as stable JSON with `VELIN_VALUE_JSON`. The existing resume structure accepts the new tag. No existing field, tag value, ownership rule, or function behavior changed, so the ABI version remains 1.
 
+The execution-policy extension is append-only as well: `VelinExecutionPolicy`,
+`velin_execution_policy_default`, `velin_machine_new_with_policy`, and the
+cancellation functions are new exports. The existing `velin_machine_new` keeps
+default-policy behavior. Existing structures and functions retain their layout,
+ownership, and behavior, so the ABI version remains 1.
+
 An incompatible layout or ownership change increments `VELIN_C_API_VERSION`, keeps the old header/runtime pair available for the supported release line, and includes migration guidance.
 
 ## Fixtures And CI

@@ -38,6 +38,8 @@ C ABI 使用不透明的 `VelinProgram` 和 `VelinMachine` handle，并同时在
 
 P1 复合值扩展遵循这条只追加规则：旧调用仍返回 `VELIN_VALUE_COMPOUND` 展示文本，新增的 `velin_machine_*_json` 函数则以稳定 JSON 和 `VELIN_VALUE_JSON` 返回 List/Record；现有 resume 结构可以接受新 tag。已有字段、tag 数值、所有权规则和函数行为都没有改变，因此 ABI 版本仍为 1。
 
+执行策略扩展同样只追加：`VelinExecutionPolicy`、`velin_execution_policy_default`、`velin_machine_new_with_policy` 和取消函数都是新增导出；旧的 `velin_machine_new` 仍使用默认策略。已有结构体和函数的布局、所有权与行为不变，因此 ABI 版本仍为 1。
+
 不兼容的布局或所有权变更必须提升 `VELIN_C_API_VERSION`，在受支持发布线内保留旧 header/runtime 配对，并提供迁移说明。
 
 ## Fixture 与 CI

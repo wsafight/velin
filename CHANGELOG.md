@@ -18,6 +18,8 @@ change source and Rust APIs between minor releases.
 - LSP semantic tokens, rename, formatting/code actions, bounded workspace indexing, cross-document navigation, workspace symbols, and module-dependency diagnostics.
 - Source-level VM debugging with breakpoints, stepping, variable inspection, effect-boundary pauses, replayable snapshots, and source-mapped profiles.
 - A persistent Wasm `PlaygroundSession` and Playground controls for stepping, resuming, inspecting state, and deterministic branch replay.
+- Configurable execution-policy and cooperative-cancellation entry points for the C ABI, Wasm runtime, and Playground sessions.
+- Reproducible CI performance and native/Wasm artifact-size gates backed by a checked-in historical baseline.
 
 ### Changed
 

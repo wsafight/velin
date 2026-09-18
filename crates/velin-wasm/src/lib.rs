@@ -22,6 +22,8 @@ use wasm_bindgen::prelude::wasm_bindgen;
 
 #[cfg(feature = "source")]
 mod engine;
+#[cfg(any(feature = "source", feature = "runtime"))]
+mod policy;
 #[cfg(feature = "runtime")]
 mod runtime;
 
@@ -43,8 +45,24 @@ pub fn check(source: &str) -> String {
 #[wasm_bindgen]
 #[must_use]
 pub fn run(source: &str, replies_json: &str) -> String {
+    run_with_policy(source, replies_json, "{}")
+}
+
+/// Runs source with a JSON-encoded numeric execution policy.
+#[cfg(feature = "source")]
+#[wasm_bindgen]
+#[must_use]
+pub fn run_with_policy(source: &str, replies_json: &str, policy_json: &str) -> String {
     let result = match engine::parse_replies(replies_json) {
-        Ok(replies) => engine::run("playground.velin", source, replies),
+        Ok(replies) => match policy::parse(policy_json) {
+            Ok(policy) => engine::run_with_policy("playground.velin", source, replies, policy),
+            Err(error) => engine::RunResult {
+                ok: false,
+                diagnostics: Vec::new(),
+                output: Vec::new(),
+                error: Some(error),
+            },
+        },
         Err(error) => engine::RunResult {
             ok: false,
             diagnostics: Vec::new(),
@@ -69,7 +87,28 @@ impl PlaygroundSession {
     #[wasm_bindgen(constructor)]
     #[must_use]
     pub fn new(source: &str) -> PlaygroundSession {
-        match engine::InteractiveSession::new("playground.velin", source) {
+        Self::new_with_policy(source, "{}")
+    }
+
+    /// Creates a Playground debugger with a JSON-encoded numeric policy.
+    #[must_use]
+    pub fn new_with_policy(source: &str, policy_json: &str) -> PlaygroundSession {
+        let policy = match policy::parse(policy_json) {
+            Ok(policy) => policy,
+            Err(error) => {
+                return Self::from_error(engine::DebugResult {
+                    ok: false,
+                    status: "error".to_owned(),
+                    line: 0,
+                    diagnostics: Vec::new(),
+                    output: Vec::new(),
+                    variables: std::collections::BTreeMap::new(),
+                    snapshot: None,
+                    error: Some(error),
+                });
+            }
+        };
+        match engine::InteractiveSession::new_with_policy("playground.velin", source, policy) {
             Ok(session) => {
                 let initial = session.state();
                 Self {
@@ -81,6 +120,13 @@ impl PlaygroundSession {
                 session: None,
                 initial: *initial,
             },
+        }
+    }
+
+    fn from_error(initial: engine::DebugResult) -> PlaygroundSession {
+        Self {
+            session: None,
+            initial,
         }
     }
 
@@ -115,6 +161,22 @@ impl PlaygroundSession {
         self.session.as_mut().map_or_else(
             || to_json(&self.initial),
             |session| to_json(&session.restore(snapshot)),
+        )
+    }
+
+    /// Requests cooperative cancellation at the next VM checkpoint.
+    pub fn cancel(&mut self) -> String {
+        self.session.as_mut().map_or_else(
+            || to_json(&self.initial),
+            |session| to_json(&session.cancel()),
+        )
+    }
+
+    /// Clears a previous cooperative cancellation request.
+    pub fn clear_cancellation(&mut self) -> String {
+        self.session.as_mut().map_or_else(
+            || to_json(&self.initial),
+            |session| to_json(&session.clear_cancellation()),
         )
     }
 
@@ -168,11 +230,34 @@ impl RuntimeMachine {
     /// fails bytecode validation.
     #[wasm_bindgen(constructor)]
     pub fn new(program_json: &str) -> Result<RuntimeMachine, wasm_bindgen::JsValue> {
+        Self::new_with_policy(program_json, "{}")
+    }
+
+    /// Loads a program with a JSON-encoded numeric execution policy.
+    ///
+    /// # Errors
+    /// Returns a JavaScript error when the program, policy JSON, or bytecode is invalid.
+    pub fn new_with_policy(
+        program_json: &str,
+        policy_json: &str,
+    ) -> Result<RuntimeMachine, wasm_bindgen::JsValue> {
         let program: velin_bytecode::Program =
             serde_json::from_str(program_json).map_err(|error| runtime::json_error(&error))?;
-        let machine =
-            velin_vm::Machine::new(program).map_err(|error| runtime::runtime_error(&error))?;
+        let policy =
+            policy::parse(policy_json).map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
+        let machine = velin_vm::Machine::new_with_policy(program, policy)
+            .map_err(|error| runtime::runtime_error(&error))?;
         Ok(Self { machine })
+    }
+
+    /// Requests cooperative cancellation at the next VM checkpoint.
+    pub fn cancel(&mut self) {
+        self.machine.cancel();
+    }
+
+    /// Clears a previous cooperative cancellation request.
+    pub fn clear_cancellation(&mut self) {
+        self.machine.clear_cancellation();
     }
 
     /// Runs until a host event, completion, or a bounded execution error.

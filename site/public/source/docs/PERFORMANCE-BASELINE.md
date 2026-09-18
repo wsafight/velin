@@ -159,3 +159,21 @@ For a release-quality comparison, use the default Criterion sample size and
 measurement time, save a named baseline, and repeat on the same machine and
 toolchain. A baseline is useful only when its environment and source revision
 are recorded next to it.
+
+## CI gate
+
+`benchmarks/performance-baseline.json` stores representative 0.4.0 medians and
+release-artifact size ceilings. Run the same latency, C ABI, Wasm, and size
+gate used by CI with:
+
+```sh
+bash scripts/check-performance.sh
+```
+
+The gate uses a short Criterion run by default (10 samples, 0.1 seconds of
+warm-up, and 0.2 seconds of measurement) and allows a 5x cross-host latency
+factor. It is intended to catch severe regressions, not replace a
+release-quality measurement. Set `VELIN_PERF_SAMPLE_SIZE`,
+`VELIN_PERF_WARMUP_TIME`, and `VELIN_PERF_MEASUREMENT_TIME` to collect a longer
+run, then append a dated historical snapshot with its environment and source
+revision.

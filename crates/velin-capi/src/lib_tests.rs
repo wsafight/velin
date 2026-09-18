@@ -47,6 +47,68 @@ fn reports_the_exported_abi_version() {
 }
 
 #[test]
+fn exposes_default_policy_and_applies_numeric_limits() {
+    let defaults = velin_execution_policy_default();
+    assert!(defaults.max_fuel > 0);
+    assert!(defaults.max_immediate_fuel > 0);
+    assert!(defaults.max_host_effects > 0);
+
+    let json =
+        program_json("default counter = 0\nwhile counter < 100:\n    set counter = counter + 1\n");
+    let mut error = std::ptr::null_mut();
+    let mut error_len = 0;
+    let mut error_capacity = 0;
+    let program = unsafe {
+        velin_program_load_json(
+            json.as_ptr(),
+            json.len(),
+            &mut error,
+            &mut error_len,
+            &mut error_capacity,
+        )
+    };
+    assert!(!program.is_null());
+    let mut policy = defaults;
+    policy.max_fuel = 1;
+    policy.max_immediate_fuel = 1;
+    let machine = unsafe {
+        velin_machine_new_with_policy(
+            program,
+            0,
+            &policy,
+            &mut error,
+            &mut error_len,
+            &mut error_capacity,
+        )
+    };
+    assert!(!machine.is_null());
+    let mut result = unsafe { velin_machine_run(machine) };
+    assert_eq!(result.kind, VELIN_YIELD_ERROR);
+    unsafe {
+        velin_yield_free(&mut result);
+        velin_machine_free(machine);
+        velin_program_free(program);
+    }
+}
+
+#[test]
+fn cancellation_can_be_requested_between_c_calls() {
+    let loaded = load(HOST_PROGRAM);
+    unsafe { velin_machine_cancel(loaded.machine) };
+    let mut cancelled = unsafe { velin_machine_run(loaded.machine) };
+    assert_eq!(cancelled.kind, VELIN_YIELD_ERROR);
+    unsafe { velin_yield_free(&mut cancelled) };
+
+    unsafe { velin_machine_clear_cancellation(loaded.machine) };
+    let mut yielded = unsafe { velin_machine_run(loaded.machine) };
+    assert_eq!(yielded.kind, VELIN_YIELD_HOST);
+    unsafe {
+        velin_yield_free(&mut yielded);
+        free_loaded(loaded);
+    }
+}
+
+#[test]
 fn host_yield_and_scalar_resume_cross_the_c_boundary() {
     let loaded = load(HOST_PROGRAM);
     let mut yielded = unsafe { velin_machine_run(loaded.machine) };

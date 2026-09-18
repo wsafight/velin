@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "description": "Representative 0.4.0 performance ceilings. Values are medians in nanoseconds from the documented M3 baseline; the gate uses a generous cross-host regression factor.",
+  "max_regression_factor": 5.0,
+  "benchmarks": {
+    "snapshot/machine_clone": 674.3,
+    "snapshot/clone_and_replay": 403.14,
+    "queue/full_backpressure": 130.2,
+    "vm/counter_loop": 27328,
+    "host/batched_effect_roundtrip": 41034,
+    "artifact/binary_decode": 1043300,
+    "pure/invoke/one_reused": 82.34,
+    "host/c_abi_batch": 11106,
+    "host/wasm_batch": 131630
+  },
+  "artifacts": {
+    "runtime-only example": {
+      "bytes": 2000000,
+      "gzip_bytes": 800000
+    },
+    "C runtime staticlib": {
+      "bytes": 35000000,
+      "gzip_bytes": 12000000
+    },
+    "runtime-only wasm": {
+      "bytes": 650000,
+      "gzip_bytes": 250000
+    },
+    "source-to-run wasm": {
+      "bytes": 1000000,
+      "gzip_bytes": 400000
+    },
+    "full CLI": {
+      "bytes": 5000000,
+      "gzip_bytes": 2000000
+    }
+  }
+}
