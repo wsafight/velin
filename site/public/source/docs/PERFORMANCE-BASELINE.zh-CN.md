@@ -1,142 +1,211 @@
-# 当前性能基线
+# 性能报告
 
 [English](PERFORMANCE-BASELINE.md)
 
-这是一份可复现的本地性能快照，不是发布承诺。除非语言子集、工作负载、工具链、硬件和计时边界完全一致，否则不应将这些数字与其他引擎直接比较。
+性能数据统一存放在 `benchmarks/reports/*.jsonl`。下面的报告区域由这些文件生成：先展示最新的 `<源码标识>-last.jsonl`，再与最新发布快照逐项比较，并保留全部发布快照。
 
-## 测量环境
+<!-- BEGIN GENERATED PERFORMANCE REPORTS -->
+## 最新未发布报告（2026-09-19）
+
+本报告包含 63 个 benchmark，其中 41 个同名指标与 2026-09-16 发布的 Velin `0.4.0` 对比。负数表示更快，正数表示更慢；单次本地采样的细小差异不应单独视为性能回退结论。
+
+### 环境与方法
+
+| 项目 | 值 |
+| --- | --- |
+| Velin 版本 | `0.4.0` 加未发布变更 |
+| 测量源码 | staged 源码 `5c4f3a38269a`（基于 `a9259d9`） |
+| 数据文件 | `benchmarks/reports/5c4f3a38269a-last.jsonl` |
+| 主机 | Apple M3 Pro, 12 logical cores, 36.0 GiB RAM |
+| 系统 | Darwin 25.6.0, arm64 |
+| Rust | `rustc 1.98.1`, LLVM `22.1.8` |
+| Cargo | `cargo 1.98.1` |
+| 采样 | 20 个样本，0.5 秒预热，1 秒测量, plots disabled |
+| 日期 | 2026-09-19 (Asia/Shanghai) |
+
+### Benchmark 结果
+
+| Benchmark | 当前值 | 已发布 `0.4.0` | 变化 |
+| --- | ---: | ---: | ---: |
+| `artifact/binary_decode` | 392.069 us | 1.0433 ms | -62.4% |
+| `artifact/cache_hit` | 411.879 us | 1.0633 ms | -61.3% |
+| `artifact/cache_miss` | 1.540 us | 1.530 us | +0.6% |
+| `artifact/source_compile` | 276.541 us | 255.350 us | +8.3% |
+| `builtin/record_arguments/fresh` | 148.88 ns | - | 新增 |
+| `builtin/record_arguments/reused` | 124.21 ns | - | 新增 |
+| `check/builtin_heavy_script` | 300.387 us | - | 新增 |
+| `check/expression_heavy_script` | 201.597 us | 203.650 us | -1.0% |
+| `check/guard` | 137.61 ns | 133.52 ns | +3.1% |
+| `check/short_circuit_heavy_script` | 637.427 us | - | 新增 |
+| `check/wide_linear_script` | 38.312 us | 38.175 us | +0.4% |
+| `compile/expression_heavy_script` | 662.254 us | 641.450 us | +3.2% |
+| `compile/guard` | 809.54 ns | 778.81 ns | +3.9% |
+| `compile/wide_linear_script` | 549.935 us | 517.160 us | +6.3% |
+| `eval/tree_walk` | 96.05 ns | 96.28 ns | -0.2% |
+| `host/batched_effect_roundtrip` | 30.980 us | 41.034 us | -24.5% |
+| `host/c_abi_batch` | 12.163 us | 11.106 us | +9.5% |
+| `host/single_effect_roundtrip` | 39.681 us | 37.435 us | +6.0% |
+| `host/wasm_batch` | 13.741 us | 131.630 us | -89.6% |
+| `host/wasm_load_and_batch` | 100.903 us | - | 新增 |
+| `host/wasm_machine_create_reused` | 192.24 ns | - | 新增 |
+| `machine/create_expression_heavy/reuse_validation` | 1.323 us | - | 新增 |
+| `machine/create_expression_heavy/validate` | 186.250 us | - | 新增 |
+| `machine/create_short_circuit_heavy/reuse_validation` | 1.306 us | - | 新增 |
+| `machine/create_short_circuit_heavy/validate` | 400.217 us | - | 新增 |
+| `machine/create_wide/reuse_validation` | 1.330 us | 1.254 us | +6.1% |
+| `machine/create_wide/validate` | 4.626 us | 4.630 us | -0.1% |
+| `machine/profile/disabled` | 14.489 us | 14.400 us | +0.6% |
+| `machine/profile/enabled` | 14.994 us | 14.825 us | +1.1% |
+| `machine/restart` | 22.570 us | 22.275 us | +1.3% |
+| `memory/execution_image` | 32.578 us | 32.525 us | +0.2% |
+| `parse/guard` | 1.878 us | 1.834 us | +2.4% |
+| `parse/host_calls` | 309.847 us | 296.220 us | +4.6% |
+| `parse/wide_linear_script` | 367.799 us | 339.320 us | +8.4% |
+| `pure/invoke/map_fresh` | 564.09 ns | 544.04 ns | +3.7% |
+| `pure/invoke/map_reused` | 187.61 ns | 189.90 ns | -1.2% |
+| `pure/invoke/one_reused` | 88.27 ns | 82.34 ns | +7.2% |
+| `queue/full_backpressure` | 129.52 ns | 130.20 ns | -0.5% |
+| `queue/push_pop` | 8.237 us | 8.339 us | -1.2% |
+| `snapshot/clone_and_replay` | 410.18 ns | 403.14 ns | +1.7% |
+| `snapshot/machine_clone` | 667.52 ns | 674.30 ns | -1.0% |
+| `vm/boolean_slot_loop` | 31.177 us | - | 新增 |
+| `vm/branched_scalar_loop` | 14.465 us | - | 新增 |
+| `vm/builtin_loop` | 164.796 us | - | 新增 |
+| `vm/constant_folding/folded` | 34.509 us | - | 新增 |
+| `vm/constant_folding/runtime_expression` | 123.939 us | - | 新增 |
+| `vm/counter_loop` | 26.872 us | 27.328 us | -1.7% |
+| `vm/growing_list` | 119.554 us | 115.260 us | +3.7% |
+| `vm/growing_string` | 109.803 us | 109.090 us | +0.7% |
+| `vm/interpolation` | 281.348 us | 276.840 us | +1.6% |
+| `vm/interpolation_mixed_holes` | 113.174 us | - | 新增 |
+| `vm/long_register_expression_loop` | 122.701 us | - | 新增 |
+| `vm/owned_builtin_loop` | 348.184 us | - | 新增 |
+| `vm/propagated_constants` | 21.035 us | - | 新增 |
+| `vm/run_with_host_yield` | 3.398 us | 3.408 us | -0.3% |
+| `vm/scalar_reassignment` | 45.966 us | - | 新增 |
+| `vm/short_scalar_expression` | 398.18 ns | - | 新增 |
+| `vm/small_register_expression_loop` | 112.743 us | - | 新增 |
+| `vm/string_reads` | 1.3991 ms | 1.3896 ms | +0.7% |
+| `vm/wide_linear_script` | 23.517 us | 23.013 us | +2.2% |
+| `workload/dialogue` | 915.46 ns | 896.37 ns | +2.1% |
+| `workload/inventory` | 66.760 us | 65.858 us | +1.4% |
+| `workload/mixed` | 14.896 us | 15.049 us | -1.0% |
+
+### 产物体积
+
+| 产物 | 字节数 | Gzip 字节数 | 仓库上限 |
+| --- | ---: | ---: | ---: |
+| Runtime-only 示例 | 524,976 | 238,922 | 2,000,000 / 800,000 |
+| C runtime 静态库 | 24,715,192 | 7,851,830 | 35,000,000 / 12,000,000 |
+| Runtime-only Wasm | 418,352 | 142,630 | 650,000 / 250,000 |
+| Source-to-run Wasm | 644,708 | 234,767 | 1,000,000 / 400,000 |
+| 完整 CLI | 1,280,384 | 567,130 | 5,000,000 / 2,000,000 |
+
+## 已发布快照
+
+### Velin `0.4.0` (2026-09-16)
+
+以下数值来自对应 JSONL，是后续未发布报告的比较基线。
 
 | 项目 | 值 |
 | --- | --- |
 | Velin 版本 | `0.4.0` |
-| 源码版本 | `86ab5f0`，加上本地文档和 benchmark 修改；运行时代码未变 |
-| 主机 | Apple MacBook Pro，Apple M3 Pro，12 核，36 GB 内存 |
-| 系统 | macOS Darwin `25.6.0`，`arm64` |
-| Rust | `rustc 1.98.0`，LLVM `22.1.8` |
+| 测量源码 | commit `86ab5f0` |
+| 数据文件 | `benchmarks/reports/86ab5f0-0.4.0.jsonl` |
+| 主机 | Apple M3 Pro, 12 logical cores, 36.0 GiB RAM |
+| 系统 | Darwin 25.6.0, arm64 |
+| Rust | `rustc 1.98.0`, LLVM `22.1.8` |
 | Cargo | `cargo 1.98.0` |
-| 构建 | Criterion `bench` profile，使用 workspace release 设置 |
-| 日期 | 2026-09-16（Asia/Shanghai） |
+| 采样 | 20 个样本，0.5 秒预热，1 秒测量, plots disabled |
+| 日期 | 2026-09-16 (Asia/Shanghai) |
 
-采集期间没有修改运行时实现；工作区包含路线图中新增的 P0 benchmark harness。
+#### Benchmark 结果
 
-## 版本规则
+| Benchmark | Estimate |
+| --- | ---: |
+| `artifact/binary_decode` | 1.0433 ms |
+| `artifact/cache_hit` | 1.0633 ms |
+| `artifact/cache_miss` | 1.530 us |
+| `artifact/source_compile` | 255.350 us |
+| `check/expression_heavy_script` | 203.650 us |
+| `check/guard` | 133.52 ns |
+| `check/wide_linear_script` | 38.175 us |
+| `compile/expression_heavy_script` | 641.450 us |
+| `compile/guard` | 778.81 ns |
+| `compile/wide_linear_script` | 517.160 us |
+| `eval/tree_walk` | 96.28 ns |
+| `host/batched_effect_roundtrip` | 41.034 us |
+| `host/c_abi_batch` | 11.106 us |
+| `host/single_effect_roundtrip` | 37.435 us |
+| `host/wasm_batch` | 131.630 us |
+| `machine/create_wide/reuse_validation` | 1.254 us |
+| `machine/create_wide/validate` | 4.630 us |
+| `machine/profile/disabled` | 14.400 us |
+| `machine/profile/enabled` | 14.825 us |
+| `machine/restart` | 22.275 us |
+| `memory/execution_image` | 32.525 us |
+| `parse/guard` | 1.834 us |
+| `parse/host_calls` | 296.220 us |
+| `parse/wide_linear_script` | 339.320 us |
+| `pure/invoke/map_fresh` | 544.04 ns |
+| `pure/invoke/map_reused` | 189.90 ns |
+| `pure/invoke/one_reused` | 82.34 ns |
+| `queue/full_backpressure` | 130.20 ns |
+| `queue/push_pop` | 8.339 us |
+| `snapshot/clone_and_replay` | 403.14 ns |
+| `snapshot/machine_clone` | 674.30 ns |
+| `vm/counter_loop` | 27.328 us |
+| `vm/growing_list` | 115.260 us |
+| `vm/growing_string` | 109.090 us |
+| `vm/interpolation` | 276.840 us |
+| `vm/run_with_host_yield` | 3.408 us |
+| `vm/string_reads` | 1.3896 ms |
+| `vm/wide_linear_script` | 23.013 us |
+| `workload/dialogue` | 896.37 ns |
+| `workload/inventory` | 65.858 us |
+| `workload/mixed` | 15.049 us |
 
-本文档中的指标是 Velin `0.4.0` 的首份基线。后续版本发布时，在文档中追加带版本号和日期的独立段落，并记录对应的环境与测量结果。不要覆盖 `0.4.0` 的数值；文档需要保留可比较的历史快照序列。
+#### 产物体积
 
-## 测量方法
+| 产物 | 字节数 | Gzip 字节数 | 仓库上限 |
+| --- | ---: | ---: | ---: |
+| Runtime-only 示例 | 524,960 | 239,161 | 2,000,000 / 800,000 |
+| C runtime 静态库 | 24,725,352 | 7,854,007 | 35,000,000 / 12,000,000 |
+| Runtime-only Wasm | 414,621 | 142,084 | 650,000 / 250,000 |
+| Source-to-run Wasm | 642,938 | 233,886 | 1,000,000 / 400,000 |
+| 完整 CLI | 1,296,800 | 574,136 | 5,000,000 / 2,000,000 |
+<!-- END GENERATED PERFORMANCE REPORTS -->
 
-pipeline、C ABI 和 Wasm benchmark 使用相同的缩短版 Criterion 参数，以便在一次采样中得到快照：
+## 记录
 
-```text
-sample-size       20
-warm-up-time      0.5 s
-measurement-time  1 s
-plots             disabled
-```
-
-表格使用 Criterion 输出 `[low median high]` 中间的 median 值。Criterion 输出的 `change` 行没有写入表格：本机 `base` 目录没有记录硬件和工具链来源，因此这些比较不能作为可信的回归结论。
-
-## Pipeline 指标
-
-以下是每次 benchmark 调用的耗时，不是每条源码语句的耗时。表中保留了 fixture 大小，便于解释数字。
-
-| 区域 | Benchmark | Fixture | Median |
-| --- | --- | --- | ---: |
-| 解析 | `parse/guard` | 一个复合 guard 表达式 | 1.8343 us |
-| 解析 | `parse/wide_linear_script` | 512 个变量和赋值 | 339.32 us |
-| 解析 | `parse/host_calls` | 512 个宿主 effect | 296.22 us |
-| 检查 | `check/guard` | 一个复合 guard 表达式 | 133.52 ns |
-| 检查 | `check/wide_linear_script` | 512 个变量和赋值 | 38.175 us |
-| 检查 | `check/expression_heavy_script` | 512 个算术表达式 | 203.65 us |
-| 编译 | `compile/guard` | 一个复合 guard 表达式 | 778.81 ns |
-| 编译 | `compile/wide_linear_script` | 512 个变量和赋值 | 517.16 us |
-| 编译 | `compile/expression_heavy_script` | 512 个算术表达式 | 641.45 us |
-| VM | `vm/counter_loop` | 2,000 次循环 | 27.328 us |
-| VM | `vm/growing_list` | 2,000 次列表追加 | 115.26 us |
-| VM | `vm/growing_string` | 2,000 次字符串追加 | 109.09 us |
-| VM | `vm/interpolation` | 1,500 次插值 | 276.84 us |
-| VM | `vm/string_reads` | 在 16 KiB 字符串上读取 1,500 次 | 1.3896 ms |
-| VM | `vm/wide_linear_script` | 512 个变量和赋值 | 23.013 us |
-| Machine | `machine/create_wide/validate` | 验证 512 变量程序 | 4.630 us |
-| Machine | `machine/create_wide/reuse_validation` | 复用验证证明 | 1.254 us |
-| Machine | `machine/restart` | 重启 expression-heavy runner | 22.275 us |
-| 求值器 | `eval/tree_walk` | 一个复合 guard 表达式 | 96.278 ns |
-| 宿主 | `vm/run_with_host_yield` | 一个有返回值的宿主 yield | 3.408 us |
-| 宿主 | `host/single_effect_roundtrip` | 256 个 effect，逐个 resume | 37.435 us |
-| 宿主 | `host/batched_effect_roundtrip` | 256 个 effect，每批 64 个 | 41.034 us |
-| Artifact | `artifact/source_compile` | 256 变量源码 | 255.35 us |
-| Artifact | `artifact/binary_decode` | 164,738 字节 artifact | 1.0433 ms |
-| Artifact | `artifact/cache_hit` | 已缓存的 164,738 字节 artifact | 1.0633 ms |
-| Artifact | `artifact/cache_miss` | 缺失缓存项的查询 | 1.5304 us |
-| 纯模块 | `pure/invoke/one_reused` | 一个整数参数，复用 invoker | 82.340 ns |
-| 纯模块 | `pure/invoke/map_reused` | 一个具名整数，复用 invoker | 189.90 ns |
-| 纯模块 | `pure/invoke/map_fresh` | 一个具名整数，新建 map | 544.04 ns |
-| Profile | `machine/profile/enabled` | 256 次循环的 profile 工作负载 | 14.825 us |
-| Profile | `machine/profile/disabled` | 相同工作负载但关闭 profile | 14.400 us |
-| 内存 | `memory/execution_image` | 256 变量程序 | 32.525 us |
-| 工作负载 | `workload/dialogue` | 三个宿主 effect 的对话 | 896.37 ns |
-| 工作负载 | `workload/inventory` | 150 次列表更新与渲染 | 65.858 us |
-| 工作负载 | `workload/mixed` | 100 次带条件 effect 的循环 | 15.049 us |
-
-## P0 边界指标
-
-以下 benchmark 随 P0 运行时边界工作新增：
-
-| Benchmark | Fixture | Median |
-| --- | --- | ---: |
-| `snapshot/machine_clone` | 256 个已填充槽位的已完成机器 | 674.30 ns |
-| `snapshot/clone_and_replay` | 宿主 yield 暂停、克隆、resume 和随机状态延续 | 403.14 ns |
-| `queue/push_pop` | 128 个有界事件，每个包含两个值 | 8.3387 us |
-| `queue/full_backpressure` | 64 个事件的满队列，拒绝/pop/push 循环 | 130.20 ns |
-
-两个 snapshot 数字对应不同形状：前者复制更大的已完成帧，后者复制停在宿主边界的机器。它们不能互相替代，也不能代表所有 snapshot 大小。
-
-## C ABI 与 Wasm 边界
-
-边界 benchmark 在同一主机上使用相同 Criterion 参数：
-
-| 边界 | Benchmark | Fixture | Median |
-| --- | --- | --- | ---: |
-| C ABI | `host/c_abi_batch` | 128 个 effect，每批 64 个 | 11.106 us |
-| Wasm runtime | `host/wasm_batch` | 128 个 effect，分三批运行 | 131.63 us |
-
-C benchmark 在采样前完成 C handle 加载，采样区间包含 machine 创建和批量执行。Wasm benchmark 的采样区间包含从序列化 JSON 创建 runtime machine 和三次 batch 调用。两者都不是浏览器端到端延迟。
-
-## 如何解读
-
-- 常见 VM loop fixture 在 1,500-2,000 次迭代下通常耗时几十到几百微秒。集合和插值路径需要分配或校验更大的值，因此明显高于标量计数循环。
-- 复用验证证明比每次 machine 创建都验证公开程序便宜，这是重复运行时的预期嵌入路径。
-- Artifact decode 和 cache hit 包含有界解码与验证，不应期待它们击败进程内的 warm runner；验证成本是输入安全边界的一部分。
-- 队列数字只描述有界宿主队列本身，不包含应用分派、序列化或消费者工作。
-- 当前不做跨引擎速度宣传。未来比较必须先固定版本、feature、硬件和等价语义。
-
-## 复现
-
-采集基线前先运行正确性检查：
+运行完整 benchmark，并写入 `<源码标识>-last.jsonl`：
 
 ```sh
-cargo test --workspace
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+node scripts/record-performance.mjs
 ```
 
-使用相同参数采集 pipeline、C ABI 和 Wasm 指标：
+发布时冻结为 `<源码标识>-<版本>.jsonl`：
 
 ```sh
-cargo bench -p velin --bench pipeline -- --noplot --sample-size 20 --warm-up-time 0.5 --measurement-time 1 --format terse
-cargo bench -p velin-capi --bench c_api -- --noplot --sample-size 20 --warm-up-time 0.5 --measurement-time 1 --format terse
-cargo bench -p velin-wasm --features runtime --bench runtime -- --noplot --sample-size 20 --warm-up-time 0.5 --measurement-time 1 --format terse
+node scripts/record-performance.mjs --release 0.4.1
 ```
 
-发布级比较应使用 Criterion 默认的 sample size 和 measurement time，保存具名 baseline，并在同一台机器和同一工具链上重复运行。只有同时记录环境和源码版本，baseline 才有意义。
+只根据现有 JSONL 生成文档，不重新测量：
 
-## CI 门禁
+```sh
+node scripts/record-performance.mjs --generate-only
+```
 
-仓库中的 `benchmarks/performance-baseline.json` 保存代表性 0.4.0 中位数和发布产物体积上限。
-使用以下命令运行与 CI 相同的延迟、C ABI、Wasm 和体积门禁：
+每个 clone 只需执行一次以下配置启用本地 pre-commit hook：
+
+```sh
+git config core.hooksPath .githooks
+```
+
+hook 会运行完整测量，并暂存 JSONL 报告和生成后的文档；如果存在 staged 内容，源码标识会基于 staged 内容计算，因此无关的未暂存工作可以保留。可通过 `VELIN_PERF_SAMPLE_SIZE`、`VELIN_PERF_WARMUP_TIME` 和 `VELIN_PERF_MEASUREMENT_TIME` 调整采样。
+
+## 门禁
 
 ```sh
 bash scripts/check-performance.sh
 ```
-
-门禁默认使用较短的 Criterion 采样（10 个样本、0.1 秒预热、0.2 秒测量），并允许跨主机的 5 倍延迟浮动；它用于拦截严重回退，不替代发布级性能采集。可以通过 `VELIN_PERF_SAMPLE_SIZE`、`VELIN_PERF_WARMUP_TIME` 和 `VELIN_PERF_MEASUREMENT_TIME` 调整采样，正式发布仍应按本页前述方法追加带环境和版本的历史快照。

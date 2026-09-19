@@ -71,6 +71,8 @@ impl Machine {
             &mut self.register_values,
             &mut self.register_metrics,
             &mut self.register_touched,
+            &mut self.builtin_arguments,
+            &mut self.builtin_argument_metrics,
             chunk,
         )?;
         if metrics.footprint.values > self.policy.max_value_values

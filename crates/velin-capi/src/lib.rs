@@ -23,8 +23,7 @@ use result::{
     yield_from_result_json,
 };
 use std::slice;
-use std::sync::Arc;
-use velin_bytecode::{InitialFrame, Program, ValidatedProgram};
+use velin_bytecode::{InitialFrame, ValidatedProgram};
 use velin_vm::{ExecutionPolicy, Machine};
 
 pub use result::{
@@ -148,7 +147,7 @@ pub unsafe extern "C" fn velin_program_load_json(
     } else {
         unsafe { slice::from_raw_parts(bytes, len) }
     };
-    let program = match serde_json::from_slice::<Program>(input) {
+    let program = match serde_json::from_slice::<ValidatedProgram>(input) {
         Ok(program) => program,
         Err(error) => {
             write_error(
@@ -160,9 +159,6 @@ pub unsafe extern "C" fn velin_program_load_json(
             return std::ptr::null_mut();
         }
     };
-    // JSON deserialization already ran `Program::validate`.
-    let program = ValidatedProgram::new(Arc::new(program))
-        .expect("deserialized programs have already been validated");
     let initial = InitialFrame::from_named_values(
         &program.program().slots,
         std::iter::empty::<(&str, &velin_syntax::Value)>(),

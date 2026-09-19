@@ -7,7 +7,7 @@
 use velin_bytecode::{ExprChunk, ExprChunkRef, ExprOp};
 use velin_eval::{
     EvalError, apply_binary, apply_boolean_not, apply_integer_binary, apply_integer_unary,
-    invoke_measured_with_metrics, invoke_random, unassigned,
+    invoke_measured_with_metrics_reusable, invoke_random, unassigned,
 };
 use velin_syntax::{BinaryOp, Builtin, DataFootprint, DataMetrics, MAX_DATA_TEXT_BYTES, Value};
 
@@ -51,6 +51,8 @@ pub fn eval_chunk(
     let mut values = Vec::new();
     let mut metrics = Vec::new();
     let mut touched = Vec::new();
+    let mut arguments = Vec::new();
+    let mut argument_metrics = Vec::new();
     eval_validated_chunk(
         chunk.as_chunk_ref(),
         FrameAccess::Mutable(frame),
@@ -59,6 +61,8 @@ pub fn eval_chunk(
         &mut values,
         &mut metrics,
         &mut touched,
+        &mut arguments,
+        &mut argument_metrics,
         slot_name,
     )
     .map(|(value, _)| value)
@@ -74,6 +78,8 @@ pub(crate) fn eval_validated_chunk(
     values: &mut Vec<Option<Value>>,
     metrics: &mut Vec<Option<DataMetrics>>,
     touched: &mut Vec<usize>,
+    arguments: &mut Vec<Value>,
+    argument_metrics: &mut Vec<DataMetrics>,
     slot_name: impl Fn(u32) -> String,
 ) -> Result<(Value, DataMetrics), EvalError> {
     let register_count = usize::from(chunk.registers);
@@ -86,6 +92,8 @@ pub(crate) fn eval_validated_chunk(
         values,
         metrics,
         touched,
+        arguments,
+        argument_metrics,
         &slot_name,
     );
     clear_workspace(values, metrics, touched);
@@ -101,6 +109,8 @@ fn execute_registers(
     values: &mut [Option<Value>],
     metrics: &mut [Option<DataMetrics>],
     touched: &mut Vec<usize>,
+    arguments: &mut Vec<Value>,
+    argument_metrics: &mut Vec<DataMetrics>,
     slot_name: &impl Fn(u32) -> String,
 ) -> Result<(Value, DataMetrics), EvalError> {
     let line = chunk.line as usize;
@@ -162,9 +172,22 @@ fn execute_registers(
                     if matches!(function, Builtin::Len | Builtin::Get | Builtin::Contains) {
                         invoke_readonly_registers(*function, values, args.clone(), line)?
                     } else {
-                        let (arguments, argument_metrics) =
-                            collect_registers(values, metrics, args.clone());
-                        invoke_measured_with_metrics(*function, arguments, &argument_metrics, line)?
+                        collect_registers(
+                            values,
+                            metrics,
+                            args.clone(),
+                            arguments,
+                            argument_metrics,
+                        );
+                        let result = invoke_measured_with_metrics_reusable(
+                            *function,
+                            arguments,
+                            argument_metrics,
+                            line,
+                        );
+                        arguments.clear();
+                        argument_metrics.clear();
+                        result?
                     };
                 write_register(values, metrics, touched, *dst, result, result_metrics);
             }
@@ -173,13 +196,15 @@ fn execute_registers(
                 args,
                 state_slot,
             } => {
-                let arguments = collect_values(values, args.clone());
+                collect_values(values, args.clone(), arguments);
                 let result = invoke_random(
                     Builtin::Random,
-                    &arguments,
+                    arguments,
                     frame.rng_state(*state_slot, line)?,
                     line,
-                )?;
+                );
+                arguments.clear();
+                let result = result?;
                 let result_metrics = scalar_metrics(&result);
                 write_register(values, metrics, touched, *dst, result, result_metrics);
             }
@@ -188,13 +213,15 @@ fn execute_registers(
                 args,
                 state_slot,
             } => {
-                let arguments = collect_values(values, args.clone());
+                collect_values(values, args.clone(), arguments);
                 let result = invoke_random(
                     Builtin::Chance,
-                    &arguments,
+                    arguments,
                     frame.rng_state(*state_slot, line)?,
                     line,
-                )?;
+                );
+                arguments.clear();
+                let result = result?;
                 let result_metrics = scalar_metrics(&result);
                 write_register(values, metrics, touched, *dst, result, result_metrics);
             }
@@ -253,10 +280,13 @@ fn execute_registers(
     Ok((result, result_metrics))
 }
 
-fn collect_values(values: &[Option<Value>], registers: std::ops::Range<u16>) -> Vec<Value> {
-    registers
-        .map(|register| register_value(values, register).clone())
-        .collect()
+fn collect_values(
+    values: &[Option<Value>],
+    registers: std::ops::Range<u16>,
+    arguments: &mut Vec<Value>,
+) {
+    arguments.clear();
+    arguments.extend(registers.map(|register| register_value(values, register).clone()));
 }
 
 fn invoke_readonly_registers(
@@ -334,15 +364,18 @@ fn collect_registers(
     values: &[Option<Value>],
     metrics: &[Option<DataMetrics>],
     registers: std::ops::Range<u16>,
-) -> (Vec<Value>, Vec<DataMetrics>) {
-    let mut arguments = Vec::with_capacity(registers.len());
-    let mut argument_metrics = Vec::with_capacity(registers.len());
+    arguments: &mut Vec<Value>,
+    argument_metrics: &mut Vec<DataMetrics>,
+) {
+    arguments.clear();
+    argument_metrics.clear();
+    arguments.reserve(registers.len());
+    argument_metrics.reserve(registers.len());
     for register in registers {
         arguments.push(register_value(values, register).clone());
         argument_metrics
             .push(metrics[register as usize].expect("validated register argument metrics"));
     }
-    (arguments, argument_metrics)
 }
 
 fn register_value(values: &[Option<Value>], register: u16) -> &Value {

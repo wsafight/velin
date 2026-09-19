@@ -313,18 +313,19 @@ impl<'a> ScriptRunner<'a> {
             Ok(count) => count,
             Err(error) => return Err(self.map_machine_error(error)),
         };
-        let raw = self.machine.effect_batch().to_vec();
         let mut events = Vec::with_capacity(count);
         let mut failure = None;
-        for effect in raw {
-            let Some(name) = self.script.host_name(effect.host_id) else {
+        let script = self.script;
+        let schema = self.schema;
+        for effect in self.machine.drain_effect_batch_iter() {
+            let Some(name) = script.host_name(effect.host_id) else {
                 failure = Some(PendingFailure::HostContract(format!(
                     "bytecode yielded unknown host id {}",
                     effect.host_id
                 )));
                 break;
             };
-            if let Err(message) = self.validate_call(name, &effect.values) {
+            if let Err(message) = validate_call(schema, name, &effect.values) {
                 failure = Some(PendingFailure::HostContract(message));
                 break;
             }
@@ -337,8 +338,6 @@ impl<'a> ScriptRunner<'a> {
             let error = failure.error();
             self.pending_failure = Some(failure);
             self.host_effects += events.len();
-            let mut discarded = Vec::new();
-            self.machine.drain_effect_batch(&mut discarded);
             return if events.is_empty() {
                 Err(error)
             } else {
@@ -346,8 +345,6 @@ impl<'a> ScriptRunner<'a> {
             };
         }
         self.host_effects += count;
-        let mut discarded = Vec::new();
-        self.machine.drain_effect_batch(&mut discarded);
         Ok(events)
     }
 
@@ -419,13 +416,7 @@ impl<'a> ScriptRunner<'a> {
     }
 
     fn validate_call(&self, name: &str, values: &[Value]) -> Result<(), String> {
-        let Some(schema) = self.schema else {
-            return Ok(());
-        };
-        schema
-            .validate_call(name, values)
-            .map(|_| ())
-            .map_err(|error| error.to_string())
+        validate_call(self.schema, name, values)
     }
 
     fn validate_reply(&self, value: Option<&Value>) -> Result<(), ScriptRunError> {
@@ -438,6 +429,16 @@ impl<'a> ScriptRunner<'a> {
             .validate_reply(name, Some(value))
             .map_err(|error| ScriptRunError::HostContract(error.to_string()))
     }
+}
+
+fn validate_call(schema: Option<&HostSchema>, name: &str, values: &[Value]) -> Result<(), String> {
+    let Some(schema) = schema else {
+        return Ok(());
+    };
+    schema
+        .validate_call(name, values)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn map_eval_error(error: EvalError) -> ScriptRunError {

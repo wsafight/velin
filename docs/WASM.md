@@ -63,6 +63,22 @@ console.log(JSON.parse(session.restore(saved)));
 
 Use `PlaygroundSession.new_with_policy(source, policyJson)` when a debug session needs explicit limits.
 
+When a host creates more than one machine from the same bytecode, parse and
+validate it once with `RuntimeProgram`, then create cheap independent machines:
+
+```js
+import init, { RuntimeProgram } from "./pkg/velin_wasm.js";
+
+await init();
+const program = new RuntimeProgram(programJson);
+const first = program.create_machine();
+const second = program.create_machine_with_policy(policyJson);
+```
+
+The existing `RuntimeMachine` constructor remains available for one-shot use.
+`RuntimeProgram` is immutable; each returned machine owns independent execution
+state, budgets, cancellation state, and RNG state.
+
 The runtime-only `RuntimeMachine::run_batch(limit)` returns consecutive
 side-effect-only host events in one call:
 

@@ -313,6 +313,8 @@ impl Machine {
                     &mut self.register_values,
                     &mut self.register_metrics,
                     &mut self.register_touched,
+                    &mut self.builtin_arguments,
+                    &mut self.builtin_argument_metrics,
                     rhs,
                 )?;
                 self.update_add(slot, rhs, line)
@@ -326,6 +328,8 @@ impl Machine {
                     &mut self.register_values,
                     &mut self.register_metrics,
                     &mut self.register_touched,
+                    &mut self.builtin_arguments,
+                    &mut self.builtin_argument_metrics,
                     value,
                 )?;
                 self.update_push(slot, value, metrics, line)
@@ -338,6 +342,8 @@ impl Machine {
                     &mut self.register_values,
                     &mut self.register_metrics,
                     &mut self.register_touched,
+                    &mut self.builtin_arguments,
+                    &mut self.builtin_argument_metrics,
                     key,
                 )?;
                 let (value, metrics) = eval_chunk_for(
@@ -347,6 +353,8 @@ impl Machine {
                     &mut self.register_values,
                     &mut self.register_metrics,
                     &mut self.register_touched,
+                    &mut self.builtin_arguments,
+                    &mut self.builtin_argument_metrics,
                     value,
                 )?;
                 self.update_put(slot, key, value, metrics, line)
@@ -359,6 +367,8 @@ impl Machine {
                     &mut self.register_values,
                     &mut self.register_metrics,
                     &mut self.register_touched,
+                    &mut self.builtin_arguments,
+                    &mut self.builtin_argument_metrics,
                     key,
                 )?;
                 self.update_remove(slot, key, line)

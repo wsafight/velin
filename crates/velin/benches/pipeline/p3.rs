@@ -3,7 +3,8 @@
 use crate::sources::{expression_heavy_source, short_circuit_heavy_source, wide_linear_source};
 use criterion::Criterion;
 use std::hint::black_box;
-use velin::{Machine, ScriptRunner, compile};
+use velin::{Builtin, Machine, ScriptRunner, Value, compile};
+use velin_eval::{invoke_measured_with_metrics, invoke_measured_with_metrics_reusable};
 
 pub(crate) fn bench_wide_linear_run(c: &mut Criterion) {
     let source = wide_linear_source(512);
@@ -113,6 +114,58 @@ pub(crate) fn bench_builtin_loop(c: &mut Criterion) {
             black_box(runner.run().unwrap())
         });
     });
+}
+
+pub(crate) fn bench_owned_builtin_loop(c: &mut Criterion) {
+    let script = compile(
+        "bench.velin",
+        concat!(
+            "default index = 0\n",
+            "while index < 1500:\n",
+            "    set item = record(\"index\", index)\n",
+            "    set index = index + 1\n",
+        ),
+    )
+    .unwrap();
+    c.bench_function("vm/owned_builtin_loop", |b| {
+        b.iter(|| {
+            let mut runner = ScriptRunner::new(&script).unwrap();
+            black_box(runner.run().unwrap())
+        });
+    });
+}
+
+pub(crate) fn bench_owned_builtin_arguments(c: &mut Criterion) {
+    let metrics = [
+        Value::String("index".into()).data_metrics().unwrap(),
+        Value::Integer(1).data_metrics().unwrap(),
+    ];
+    let mut group = c.benchmark_group("builtin/record_arguments");
+    group.bench_function("fresh", |b| {
+        b.iter(|| {
+            black_box(
+                invoke_measured_with_metrics(
+                    Builtin::Record,
+                    vec![Value::String("index".into()), Value::Integer(1)],
+                    &metrics,
+                    1,
+                )
+                .unwrap(),
+            )
+        });
+    });
+    group.bench_function("reused", |b| {
+        let mut arguments = Vec::with_capacity(2);
+        b.iter(|| {
+            arguments.push(Value::String("index".into()));
+            arguments.push(Value::Integer(1));
+            black_box(
+                invoke_measured_with_metrics_reusable(Builtin::Record, &mut arguments, &metrics, 1)
+                    .unwrap(),
+            )
+        });
+    });
+    group.finish();
 }
 
 pub(crate) fn bench_growing_string(c: &mut Criterion) {

@@ -1,179 +1,211 @@
-# Current Performance Baseline
+# Performance Reports
 
 [简体中文](PERFORMANCE-BASELINE.zh-CN.md)
 
-This page records one reproducible local performance snapshot. The numbers are
-not release guarantees and should not be compared with another engine unless
-the language subset, workload, toolchain, hardware, and timing boundary are
-held constant.
+Performance data is stored in `benchmarks/reports/*.jsonl`. The report section below is generated from those files: it shows the newest `<source>-last.jsonl`, compares it with the newest released snapshot, and retains every released snapshot.
 
-## Measurement environment
+<!-- BEGIN GENERATED PERFORMANCE REPORTS -->
+## Latest unreleased report (2026-09-19)
+
+This report contains 63 benchmarks. 41 matching metrics are compared with Velin `0.4.0`, released on 2026-09-16. Negative changes are faster and positive changes are slower; small differences from one local run are not regression claims.
+
+### Environment and method
+
+| Item | Value |
+| --- | --- |
+| Velin version | `0.4.0` plus unreleased changes |
+| Measured source | staged source `5c4f3a38269a` (base `a9259d9`) |
+| Data file | `benchmarks/reports/5c4f3a38269a-last.jsonl` |
+| Host | Apple M3 Pro, 12 logical cores, 36.0 GiB RAM |
+| OS | Darwin 25.6.0, arm64 |
+| Rust | `rustc 1.98.1`, LLVM `22.1.8` |
+| Cargo | `cargo 1.98.1` |
+| Sampling | 20 samples, 0.5s warm-up, 1s measurement, plots disabled |
+| Date | 2026-09-19 (Asia/Shanghai) |
+
+### Benchmark results
+
+| Benchmark | Current | Released `0.4.0` | Change |
+| --- | ---: | ---: | ---: |
+| `artifact/binary_decode` | 392.069 us | 1.0433 ms | -62.4% |
+| `artifact/cache_hit` | 411.879 us | 1.0633 ms | -61.3% |
+| `artifact/cache_miss` | 1.540 us | 1.530 us | +0.6% |
+| `artifact/source_compile` | 276.541 us | 255.350 us | +8.3% |
+| `builtin/record_arguments/fresh` | 148.88 ns | - | new |
+| `builtin/record_arguments/reused` | 124.21 ns | - | new |
+| `check/builtin_heavy_script` | 300.387 us | - | new |
+| `check/expression_heavy_script` | 201.597 us | 203.650 us | -1.0% |
+| `check/guard` | 137.61 ns | 133.52 ns | +3.1% |
+| `check/short_circuit_heavy_script` | 637.427 us | - | new |
+| `check/wide_linear_script` | 38.312 us | 38.175 us | +0.4% |
+| `compile/expression_heavy_script` | 662.254 us | 641.450 us | +3.2% |
+| `compile/guard` | 809.54 ns | 778.81 ns | +3.9% |
+| `compile/wide_linear_script` | 549.935 us | 517.160 us | +6.3% |
+| `eval/tree_walk` | 96.05 ns | 96.28 ns | -0.2% |
+| `host/batched_effect_roundtrip` | 30.980 us | 41.034 us | -24.5% |
+| `host/c_abi_batch` | 12.163 us | 11.106 us | +9.5% |
+| `host/single_effect_roundtrip` | 39.681 us | 37.435 us | +6.0% |
+| `host/wasm_batch` | 13.741 us | 131.630 us | -89.6% |
+| `host/wasm_load_and_batch` | 100.903 us | - | new |
+| `host/wasm_machine_create_reused` | 192.24 ns | - | new |
+| `machine/create_expression_heavy/reuse_validation` | 1.323 us | - | new |
+| `machine/create_expression_heavy/validate` | 186.250 us | - | new |
+| `machine/create_short_circuit_heavy/reuse_validation` | 1.306 us | - | new |
+| `machine/create_short_circuit_heavy/validate` | 400.217 us | - | new |
+| `machine/create_wide/reuse_validation` | 1.330 us | 1.254 us | +6.1% |
+| `machine/create_wide/validate` | 4.626 us | 4.630 us | -0.1% |
+| `machine/profile/disabled` | 14.489 us | 14.400 us | +0.6% |
+| `machine/profile/enabled` | 14.994 us | 14.825 us | +1.1% |
+| `machine/restart` | 22.570 us | 22.275 us | +1.3% |
+| `memory/execution_image` | 32.578 us | 32.525 us | +0.2% |
+| `parse/guard` | 1.878 us | 1.834 us | +2.4% |
+| `parse/host_calls` | 309.847 us | 296.220 us | +4.6% |
+| `parse/wide_linear_script` | 367.799 us | 339.320 us | +8.4% |
+| `pure/invoke/map_fresh` | 564.09 ns | 544.04 ns | +3.7% |
+| `pure/invoke/map_reused` | 187.61 ns | 189.90 ns | -1.2% |
+| `pure/invoke/one_reused` | 88.27 ns | 82.34 ns | +7.2% |
+| `queue/full_backpressure` | 129.52 ns | 130.20 ns | -0.5% |
+| `queue/push_pop` | 8.237 us | 8.339 us | -1.2% |
+| `snapshot/clone_and_replay` | 410.18 ns | 403.14 ns | +1.7% |
+| `snapshot/machine_clone` | 667.52 ns | 674.30 ns | -1.0% |
+| `vm/boolean_slot_loop` | 31.177 us | - | new |
+| `vm/branched_scalar_loop` | 14.465 us | - | new |
+| `vm/builtin_loop` | 164.796 us | - | new |
+| `vm/constant_folding/folded` | 34.509 us | - | new |
+| `vm/constant_folding/runtime_expression` | 123.939 us | - | new |
+| `vm/counter_loop` | 26.872 us | 27.328 us | -1.7% |
+| `vm/growing_list` | 119.554 us | 115.260 us | +3.7% |
+| `vm/growing_string` | 109.803 us | 109.090 us | +0.7% |
+| `vm/interpolation` | 281.348 us | 276.840 us | +1.6% |
+| `vm/interpolation_mixed_holes` | 113.174 us | - | new |
+| `vm/long_register_expression_loop` | 122.701 us | - | new |
+| `vm/owned_builtin_loop` | 348.184 us | - | new |
+| `vm/propagated_constants` | 21.035 us | - | new |
+| `vm/run_with_host_yield` | 3.398 us | 3.408 us | -0.3% |
+| `vm/scalar_reassignment` | 45.966 us | - | new |
+| `vm/short_scalar_expression` | 398.18 ns | - | new |
+| `vm/small_register_expression_loop` | 112.743 us | - | new |
+| `vm/string_reads` | 1.3991 ms | 1.3896 ms | +0.7% |
+| `vm/wide_linear_script` | 23.517 us | 23.013 us | +2.2% |
+| `workload/dialogue` | 915.46 ns | 896.37 ns | +2.1% |
+| `workload/inventory` | 66.760 us | 65.858 us | +1.4% |
+| `workload/mixed` | 14.896 us | 15.049 us | -1.0% |
+
+### Artifact sizes
+
+| Artifact | Bytes | Gzip bytes | Checked-in ceiling |
+| --- | ---: | ---: | ---: |
+| Runtime-only example | 524,976 | 238,922 | 2,000,000 / 800,000 |
+| C runtime static library | 24,715,192 | 7,851,830 | 35,000,000 / 12,000,000 |
+| Runtime-only Wasm | 418,352 | 142,630 | 650,000 / 250,000 |
+| Source-to-run Wasm | 644,708 | 234,767 | 1,000,000 / 400,000 |
+| Full CLI | 1,280,384 | 567,130 | 5,000,000 / 2,000,000 |
+
+## Released snapshots
+
+### Velin `0.4.0` (2026-09-16)
+
+These values come from the corresponding JSONL file and form the comparison baseline for later unreleased reports.
 
 | Item | Value |
 | --- | --- |
 | Velin version | `0.4.0` |
-| Source revision | `86ab5f0` plus local documentation and benchmark changes; runtime code unchanged |
-| Host | Apple MacBook Pro, Apple M3 Pro, 12 cores, 36 GB RAM |
-| OS | macOS Darwin `25.6.0`, `arm64` |
+| Measured source | commit `86ab5f0` |
+| Data file | `benchmarks/reports/86ab5f0-0.4.0.jsonl` |
+| Host | Apple M3 Pro, 12 logical cores, 36.0 GiB RAM |
+| OS | Darwin 25.6.0, arm64 |
 | Rust | `rustc 1.98.0`, LLVM `22.1.8` |
 | Cargo | `cargo 1.98.0` |
-| Build | Criterion `bench` profile with workspace release settings |
+| Sampling | 20 samples, 0.5s warm-up, 1s measurement, plots disabled |
 | Date | 2026-09-16 (Asia/Shanghai) |
 
-The runtime implementation was unchanged while collecting this snapshot. The
-worktree contained the new P0 benchmark harness described in the roadmap.
+#### Benchmark results
 
-## Version policy
+| Benchmark | Estimate |
+| --- | ---: |
+| `artifact/binary_decode` | 1.0433 ms |
+| `artifact/cache_hit` | 1.0633 ms |
+| `artifact/cache_miss` | 1.530 us |
+| `artifact/source_compile` | 255.350 us |
+| `check/expression_heavy_script` | 203.650 us |
+| `check/guard` | 133.52 ns |
+| `check/wide_linear_script` | 38.175 us |
+| `compile/expression_heavy_script` | 641.450 us |
+| `compile/guard` | 778.81 ns |
+| `compile/wide_linear_script` | 517.160 us |
+| `eval/tree_walk` | 96.28 ns |
+| `host/batched_effect_roundtrip` | 41.034 us |
+| `host/c_abi_batch` | 11.106 us |
+| `host/single_effect_roundtrip` | 37.435 us |
+| `host/wasm_batch` | 131.630 us |
+| `machine/create_wide/reuse_validation` | 1.254 us |
+| `machine/create_wide/validate` | 4.630 us |
+| `machine/profile/disabled` | 14.400 us |
+| `machine/profile/enabled` | 14.825 us |
+| `machine/restart` | 22.275 us |
+| `memory/execution_image` | 32.525 us |
+| `parse/guard` | 1.834 us |
+| `parse/host_calls` | 296.220 us |
+| `parse/wide_linear_script` | 339.320 us |
+| `pure/invoke/map_fresh` | 544.04 ns |
+| `pure/invoke/map_reused` | 189.90 ns |
+| `pure/invoke/one_reused` | 82.34 ns |
+| `queue/full_backpressure` | 130.20 ns |
+| `queue/push_pop` | 8.339 us |
+| `snapshot/clone_and_replay` | 403.14 ns |
+| `snapshot/machine_clone` | 674.30 ns |
+| `vm/counter_loop` | 27.328 us |
+| `vm/growing_list` | 115.260 us |
+| `vm/growing_string` | 109.090 us |
+| `vm/interpolation` | 276.840 us |
+| `vm/run_with_host_yield` | 3.408 us |
+| `vm/string_reads` | 1.3896 ms |
+| `vm/wide_linear_script` | 23.013 us |
+| `workload/dialogue` | 896.37 ns |
+| `workload/inventory` | 65.858 us |
+| `workload/mixed` | 15.049 us |
 
-The measurements in this document are the initial baseline for Velin `0.4.0`.
-When a later version is released, append a new version- and date-labeled section
-with its own environment and measurements. Do not overwrite the `0.4.0` values;
-the document is intended to retain a historical sequence of comparable
-snapshots.
+#### Artifact sizes
 
-## Method
+| Artifact | Bytes | Gzip bytes | Checked-in ceiling |
+| --- | ---: | ---: | ---: |
+| Runtime-only example | 524,960 | 239,161 | 2,000,000 / 800,000 |
+| C runtime static library | 24,725,352 | 7,854,007 | 35,000,000 / 12,000,000 |
+| Runtime-only Wasm | 414,621 | 142,084 | 650,000 / 250,000 |
+| Source-to-run Wasm | 642,938 | 233,886 | 1,000,000 / 400,000 |
+| Full CLI | 1,296,800 | 574,136 | 5,000,000 / 2,000,000 |
+<!-- END GENERATED PERFORMANCE REPORTS -->
 
-The pipeline, C ABI, and Wasm benchmarks used the same shortened Criterion
-sampling configuration so the snapshot could be collected in one pass:
+## Recording
 
-```text
-sample-size       20
-warm-up-time      0.5 s
-measurement-time  1 s
-plots             disabled
-```
-
-The table reports the center value from Criterion's `[low median high]` output.
-The `change` lines printed by Criterion are intentionally excluded: the local
-`base` directory does not have a recorded hardware and toolchain provenance,
-so those comparisons are not a trustworthy regression claim.
-
-## Pipeline metrics
-
-These are per benchmark invocation, not per source statement. Fixture sizes are
-included to keep the measurements interpretable.
-
-| Area | Benchmark | Fixture | Median |
-| --- | --- | --- | ---: |
-| Parse | `parse/guard` | one compound guard expression | 1.8343 us |
-| Parse | `parse/wide_linear_script` | 512 variables and assignments | 339.32 us |
-| Parse | `parse/host_calls` | 512 host effects | 296.22 us |
-| Check | `check/guard` | one compound guard expression | 133.52 ns |
-| Check | `check/wide_linear_script` | 512 variables and assignments | 38.175 us |
-| Check | `check/expression_heavy_script` | 512 arithmetic expressions | 203.65 us |
-| Compile | `compile/guard` | one compound guard expression | 778.81 ns |
-| Compile | `compile/wide_linear_script` | 512 variables and assignments | 517.16 us |
-| Compile | `compile/expression_heavy_script` | 512 arithmetic expressions | 641.45 us |
-| VM | `vm/counter_loop` | 2,000 loop iterations | 27.328 us |
-| VM | `vm/growing_list` | 2,000 list appends | 115.26 us |
-| VM | `vm/growing_string` | 2,000 string appends | 109.09 us |
-| VM | `vm/interpolation` | 1,500 interpolations | 276.84 us |
-| VM | `vm/string_reads` | 1,500 reads over a 16 KiB string | 1.3896 ms |
-| VM | `vm/wide_linear_script` | 512 variables and assignments | 23.013 us |
-| Machine | `machine/create_wide/validate` | validate a 512-variable program | 4.630 us |
-| Machine | `machine/create_wide/reuse_validation` | reuse the validation proof | 1.254 us |
-| Machine | `machine/restart` | restart an expression-heavy runner | 22.275 us |
-| Evaluation | `eval/tree_walk` | one compound guard expression | 96.278 ns |
-| Host | `vm/run_with_host_yield` | one bound host yield | 3.408 us |
-| Host | `host/single_effect_roundtrip` | 256 effects, one resume at a time | 37.435 us |
-| Host | `host/batched_effect_roundtrip` | 256 effects, batches of 64 | 41.034 us |
-| Artifact | `artifact/source_compile` | 256-variable source | 255.35 us |
-| Artifact | `artifact/binary_decode` | 164,738-byte artifact | 1.0433 ms |
-| Artifact | `artifact/cache_hit` | cached 164,738-byte artifact | 1.0633 ms |
-| Artifact | `artifact/cache_miss` | missing cache entry lookup | 1.5304 us |
-| Pure module | `pure/invoke/one_reused` | one integer argument, reused invoker | 82.340 ns |
-| Pure module | `pure/invoke/map_reused` | one named integer, reused invoker | 189.90 ns |
-| Pure module | `pure/invoke/map_fresh` | one named integer, fresh map | 544.04 ns |
-| Profile | `machine/profile/enabled` | 256-iteration profile workload | 14.825 us |
-| Profile | `machine/profile/disabled` | same workload without profile | 14.400 us |
-| Memory | `memory/execution_image` | 256-variable program | 32.525 us |
-| Workload | `workload/dialogue` | dialogue with three host effects | 896.37 ns |
-| Workload | `workload/inventory` | 150 list updates and renders | 65.858 us |
-| Workload | `workload/mixed` | 100 iterations with conditional effects | 15.049 us |
-
-## P0 boundary metrics
-
-These benchmarks were added with the P0 runtime-boundary work:
-
-| Benchmark | Fixture | Median |
-| --- | --- | ---: |
-| `snapshot/machine_clone` | finished machine with 256 populated slots | 674.30 ns |
-| `snapshot/clone_and_replay` | pending host yield, clone, resume, and RNG continuation | 403.14 ns |
-| `queue/push_pop` | 128 bounded events with two values each | 8.3387 us |
-| `queue/full_backpressure` | full 64-event queue, reject/pop/push cycle | 130.20 ns |
-
-The two snapshot numbers measure different shapes: the first copies a larger
-finished frame, while the second clones a machine paused at a host boundary.
-They are not interchangeable estimates for every snapshot size.
-
-## C ABI and Wasm boundaries
-
-The boundary-specific benches use the same Criterion settings on the same host:
-
-| Boundary | Benchmark | Fixture | Median |
-| --- | --- | --- | ---: |
-| C ABI | `host/c_abi_batch` | 128 effects, batches of 64 | 11.106 us |
-| Wasm runtime | `host/wasm_batch` | 128 effects, three runtime batches | 131.63 us |
-
-The C benchmark measures C-handle loading already performed during setup and
-measures machine creation plus batch execution inside the iteration. The Wasm
-benchmark measures runtime-machine creation from serialized JSON plus three
-batch calls. Neither number is a browser end-to-end latency measurement.
-
-## Reading the snapshot
-
-- The common VM loop fixtures complete in tens to hundreds of microseconds for
-  1,500-2,000 iterations. Collection and interpolation paths are materially
-  more expensive than scalar counter updates because they allocate or validate
-  larger values.
-- Reusing a validation proof is cheaper than validating a public program on
-  every machine creation. This is the intended embedding path for repeated
-  runs.
-- Artifact decode and cache-hit measurements include bounded decoding and
-  validation. They are not expected to beat a warm in-process runner, and the
-  validation cost is part of the untrusted-input boundary.
-- The queue numbers describe the bounded host queue itself. They do not include
-  application dispatch, serialization, or consumer work.
-- Cross-engine speed claims are deliberately absent. Future comparisons must
-  pin versions, features, hardware, and equivalent semantics first.
-
-## Reproduction
-
-Run correctness checks before collecting a baseline:
+Run the complete benchmark suite and write `<source>-last.jsonl`:
 
 ```sh
-cargo test --workspace
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+node scripts/record-performance.mjs
 ```
 
-Collect the pipeline, C ABI, and Wasm numbers with the same settings:
+Freeze a release snapshot as `<source>-<version>.jsonl`:
 
 ```sh
-cargo bench -p velin --bench pipeline -- --noplot --sample-size 20 --warm-up-time 0.5 --measurement-time 1 --format terse
-cargo bench -p velin-capi --bench c_api -- --noplot --sample-size 20 --warm-up-time 0.5 --measurement-time 1 --format terse
-cargo bench -p velin-wasm --features runtime --bench runtime -- --noplot --sample-size 20 --warm-up-time 0.5 --measurement-time 1 --format terse
+node scripts/record-performance.mjs --release 0.4.1
 ```
 
-For a release-quality comparison, use the default Criterion sample size and
-measurement time, save a named baseline, and repeat on the same machine and
-toolchain. A baseline is useful only when its environment and source revision
-are recorded next to it.
+Regenerate documents without measuring:
 
-## CI gate
+```sh
+node scripts/record-performance.mjs --generate-only
+```
 
-`benchmarks/performance-baseline.json` stores representative 0.4.0 medians and
-release-artifact size ceilings. Run the same latency, C ABI, Wasm, and size
-gate used by CI with:
+Enable the local pre-commit hook once per clone:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+The hook runs the full measurement and stages the JSONL report and generated documents. It identifies staged content when available, so unrelated unstaged work can remain in the working tree. Configure sample count and timing with `VELIN_PERF_SAMPLE_SIZE`, `VELIN_PERF_WARMUP_TIME`, and `VELIN_PERF_MEASUREMENT_TIME`.
+
+## Gate
 
 ```sh
 bash scripts/check-performance.sh
 ```
-
-The gate uses a short Criterion run by default (10 samples, 0.1 seconds of
-warm-up, and 0.2 seconds of measurement) and allows a 5x cross-host latency
-factor. It is intended to catch severe regressions, not replace a
-release-quality measurement. Set `VELIN_PERF_SAMPLE_SIZE`,
-`VELIN_PERF_WARMUP_TIME`, and `VELIN_PERF_MEASUREMENT_TIME` to collect a longer
-run, then append a dated historical snapshot with its environment and source
-revision.

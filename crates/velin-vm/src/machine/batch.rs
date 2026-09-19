@@ -6,10 +6,10 @@ impl Machine {
     /// buffer and returns the number of collected effects.
     ///
     /// The returned effects remain borrowed from the machine until the next
-    /// execution call. Use [`Machine::drain_effect_batch`] to move them into a
-    /// host-owned queue while retaining the buffer allocation for later
-    /// batches. If execution fails after collecting effects, the effects are
-    /// returned first and the error is reported by the next execution call.
+    /// execution call. Use [`Machine::drain_effect_batch_iter`] to consume them
+    /// without cloning while retaining the buffer allocation for later batches.
+    /// If execution fails after collecting effects, the effects are returned
+    /// first and the error is reported by the next execution call.
     ///
     /// # Errors
     /// Returns an error when `limit` is zero, the machine is waiting for a
@@ -70,6 +70,8 @@ impl Machine {
                 &mut self.register_values,
                 &mut self.register_metrics,
                 &mut self.register_touched,
+                &mut self.builtin_arguments,
+                &mut self.builtin_argument_metrics,
                 host,
                 &self.policy,
             ) {
@@ -98,6 +100,12 @@ impl Machine {
     #[must_use]
     pub fn effect_batch(&self) -> &[HostEffect] {
         &self.effect_buffer
+    }
+
+    /// Drains the current batch without cloning any effects while retaining
+    /// the machine buffer's allocation for later batches.
+    pub fn drain_effect_batch_iter(&mut self) -> std::vec::Drain<'_, HostEffect> {
+        self.effect_buffer.drain(..)
     }
 
     /// Moves the current batch into `destination` and retains its allocation

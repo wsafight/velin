@@ -177,6 +177,8 @@ criterion_group!(
     pipeline_p3::bench_scalar_reassignment,
     pipeline_p3::bench_boolean_slot_loop,
     pipeline_p3::bench_builtin_loop,
+    pipeline_p3::bench_owned_builtin_loop,
+    pipeline_p3::bench_owned_builtin_arguments,
     pipeline_p3::bench_growing_list,
     pipeline_p3::bench_growing_string,
     pipeline_p2::bench_interpolation,

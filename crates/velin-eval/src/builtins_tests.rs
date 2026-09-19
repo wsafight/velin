@@ -284,6 +284,20 @@ fn metric_aware_collection_calls_match_value_metrics() {
 }
 
 #[test]
+fn reusable_metric_aware_calls_retain_argument_capacity() {
+    let scalar = scalar_metrics();
+    let mut arguments = vec![Value::List(Arc::new(Vec::new())), Value::Integer(1)];
+    let capacity = arguments.capacity();
+    let (result, metrics) =
+        invoke_measured_with_metrics_reusable(Builtin::Push, &mut arguments, &[scalar, scalar], 1)
+            .unwrap();
+
+    assert!(arguments.is_empty());
+    assert!(arguments.capacity() >= capacity);
+    assert_eq!(metrics, result.data_metrics().unwrap());
+}
+
+#[test]
 fn metric_aware_calls_cover_scalars_records_and_failures() {
     let scalar = scalar_metrics();
     let arguments = vec![Value::String("xy".into()), Value::Integer(1)];

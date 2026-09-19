@@ -79,6 +79,20 @@ fn artifact_rejects_trailing_bytes_and_unknown_hosts() {
 }
 
 #[test]
+fn artifact_rejects_duplicate_object_keys() {
+    let script = compile("test.velin", "perform say(1)\n").unwrap();
+    let mut bytes = encode_artifact("test.velin", &script).unwrap();
+    let position = bytes
+        .windows(b"type_sites".len())
+        .position(|window| window == b"type_sites")
+        .expect("artifact root contains type_sites");
+    bytes[position..position + b"host_sites".len()].copy_from_slice(b"host_sites");
+
+    let error = decode_artifact(&bytes).unwrap_err();
+    assert!(error.to_string().contains("duplicate"), "{error}");
+}
+
+#[test]
 fn cache_key_changes_with_semantic_inputs_and_cache_round_trips() {
     let script = compile("test.velin", "set x = 1\n").unwrap();
     let first = artifact_cache_key(b"set x = 1\n", "compiler-a", "speed", b"schema-a");

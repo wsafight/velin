@@ -98,7 +98,9 @@ calls. The existing `velin_machine_new` keeps default-policy behavior.
 Wasm hosts use `run_with_policy`, `PlaygroundSession.new_with_policy`, or the
 runtime-only `RuntimeMachine.new_with_policy` with the same JSON field names.
 Default constructors remain unchanged, and JavaScript can control cancellation
-with `cancel()` and `clear_cancellation()`.
+with `cancel()` and `clear_cancellation()`. When the same bytecode creates
+multiple machines, keep a `RuntimeProgram` handle so JSON parsing and bytecode
+validation happen once.
 
 ## Create a machine
 

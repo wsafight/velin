@@ -63,6 +63,19 @@ console.log(JSON.parse(session.restore(saved)));
 
 需要限制调试会话时，使用 `PlaygroundSession.new_with_policy(source, policyJson)`。
 
+当宿主需要从同一份字节码创建多个机器时，可用 `RuntimeProgram` 只解析和校验一次，再创建彼此独立的轻量机器：
+
+```js
+import init, { RuntimeProgram } from "./pkg/velin_wasm.js";
+
+await init();
+const program = new RuntimeProgram(programJson);
+const first = program.create_machine();
+const second = program.create_machine_with_policy(policyJson);
+```
+
+原有的 `RuntimeMachine` 构造函数继续用于一次性场景。`RuntimeProgram` 本身不可变；返回的每个机器分别拥有独立的执行状态、预算、取消状态和随机数状态。
+
 runtime-only 的 `RuntimeMachine::run_batch(limit)` 可一次返回连续的无返回值 Host 事件：
 
 ```json

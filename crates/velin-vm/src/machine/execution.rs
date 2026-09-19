@@ -260,6 +260,8 @@ impl Machine {
                     &mut self.register_values,
                     &mut self.register_metrics,
                     &mut self.register_touched,
+                    &mut self.builtin_arguments,
+                    &mut self.builtin_argument_metrics,
                     value,
                 )?;
                 let line = self.program.chunks[value as usize].line as usize;
@@ -340,6 +342,8 @@ impl Machine {
                     &mut self.register_values,
                     &mut self.register_metrics,
                     &mut self.register_touched,
+                    &mut self.builtin_arguments,
+                    &mut self.builtin_argument_metrics,
                     host,
                     &self.policy,
                 )?;
@@ -400,6 +404,8 @@ impl Machine {
             &mut self.register_values,
             &mut self.register_metrics,
             &mut self.register_touched,
+            &mut self.builtin_arguments,
+            &mut self.builtin_argument_metrics,
             condition,
         )?
         .0;

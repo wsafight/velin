@@ -76,3 +76,19 @@ fn runtime_binding_accepts_compounds_and_caps_resume_json() {
     let bounded_result = bounded.run();
     assert!(bounded_result.contains("fuel"), "{bounded_result}");
 }
+
+#[cfg(feature = "runtime")]
+#[test]
+fn runtime_program_reuses_validation_across_machines() {
+    let script = velin::compile("runtime.velin", "perform emit(1)\n").unwrap();
+    let program_json = serde_json::to_string(&*script.program).unwrap();
+    let program = super::RuntimeProgram::new(&program_json).unwrap();
+
+    let mut first = program.create_machine();
+    let mut second = program
+        .create_machine_with_policy(r#"{"max_host_effects":4}"#)
+        .unwrap();
+
+    assert!(first.run_batch(1).contains(r#""host_id":0"#));
+    assert!(second.run_batch(1).contains(r#""host_id":0"#));
+}

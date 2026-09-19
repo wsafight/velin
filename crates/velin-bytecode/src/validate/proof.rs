@@ -47,3 +47,27 @@ impl ValidatedProgram {
         Arc::ptr_eq(&self.program, program)
     }
 }
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for ValidatedProgram {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serde::Serialize::serialize(&*self.program, serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ValidatedProgram {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let program = <Program as serde::Deserialize>::deserialize(deserializer)?;
+        Ok(Self {
+            program: Arc::new(program),
+            metadata: Arc::new(OnceLock::new()),
+        })
+    }
+}

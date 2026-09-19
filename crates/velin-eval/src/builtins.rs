@@ -54,18 +54,35 @@ pub fn invoke_measured_with_metrics(
     argument_metrics: &[DataMetrics],
     line: usize,
 ) -> Result<(Value, DataMetrics), EvalError> {
+    invoke_measured_with_metrics_reusable(function, &mut arguments, argument_metrics, line)
+}
+
+/// Invokes an owned built-in using a caller-owned argument buffer.
+///
+/// Collection mutations consume their arguments and retain the buffer's
+/// allocation for reuse. `list(...)` transfers the allocation into the
+/// returned list because the argument vector is the result itself.
+///
+/// # Errors
+/// Returns the same failures as [`invoke_measured_with_metrics`].
+pub fn invoke_measured_with_metrics_reusable(
+    function: Builtin,
+    arguments: &mut Vec<Value>,
+    argument_metrics: &[DataMetrics],
+    line: usize,
+) -> Result<(Value, DataMetrics), EvalError> {
     if arguments.len() != argument_metrics.len() {
         return Err(execution(line, "invalid built-in argument metrics"));
     }
     validate_argument_count(function, arguments.len(), line)?;
     let known_metrics = match function {
         Builtin::List => Some(collection_metrics(argument_metrics, line)),
-        Builtin::Record => record_metrics(&arguments, argument_metrics, line),
+        Builtin::Record => record_metrics(arguments, argument_metrics, line),
         Builtin::Push => push_metrics(argument_metrics, line),
         Builtin::Len | Builtin::Contains => Some(Ok(scalar_metrics())),
         Builtin::Get | Builtin::Put | Builtin::Remove | Builtin::Random | Builtin::Chance => None,
     };
-    let result = invoke_owned(function, &mut arguments, line)?;
+    let result = invoke_owned(function, arguments, line)?;
     let result_metrics = if let Some(known) = known_metrics.transpose()? {
         known
     } else {

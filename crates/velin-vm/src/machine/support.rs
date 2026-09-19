@@ -10,6 +10,7 @@ pub(super) fn cache_metrics(frame: &mut FrameState, slot: usize, metrics: DataMe
         .expect("validated value depth fits in the compact frame cache");
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn eval_chunk_for(
     program: &Program,
     metadata: &ExecutionMetadata,
@@ -17,6 +18,8 @@ pub(super) fn eval_chunk_for(
     register_values: &mut Vec<Option<Value>>,
     register_metrics: &mut Vec<Option<DataMetrics>>,
     register_touched: &mut Vec<usize>,
+    builtin_arguments: &mut Vec<Value>,
+    builtin_argument_metrics: &mut Vec<DataMetrics>,
     chunk_id: u32,
 ) -> Result<(Value, DataMetrics), EvalError> {
     let (execution, _) = metadata
@@ -51,6 +54,8 @@ pub(super) fn eval_chunk_for(
         register_values,
         register_metrics,
         register_touched,
+        builtin_arguments,
+        builtin_argument_metrics,
         |slot| slots.name(slot).unwrap_or("?").to_owned(),
     )
 }
@@ -63,6 +68,8 @@ pub(super) fn eval_host_args(
     register_values: &mut Vec<Option<Value>>,
     register_metrics: &mut Vec<Option<DataMetrics>>,
     register_touched: &mut Vec<usize>,
+    builtin_arguments: &mut Vec<Value>,
+    builtin_argument_metrics: &mut Vec<DataMetrics>,
     host: &HostOp,
     policy: &ExecutionPolicy,
 ) -> Result<Vec<Value>, EvalError> {
@@ -77,6 +84,8 @@ pub(super) fn eval_host_args(
             register_values,
             register_metrics,
             register_touched,
+            builtin_arguments,
+            builtin_argument_metrics,
             chunk,
         )?;
         if metrics.footprint.values > policy.max_value_values

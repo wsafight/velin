@@ -209,6 +209,47 @@ impl PlaygroundSession {
     }
 }
 
+/// A reusable validated runtime program for hosts that create multiple machines.
+#[cfg(feature = "runtime")]
+#[wasm_bindgen]
+pub struct RuntimeProgram {
+    program: velin_bytecode::ValidatedProgram,
+}
+
+#[cfg(feature = "runtime")]
+#[wasm_bindgen]
+impl RuntimeProgram {
+    /// Parses and validates a JSON-encoded [`velin_bytecode::Program`] once.
+    ///
+    /// # Errors
+    /// Returns a JavaScript error when the JSON is malformed or the program
+    /// fails bytecode validation.
+    #[wasm_bindgen(constructor)]
+    pub fn new(program_json: &str) -> Result<RuntimeProgram, wasm_bindgen::JsValue> {
+        let program = parse_runtime_program(program_json)?;
+        Ok(Self { program })
+    }
+
+    /// Creates a fresh machine without parsing or validating the program again.
+    #[must_use]
+    pub fn create_machine(&self) -> RuntimeMachine {
+        RuntimeMachine::from_validated(&self.program, velin_vm::ExecutionPolicy::default())
+    }
+
+    /// Creates a fresh machine with a JSON-encoded numeric execution policy.
+    ///
+    /// # Errors
+    /// Returns a JavaScript error when the policy JSON is invalid.
+    pub fn create_machine_with_policy(
+        &self,
+        policy_json: &str,
+    ) -> Result<RuntimeMachine, wasm_bindgen::JsValue> {
+        let policy =
+            policy::parse(policy_json).map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
+        Ok(RuntimeMachine::from_validated(&self.program, policy))
+    }
+}
+
 /// A persistent runtime-only machine for hosts that already have bytecode.
 #[cfg(feature = "runtime")]
 #[wasm_bindgen]
@@ -230,7 +271,11 @@ impl RuntimeMachine {
     /// fails bytecode validation.
     #[wasm_bindgen(constructor)]
     pub fn new(program_json: &str) -> Result<RuntimeMachine, wasm_bindgen::JsValue> {
-        Self::new_with_policy(program_json, "{}")
+        let program = parse_runtime_program(program_json)?;
+        Ok(Self::from_validated(
+            &program,
+            velin_vm::ExecutionPolicy::default(),
+        ))
     }
 
     /// Loads a program with a JSON-encoded numeric execution policy.
@@ -241,13 +286,10 @@ impl RuntimeMachine {
         program_json: &str,
         policy_json: &str,
     ) -> Result<RuntimeMachine, wasm_bindgen::JsValue> {
-        let program: velin_bytecode::Program =
-            serde_json::from_str(program_json).map_err(|error| runtime::json_error(&error))?;
+        let program = parse_runtime_program(program_json)?;
         let policy =
             policy::parse(policy_json).map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
-        let machine = velin_vm::Machine::new_with_policy(program, policy)
-            .map_err(|error| runtime::runtime_error(&error))?;
-        Ok(Self { machine })
+        Ok(Self::from_validated(&program, policy))
     }
 
     /// Requests cooperative cancellation at the next VM checkpoint.
@@ -286,6 +328,22 @@ impl RuntimeMachine {
         };
         runtime::yield_to_json(self.machine.resume(value))
     }
+
+    fn from_validated(
+        program: &velin_bytecode::ValidatedProgram,
+        policy: velin_vm::ExecutionPolicy,
+    ) -> Self {
+        Self {
+            machine: velin_vm::Machine::from_validated_with_policy(program, policy),
+        }
+    }
+}
+
+#[cfg(feature = "runtime")]
+fn parse_runtime_program(
+    program_json: &str,
+) -> Result<velin_bytecode::ValidatedProgram, wasm_bindgen::JsValue> {
+    serde_json::from_str(program_json).map_err(|error| runtime::json_error(&error))
 }
 
 /// Serializes a result to JSON, falling back to a minimal error object so the

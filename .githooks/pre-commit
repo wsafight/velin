@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+node scripts/record-performance.mjs
+git add -- \
+    benchmarks/reports \
+    docs/PERFORMANCE-BASELINE.md \
+    docs/PERFORMANCE-BASELINE.zh-CN.md \
+    site/public/source/docs/PERFORMANCE-BASELINE.md \
+    site/public/source/docs/PERFORMANCE-BASELINE.zh-CN.md

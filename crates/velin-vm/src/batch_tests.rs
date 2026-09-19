@@ -72,6 +72,20 @@ fn reusable_batch_buffer_can_be_drained_without_losing_capacity() {
 }
 
 #[test]
+fn batch_drain_iterator_moves_effects_and_empties_the_buffer() {
+    let mut builder = ProgramBuilder::new();
+    builder.push(Op::host(1, Vec::new(), None, 1));
+    builder.push(Op::host(2, Vec::new(), None, 2));
+    builder.push(Op::host(3, Vec::new(), None, 3));
+    let mut machine = Machine::new(builder.build()).unwrap();
+    assert_eq!(machine.run_effect_batch_reusable(2).unwrap(), 2);
+    let effects: Vec<_> = machine.drain_effect_batch_iter().collect();
+    assert_eq!(effects.len(), 2);
+    assert!(machine.effect_batch().is_empty());
+    assert_eq!(machine.run_effect_batch_reusable(1).unwrap(), 1);
+}
+
+#[test]
 fn batch_delivers_collected_effects_before_reporting_an_error() {
     let mut builder = ProgramBuilder::new();
     let error_argument = builder.expr(

@@ -1,0 +1,47 @@
+{"type":"run","schema_version":1,"kind":"release","version":"0.4.0","source_id":"86ab5f0","source_kind":"commit","base_revision":"86ab5f0","recorded_at":"2026-09-16T00:00:00+08:00","date":"2026-09-16","released_at":"2026-09-16","host":"Apple M3 Pro, 12 logical cores, 36.0 GiB RAM","os":"Darwin 25.6.0, arm64","rust":"1.98.0","llvm":"22.1.8","cargo":"1.98.0","sample_size":20,"warmup_seconds":0.5,"measurement_seconds":1}
+{"type":"benchmark","name":"artifact/binary_decode","estimate_ns":1043300}
+{"type":"benchmark","name":"artifact/cache_hit","estimate_ns":1063300}
+{"type":"benchmark","name":"artifact/cache_miss","estimate_ns":1530.4}
+{"type":"benchmark","name":"artifact/source_compile","estimate_ns":255350}
+{"type":"benchmark","name":"check/expression_heavy_script","estimate_ns":203650}
+{"type":"benchmark","name":"check/guard","estimate_ns":133.52}
+{"type":"benchmark","name":"check/wide_linear_script","estimate_ns":38175}
+{"type":"benchmark","name":"compile/expression_heavy_script","estimate_ns":641450}
+{"type":"benchmark","name":"compile/guard","estimate_ns":778.81}
+{"type":"benchmark","name":"compile/wide_linear_script","estimate_ns":517160}
+{"type":"benchmark","name":"eval/tree_walk","estimate_ns":96.278}
+{"type":"benchmark","name":"host/batched_effect_roundtrip","estimate_ns":41034}
+{"type":"benchmark","name":"host/c_abi_batch","estimate_ns":11106}
+{"type":"benchmark","name":"host/single_effect_roundtrip","estimate_ns":37435}
+{"type":"benchmark","name":"host/wasm_batch","estimate_ns":131630}
+{"type":"benchmark","name":"machine/create_wide/reuse_validation","estimate_ns":1254}
+{"type":"benchmark","name":"machine/create_wide/validate","estimate_ns":4630}
+{"type":"benchmark","name":"machine/profile/disabled","estimate_ns":14400}
+{"type":"benchmark","name":"machine/profile/enabled","estimate_ns":14825}
+{"type":"benchmark","name":"machine/restart","estimate_ns":22275}
+{"type":"benchmark","name":"memory/execution_image","estimate_ns":32525}
+{"type":"benchmark","name":"parse/guard","estimate_ns":1834.3}
+{"type":"benchmark","name":"parse/host_calls","estimate_ns":296220}
+{"type":"benchmark","name":"parse/wide_linear_script","estimate_ns":339320}
+{"type":"benchmark","name":"pure/invoke/map_fresh","estimate_ns":544.04}
+{"type":"benchmark","name":"pure/invoke/map_reused","estimate_ns":189.9}
+{"type":"benchmark","name":"pure/invoke/one_reused","estimate_ns":82.34}
+{"type":"benchmark","name":"queue/full_backpressure","estimate_ns":130.2}
+{"type":"benchmark","name":"queue/push_pop","estimate_ns":8338.7}
+{"type":"benchmark","name":"snapshot/clone_and_replay","estimate_ns":403.14}
+{"type":"benchmark","name":"snapshot/machine_clone","estimate_ns":674.3}
+{"type":"benchmark","name":"vm/counter_loop","estimate_ns":27328}
+{"type":"benchmark","name":"vm/growing_list","estimate_ns":115260}
+{"type":"benchmark","name":"vm/growing_string","estimate_ns":109090}
+{"type":"benchmark","name":"vm/interpolation","estimate_ns":276840}
+{"type":"benchmark","name":"vm/run_with_host_yield","estimate_ns":3408}
+{"type":"benchmark","name":"vm/string_reads","estimate_ns":1389600}
+{"type":"benchmark","name":"vm/wide_linear_script","estimate_ns":23013}
+{"type":"benchmark","name":"workload/dialogue","estimate_ns":896.37}
+{"type":"benchmark","name":"workload/inventory","estimate_ns":65858}
+{"type":"benchmark","name":"workload/mixed","estimate_ns":15049}
+{"type":"artifact","name":"runtime-only example","bytes":524960,"gzip_bytes":239161,"max_bytes":2000000,"max_gzip_bytes":800000}
+{"type":"artifact","name":"C runtime staticlib","bytes":24725352,"gzip_bytes":7854007,"max_bytes":35000000,"max_gzip_bytes":12000000}
+{"type":"artifact","name":"runtime-only wasm","bytes":414621,"gzip_bytes":142084,"max_bytes":650000,"max_gzip_bytes":250000}
+{"type":"artifact","name":"source-to-run wasm","bytes":642938,"gzip_bytes":233886,"max_bytes":1000000,"max_gzip_bytes":400000}
+{"type":"artifact","name":"full CLI","bytes":1296800,"gzip_bytes":574136,"max_bytes":5000000,"max_gzip_bytes":2000000}

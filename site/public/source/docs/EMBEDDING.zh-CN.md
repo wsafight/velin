@@ -90,7 +90,7 @@ assert_eq!(result, Value::Integer(42));
 
 C 宿主可以调用 `velin_execution_policy_default()` 获取默认值，再把修改后的 `VelinExecutionPolicy` 传给追加式 `velin_machine_new_with_policy`。它覆盖 fuel、调用深度、值/机器/宿主载荷/队列预算和宿主效果数量；`velin_machine_cancel` 与 `velin_machine_clear_cancellation` 用于跨 C 调用协作式取消。旧的 `velin_machine_new` 继续使用默认策略。
 
-Wasm 宿主使用 `run_with_policy`、`PlaygroundSession.new_with_policy` 或 runtime-only 的 `RuntimeMachine.new_with_policy` 传入同一组 JSON 字段。默认构造函数保持不变，JavaScript 侧可以用 `cancel()` 和 `clear_cancellation()` 控制执行。
+Wasm 宿主使用 `run_with_policy`、`PlaygroundSession.new_with_policy` 或 runtime-only 的 `RuntimeMachine.new_with_policy` 传入同一组 JSON 字段。默认构造函数保持不变，JavaScript 侧可以用 `cancel()` 和 `clear_cancellation()` 控制执行。同一份字节码需要创建多个机器时，保留 `RuntimeProgram` 句柄即可只执行一次 JSON 解析和字节码校验。
 
 ## 创建机器
 

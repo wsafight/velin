@@ -67,10 +67,6 @@ pub fn json_error(error: &serde_json::Error) -> wasm_bindgen::JsValue {
     wasm_bindgen::JsValue::from_str(&format!("invalid program JSON: {error}"))
 }
 
-pub fn runtime_error(error: &velin_bytecode::ProgramValidationError) -> wasm_bindgen::JsValue {
-    wasm_bindgen::JsValue::from_str(&format!("invalid program: {error}"))
-}
-
 #[cfg(test)]
 #[path = "runtime_tests.rs"]
 mod tests;

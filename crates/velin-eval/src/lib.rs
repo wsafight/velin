@@ -10,7 +10,8 @@ mod builtins;
 mod eval;
 
 pub use builtins::{
-    invoke, invoke_measured, invoke_measured_with_metrics, invoke_random, invoke_readonly_measured,
+    invoke, invoke_measured, invoke_measured_with_metrics, invoke_measured_with_metrics_reusable,
+    invoke_random, invoke_readonly_measured,
 };
 pub use eval::{
     EvalError, EvalErrorKind, Variables, apply_binary, apply_boolean_not, apply_integer_binary,

@@ -4,14 +4,13 @@ use crate::host::{CompiledScript, HostCheckSite};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use velin_bytecode::{InitialFrame, Op, Pc, Program, ProgramValidationError, ValidatedProgram};
 use velin_check::{TypeCheckKind, TypeCheckSite};
 use velin_syntax::{DataFootprint, Value};
 
 mod wire;
 use wire::validate_check_sites;
-use wire::{HostSiteWire, TypeCheckKindWire, TypeSiteWire, decode_wire_value, encode_wire_value};
+use wire::{HostSiteWire, TypeCheckKindWire, TypeSiteWire, decode_wire, encode_wire_value};
 
 /// Fixed marker at the start of every `.velinc` file.
 pub const ARTIFACT_MAGIC: &[u8; 8] = b"VELINBC\0";
@@ -74,10 +73,16 @@ impl std::fmt::Display for ArtifactError {
 
 impl std::error::Error for ArtifactError {}
 
+impl serde::de::Error for ArtifactError {
+    fn custom<T: std::fmt::Display>(message: T) -> Self {
+        Self::new(message.to_string())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ArtifactPayload {
     source_name: String,
-    program: Program,
+    program: ValidatedProgram,
     hosts: Vec<String>,
     labels: BTreeMap<String, Pc>,
     defaults: BTreeMap<String, Value>,
@@ -114,7 +119,7 @@ pub fn encode_artifact(
     }
     let payload = ArtifactPayload {
         source_name: source_name.to_owned(),
-        program: (*script.program).clone(),
+        program: script.validated_program.clone(),
         hosts: script.hosts.clone(),
         labels: script.labels.clone(),
         defaults: script.defaults.clone(),
@@ -213,29 +218,25 @@ pub fn decode_artifact(bytes: &[u8]) -> Result<BytecodeArtifact, ArtifactError> 
             "artifact payload length does not match file size",
         ));
     }
-    let mut cursor = 0;
-    let value = decode_wire_value(&bytes[HEADER_BYTES..], &mut cursor, 0)?;
+    let (payload, cursor): (ArtifactPayload, usize) = decode_wire(&bytes[HEADER_BYTES..])?;
     if cursor != payload_len {
         return Err(ArtifactError::new("artifact payload has trailing bytes"));
     }
-    let payload: ArtifactPayload = serde_json::from_value(value)
-        .map_err(|error| ArtifactError::new(format!("cannot decode artifact payload: {error}")))?;
     validate_source_name(&payload.source_name)?;
     validate_metadata(
-        &payload.program,
+        payload.program.program(),
         &payload.hosts,
         &payload.labels,
         &payload.defaults,
     )?;
     validate_check_sites(
-        &payload.program,
+        payload.program.program(),
         &payload.hosts,
         &payload.type_sites,
         &payload.host_sites,
     )?;
-    let program = Arc::new(payload.program);
-    let validated_program = ValidatedProgram::new(program.clone())
-        .map_err(|error| ArtifactError::new(format!("invalid artifact program: {error}")))?;
+    let validated_program = payload.program;
+    let program = validated_program.shared();
     let initial_frame = InitialFrame::from_named_values(
         &program.slots,
         payload
