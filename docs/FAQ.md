@@ -73,7 +73,7 @@ Yes. `velin-wasm` exposes `check` and `run` to JavaScript. The site Playground l
 
 ## Is the language stable?
 
-Not yet. Version `0.5.0` is the current release, but syntax, the serialized program format, and the Rust API may still change during the `0.x` line. The architectural rules in [Architecture](ARCHITECTURE.md) describe how the project intends to evolve: no VM I/O, deterministic values, conservative checking, and host effects for every external action.
+Not yet. Version `0.5.1` is the current release, but syntax, the serialized program format, and the Rust API may still change during the `0.x` line. The architectural rules in [Architecture](ARCHITECTURE.md) describe how the project intends to evolve: no VM I/O, deterministic values, conservative checking, and host effects for every external action.
 
 ## Where should I start?
 

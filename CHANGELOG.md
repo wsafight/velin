@@ -4,6 +4,12 @@ All notable changes to Velin are recorded here. The project follows semantic
 versioning once an API is declared stable; the current `0.x` line may still
 change source and Rust APIs between minor releases.
 
+## 0.5.1 - 2026-09-19
+
+### Fixed
+
+- Restored the low-overhead default C ABI machine-construction path, reused validated invoker restart state, and reduced default VM fuel bookkeeping overhead without changing execution limits.
+
 ## 0.5.0 - 2026-09-19
 
 ### Added

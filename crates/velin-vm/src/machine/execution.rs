@@ -47,6 +47,31 @@ impl Machine {
             return Err("machine state text exceeds 16 MiB");
         }
 
+        self.restart_with_total(initial, seed, total);
+        Ok(())
+    }
+
+    /// Restarts from an initial frame that was validated when its owner was
+    /// constructed. Callers must ensure the frame layout and policy budgets
+    /// still match this machine.
+    pub(super) fn restart_from_known_initial(&mut self, initial: &InitialFrame, seed: i64) {
+        let mut total = initial.total();
+        if let Some(slot) = self.program.slots.rng_state() {
+            let index = slot as usize;
+            total.values = total
+                .values
+                .checked_sub(initial.footprints()[index].values)
+                .and_then(|values| values.checked_add(1))
+                .expect("validated initial frame value metrics");
+            total.text_bytes = total
+                .text_bytes
+                .checked_sub(initial.footprints()[index].text_bytes)
+                .expect("validated initial frame text metrics");
+        }
+        self.restart_with_total(initial, seed, total);
+    }
+
+    fn restart_with_total(&mut self, initial: &InitialFrame, seed: i64, total: DataFootprint) {
         self.frame.values.clone_from_slice(initial.values());
         self.frame.footprints.clone_from_slice(initial.footprints());
         self.frame.depths.clone_from_slice(initial.depths());
@@ -76,7 +101,6 @@ impl Machine {
         self.host_effects = 0;
         self.call_depth = 1;
         self.cancelled = false;
-        Ok(())
     }
 
     pub(super) fn require_assigned(&self, slot: u32, line: usize) -> Result<(), EvalError> {
@@ -160,6 +184,44 @@ impl Machine {
         if self.finished {
             return Ok(Yield::Finished);
         }
+        if self.policy.max_immediate_fuel <= self.policy.max_fuel.saturating_sub(self.fuel_used) {
+            return self.run_without_progress_callback_with_reserved_fuel();
+        }
+        self.run_without_progress_callback_with_shared_budget()
+    }
+
+    fn run_without_progress_callback_with_reserved_fuel(&mut self) -> Result<Yield, EvalError> {
+        let mut immediate_fuel = 0;
+        let result = loop {
+            let fused_jump_target = self.update_jump_target();
+            let amount = if fused_jump_target.is_some() { 2 } else { 1 };
+            if amount > self.policy.max_immediate_fuel - immediate_fuel {
+                break Err(EvalError::fuel_exhausted(
+                    self.current_line(),
+                    self.policy.max_immediate_fuel,
+                    true,
+                ));
+            }
+            immediate_fuel += amount;
+            if self.pc >= self.program.ops.len() {
+                self.finished = true;
+                break Ok(Yield::Finished);
+            }
+            match self.step_with_known_jump_target(fused_jump_target) {
+                Ok(Some(effect)) => break Ok(effect),
+                Ok(None) if self.finished => break Ok(Yield::Finished),
+                Ok(None) => {}
+                Err(error) => break Err(error),
+            }
+        };
+        self.fuel_used = self
+            .fuel_used
+            .checked_add(immediate_fuel)
+            .expect("reserved fuel budget cannot overflow");
+        result
+    }
+
+    fn run_without_progress_callback_with_shared_budget(&mut self) -> Result<Yield, EvalError> {
         let mut immediate_remaining = self.policy.max_immediate_fuel;
         let mut total_fuel = self.fuel_used;
         let mut total_remaining = self.policy.max_fuel.saturating_sub(total_fuel);

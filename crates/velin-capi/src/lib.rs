@@ -190,10 +190,23 @@ pub unsafe extern "C" fn velin_machine_new(
     error_len: *mut usize,
     error_capacity: *mut usize,
 ) -> *mut VelinMachine {
-    let policy = velin_execution_policy_default();
-    unsafe {
-        velin_machine_new_with_policy(program, seed, &policy, error_ptr, error_len, error_capacity)
-    }
+    clear_error(error_ptr, error_len, error_capacity);
+    let Some(program) = (unsafe { program.as_ref() }) else {
+        write_error(
+            "program handle is null",
+            error_ptr,
+            error_len,
+            error_capacity,
+        );
+        return std::ptr::null_mut();
+    };
+    let machine =
+        Machine::from_validated_with_seed_and_frame(&program.program, seed, &program.initial)
+            .expect("the empty initial frame matches the validated program");
+    Box::into_raw(Box::new(VelinMachine {
+        machine,
+        initial: program.initial.clone(),
+    }))
 }
 
 /// Creates a machine with an explicit numeric execution policy.

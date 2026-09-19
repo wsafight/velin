@@ -68,9 +68,12 @@ impl MachineInvoker {
     /// Restarts the contained machine from its prevalidated initial frame.
     ///
     /// # Errors
-    /// Returns an error if the initial frame no longer matches the program.
+    /// This retained result type is compatible with [`Machine::restart`]; the
+    /// invoker's private initial frame was validated when it was constructed.
     pub fn restart(&mut self) -> Result<(), &'static str> {
-        self.machine.restart(&self.initial, self.seed)
+        self.machine
+            .restart_from_known_initial(&self.initial, self.seed);
+        Ok(())
     }
 
     /// Returns the reusable machine for binding and execution.
