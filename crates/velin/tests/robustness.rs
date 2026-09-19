@@ -3,8 +3,9 @@
 use proptest::prelude::*;
 use std::collections::BTreeMap;
 use velin::{
-    BinaryOp, Builtin, Expr, Machine, Program, ProgramBuilder, UnaryOp, Value, Yield, compile,
-    evaluate_with_rng, parse_expression,
+    BinaryOp, Builtin, Expr, Machine, MarshallingLimits, Program, ProgramBuilder, ResolvedModule,
+    UnaryOp, Value, Yield, compile, compile_modules, decode_artifact, evaluate_with_rng,
+    format_source, json_to_value, parse_expression,
 };
 
 fn value() -> impl Strategy<Value = Value> {
@@ -113,6 +114,47 @@ proptest! {
         if let Ok(program) = serde_json::from_str::<Program>(&source) {
             prop_assert!(program.validate().is_ok());
             prop_assert!(Machine::new(program).is_ok());
+        }
+    }
+
+    #[test]
+    fn arbitrary_artifact_bytes_never_bypass_validation(
+        bytes in prop::collection::vec(any::<u8>(), 0..=8_192),
+    ) {
+        if let Ok(artifact) = decode_artifact(&bytes) {
+            prop_assert!(artifact.script().program.validate().is_ok());
+            prop_assert!(Machine::new(artifact.script().program.clone()).is_ok());
+        }
+    }
+
+    #[test]
+    fn arbitrary_module_source_never_panics_the_module_pipeline(source in any::<String>()) {
+        let resolver = |_: &str, _: &str| {
+            Ok(ResolvedModule::new("fuzz", source.clone()))
+        };
+        let _ = compile_modules("main", "import fuzz\nset result = 1\n", &resolver);
+    }
+
+    #[test]
+    fn successful_formatting_is_idempotent(source in any::<String>()) {
+        if let Ok(formatted) = format_source(&source) {
+            let reformatted = format_source(&formatted)
+                .expect("formatter output must remain valid source");
+            prop_assert_eq!(formatted, reformatted);
+        }
+    }
+
+    #[test]
+    fn arbitrary_json_respects_marshalling_boundaries(source in any::<String>()) {
+        if let Ok(json) = serde_json::from_str(&source) {
+            let _ = json_to_value(
+                &json,
+                MarshallingLimits {
+                    max_values: 32,
+                    max_depth: 8,
+                    max_text_bytes: 128,
+                },
+            );
         }
     }
 

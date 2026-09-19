@@ -179,6 +179,14 @@ function writeJsonl(file, runRecord, benchmarks, artifacts) {
   renameSync(temporary, file);
 }
 
+function removePreviousUnreleasedReports(currentFile) {
+  for (const name of readdirSync(reportsDirectory)) {
+    if (!name.endsWith('-last.jsonl')) continue;
+    const file = path.join(reportsDirectory, name);
+    if (file !== currentFile) rmSync(file);
+  }
+}
+
 function recordPerformance() {
   const baselineName = options.reuseBaseline ?? 'latest-unreleased-report';
   if (!/^[A-Za-z0-9._-]+$/.test(baselineName)) {
@@ -267,6 +275,7 @@ function recordPerformance() {
   const suffix = kind === 'release' ? version : 'last';
   const file = path.join(reportsDirectory, `${identity.id}-${suffix}.jsonl`);
   writeJsonl(file, runRecord, benchmarks, artifacts);
+  if (kind === 'unreleased') removePreviousUnreleasedReports(file);
   console.log(`\nWrote ${path.relative(root, file)} with ${benchmarks.size} benchmarks.`);
 }
 
@@ -451,6 +460,9 @@ function generateDocuments() {
     .sort((a, b) => b.run.recorded_at.localeCompare(a.run.recorded_at));
   if (releases.length === 0) throw new Error('no released JSONL performance report found');
   if (unreleased.length === 0) throw new Error('no <source>-last.jsonl report found');
+  if (unreleased.length > 1) {
+    throw new Error(`expected one <source>-last.jsonl report, found ${unreleased.length}`);
+  }
   const generated = {
     en: `${latestSection(unreleased[0], releases[0], 'en')}\n\n${releasedSection(releases, 'en')}`,
     zh: `${latestSection(unreleased[0], releases[0], 'zh')}\n\n${releasedSection(releases, 'zh')}`,

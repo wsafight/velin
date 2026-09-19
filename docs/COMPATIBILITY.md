@@ -6,7 +6,7 @@ This policy starts with Velin `0.4.0`. Velin remains on a pre-1.0 release line, 
 
 ## Source language
 
-Valid `0.4.x` source and its deterministic runtime behavior remain compatible across `0.4.x` patch releases. A patch release may add syntax or diagnostics, but it must not silently reinterpret an existing valid program.
+Valid `0.5.x` source and its deterministic runtime behavior remain compatible across `0.5.x` patch releases. The published `0.4.0` source fixture also remains accepted. A patch release may add syntax or diagnostics, but it must not silently reinterpret an existing valid program.
 
 A minor release may make a source-incompatible change while Velin is pre-1.0. Such a change must appear in `CHANGELOG.md`, include a before/after migration example, and have a fixture showing the old behavior. Deprecation diagnostics are preferred for at least one minor release when the old form can be recognized safely.
 
@@ -20,7 +20,7 @@ Deprecations remain callable for the rest of the current minor line. Removing a 
 
 ## Artifacts
 
-Every `.velinc` artifact carries `ARTIFACT_MAGIC` and `ARTIFACT_VERSION`. The `0.4.x` runtime reads version 4 artifacts. Decoders reject unknown, older, malformed, oversized, or semantically invalid artifacts before execution.
+Every `.velinc` artifact carries `ARTIFACT_MAGIC` and `ARTIFACT_VERSION`. The `0.5.x` runtime continues to read version 4 artifacts, including the published `0.4.0` fixture. Decoders reject unknown, older, malformed, oversized, or semantically invalid artifacts before execution.
 
 Artifact compatibility is version-exact: a runtime is required to read the artifact version it publishes, not arbitrary previous versions. The supported offline migration is to retain source and recompile it with the target Velin version. An artifact-version change must include a changelog entry and a fixed fixture for the last supported version.
 
@@ -52,13 +52,14 @@ Compatibility gates run with the normal workspace CI:
 
 - `fixtures/compatibility/0.4.0/source.velin` checks the published source behavior.
 - `fixtures/compatibility/0.4.0/artifact-v4.velinc` checks artifact version 4 decoding independently of the current encoder.
+- `fixtures/compatibility/0.5.0/source.velin` freezes the upcoming composable DSL behavior before release, including modules, pure functions, collection literals, `for`, indexed assignment, and scalar compound assignment.
 - `crates/velin-capi/tests/c_api_smoke.c` compiles and runs an ABI version 1 host against the public header.
 
 Do not regenerate a historical fixture merely because a test fails. Add a new versioned fixture when the contract intentionally changes, and keep the previous fixture when the documented compatibility window requires it.
 
 ## Security Support
 
-Security fixes are provided for the latest patch of the current minor line, currently `0.4.x`. Older minor lines and prereleases are unsupported unless a release notice explicitly says otherwise. Reports should use the repository's private security-reporting channel when available.
+Security fixes are provided for the latest patch of the current minor line, currently `0.5.x`. Older minor lines and prereleases are unsupported unless a release notice explicitly says otherwise. Reports should use the repository's private security-reporting channel when available.
 
 ## Release Process
 

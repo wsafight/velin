@@ -7,19 +7,19 @@
 <!-- BEGIN GENERATED PERFORMANCE REPORTS -->
 ## 最新未发布报告（2026-09-19）
 
-本报告包含 63 个 benchmark，其中 41 个同名指标与 2026-09-16 发布的 Velin `0.4.0` 对比。负数表示更快，正数表示更慢；单次本地采样的细小差异不应单独视为性能回退结论。
+本报告包含 64 个 benchmark，其中 41 个同名指标与 2026-09-16 发布的 Velin `0.4.0` 对比。负数表示更快，正数表示更慢；单次本地采样的细小差异不应单独视为性能回退结论。
 
 ### 环境与方法
 
 | 项目 | 值 |
 | --- | --- |
-| Velin 版本 | `0.4.0` 加未发布变更 |
-| 测量源码 | staged 源码 `fd8645a019b9`（基于 `e3e808b`） |
-| 数据文件 | `benchmarks/reports/fd8645a019b9-last.jsonl` |
+| Velin 版本 | `0.5.0` 加未发布变更 |
+| 测量源码 | staged 源码 `fde04f0f6528`（基于 `6c215f8`） |
+| 数据文件 | `benchmarks/reports/fde04f0f6528-last.jsonl` |
 | 主机 | Apple M3 Pro, 12 logical cores, 36.0 GiB RAM |
 | 系统 | Darwin 25.6.0, arm64 |
-| Rust | `rustc 1.98.1`, LLVM `22.1.8` |
-| Cargo | `cargo 1.98.1` |
+| Rust | `rustc 1.98.0`, LLVM `22.1.8` |
+| Cargo | `cargo 1.98.0` |
 | 采样 | 20 个样本，0.5 秒预热，1 秒测量, plots disabled |
 | 日期 | 2026-09-19 (Asia/Shanghai) |
 
@@ -27,79 +27,80 @@
 
 | Benchmark | 当前值 | 已发布 `0.4.0` | 变化 |
 | --- | ---: | ---: | ---: |
-| `artifact/binary_decode` | 292.751 us | 1.0433 ms | -71.9% |
-| `artifact/cache_hit` | 309.910 us | 1.0633 ms | -70.9% |
-| `artifact/cache_miss` | 1.148 us | 1.530 us | -25.0% |
-| `artifact/source_compile` | 199.803 us | 255.350 us | -21.8% |
-| `builtin/record_arguments/fresh` | 116.63 ns | - | 新增 |
-| `builtin/record_arguments/reused` | 96.72 ns | - | 新增 |
-| `check/builtin_heavy_script` | 223.688 us | - | 新增 |
-| `check/expression_heavy_script` | 153.179 us | 203.650 us | -24.8% |
-| `check/guard` | 106.84 ns | 133.52 ns | -20.0% |
-| `check/short_circuit_heavy_script` | 494.078 us | - | 新增 |
-| `check/wide_linear_script` | 29.068 us | 38.175 us | -23.9% |
-| `compile/expression_heavy_script` | 506.723 us | 641.450 us | -21.0% |
-| `compile/guard` | 626.99 ns | 778.81 ns | -19.5% |
-| `compile/wide_linear_script` | 423.041 us | 517.160 us | -18.2% |
-| `eval/tree_walk` | 69.51 ns | 96.28 ns | -27.8% |
-| `host/batched_effect_roundtrip` | 23.710 us | 41.034 us | -42.2% |
-| `host/c_abi_batch` | 9.504 us | 11.106 us | -14.4% |
-| `host/single_effect_roundtrip` | 30.365 us | 37.435 us | -18.9% |
-| `host/wasm_batch` | 10.550 us | 131.630 us | -92.0% |
-| `host/wasm_load_and_batch` | 78.482 us | - | 新增 |
-| `host/wasm_machine_create_reused` | 147.79 ns | - | 新增 |
-| `machine/create_expression_heavy/reuse_validation` | 972.93 ns | - | 新增 |
-| `machine/create_expression_heavy/validate` | 139.797 us | - | 新增 |
-| `machine/create_short_circuit_heavy/reuse_validation` | 980.60 ns | - | 新增 |
-| `machine/create_short_circuit_heavy/validate` | 301.367 us | - | 新增 |
-| `machine/create_wide/reuse_validation` | 956.98 ns | 1.254 us | -23.7% |
-| `machine/create_wide/validate` | 3.492 us | 4.630 us | -24.6% |
-| `machine/profile/disabled` | 10.919 us | 14.400 us | -24.2% |
-| `machine/profile/enabled` | 11.250 us | 14.825 us | -24.1% |
-| `machine/restart` | 17.139 us | 22.275 us | -23.1% |
-| `memory/execution_image` | 24.216 us | 32.525 us | -25.5% |
-| `parse/guard` | 1.436 us | 1.834 us | -21.7% |
-| `parse/host_calls` | 224.864 us | 296.220 us | -24.1% |
-| `parse/wide_linear_script` | 264.038 us | 339.320 us | -22.2% |
-| `pure/invoke/map_fresh` | 414.31 ns | 544.04 ns | -23.8% |
-| `pure/invoke/map_reused` | 142.02 ns | 189.90 ns | -25.2% |
-| `pure/invoke/one_reused` | 66.78 ns | 82.34 ns | -18.9% |
-| `queue/full_backpressure` | 93.70 ns | 130.20 ns | -28.0% |
-| `queue/push_pop` | 6.316 us | 8.339 us | -24.3% |
-| `snapshot/clone_and_replay` | 301.80 ns | 403.14 ns | -25.1% |
-| `snapshot/machine_clone` | 494.95 ns | 674.30 ns | -26.6% |
-| `vm/boolean_slot_loop` | 24.233 us | - | 新增 |
-| `vm/branched_scalar_loop` | 10.858 us | - | 新增 |
-| `vm/builtin_loop` | 123.988 us | - | 新增 |
-| `vm/constant_folding/folded` | 26.445 us | - | 新增 |
-| `vm/constant_folding/runtime_expression` | 93.172 us | - | 新增 |
-| `vm/counter_loop` | 19.970 us | 27.328 us | -26.9% |
-| `vm/growing_list` | 89.105 us | 115.260 us | -22.7% |
-| `vm/growing_string` | 96.452 us | 109.090 us | -11.6% |
-| `vm/interpolation` | 235.137 us | 276.840 us | -15.1% |
-| `vm/interpolation_mixed_holes` | 84.640 us | - | 新增 |
-| `vm/long_register_expression_loop` | 91.934 us | - | 新增 |
-| `vm/owned_builtin_loop` | 243.132 us | - | 新增 |
-| `vm/propagated_constants` | 15.736 us | - | 新增 |
-| `vm/run_with_host_yield` | 2.538 us | 3.408 us | -25.5% |
-| `vm/scalar_reassignment` | 35.002 us | - | 新增 |
-| `vm/short_scalar_expression` | 301.01 ns | - | 新增 |
-| `vm/small_register_expression_loop` | 83.412 us | - | 新增 |
-| `vm/string_reads` | 1.0458 ms | 1.3896 ms | -24.7% |
-| `vm/wide_linear_script` | 17.285 us | 23.013 us | -24.9% |
-| `workload/dialogue` | 696.63 ns | 896.37 ns | -22.3% |
-| `workload/inventory` | 49.897 us | 65.858 us | -24.2% |
-| `workload/mixed` | 11.197 us | 15.049 us | -25.6% |
+| `artifact/binary_decode` | 389.466 us | 1.0433 ms | -62.7% |
+| `artifact/cache_hit` | 411.019 us | 1.0633 ms | -61.3% |
+| `artifact/cache_miss` | 1.567 us | 1.530 us | +2.4% |
+| `artifact/source_compile` | 265.195 us | 255.350 us | +3.9% |
+| `builtin/record_arguments/fresh` | 155.28 ns | - | 新增 |
+| `builtin/record_arguments/reused` | 123.18 ns | - | 新增 |
+| `check/builtin_heavy_script` | 297.890 us | - | 新增 |
+| `check/expression_heavy_script` | 203.804 us | 203.650 us | +0.1% |
+| `check/guard` | 138.34 ns | 133.52 ns | +3.6% |
+| `check/short_circuit_heavy_script` | 640.108 us | - | 新增 |
+| `check/wide_linear_script` | 38.111 us | 38.175 us | -0.2% |
+| `compile/expression_heavy_script` | 653.536 us | 641.450 us | +1.9% |
+| `compile/guard` | 788.53 ns | 778.81 ns | +1.2% |
+| `compile/wide_linear_script` | 533.351 us | 517.160 us | +3.1% |
+| `eval/tree_walk` | 91.17 ns | 96.28 ns | -5.3% |
+| `host/batched_effect_roundtrip` | 31.194 us | 41.034 us | -24.0% |
+| `host/c_abi_batch` | 11.935 us | 11.106 us | +7.5% |
+| `host/single_effect_roundtrip` | 39.389 us | 37.435 us | +5.2% |
+| `host/wasm_batch` | 13.481 us | 131.630 us | -89.8% |
+| `host/wasm_load_and_batch` | 99.856 us | - | 新增 |
+| `host/wasm_machine_create_reused` | 190.96 ns | - | 新增 |
+| `machine/create_expression_heavy/reuse_validation` | 1.314 us | - | 新增 |
+| `machine/create_expression_heavy/validate` | 181.696 us | - | 新增 |
+| `machine/create_short_circuit_heavy/reuse_validation` | 1.302 us | - | 新增 |
+| `machine/create_short_circuit_heavy/validate` | 396.382 us | - | 新增 |
+| `machine/create_wide/reuse_validation` | 1.331 us | 1.254 us | +6.1% |
+| `machine/create_wide/validate` | 4.607 us | 4.630 us | -0.5% |
+| `machine/profile/disabled` | 14.436 us | 14.400 us | +0.3% |
+| `machine/profile/enabled` | 14.805 us | 14.825 us | -0.1% |
+| `machine/restart` | 22.633 us | 22.275 us | +1.6% |
+| `memory/execution_image` | 32.444 us | 32.525 us | -0.2% |
+| `parse/guard` | 1.898 us | 1.834 us | +3.5% |
+| `parse/host_calls` | 305.028 us | 296.220 us | +3.0% |
+| `parse/wide_linear_script` | 353.855 us | 339.320 us | +4.3% |
+| `pure/invoke/map_fresh` | 555.92 ns | 544.04 ns | +2.2% |
+| `pure/invoke/map_reused` | 185.04 ns | 189.90 ns | -2.6% |
+| `pure/invoke/one_reused` | 88.05 ns | 82.34 ns | +6.9% |
+| `queue/full_backpressure` | 125.68 ns | 130.20 ns | -3.5% |
+| `queue/push_pop` | 8.276 us | 8.339 us | -0.8% |
+| `snapshot/clone_and_replay` | 404.64 ns | 403.14 ns | +0.4% |
+| `snapshot/machine_clone` | 693.11 ns | 674.30 ns | +2.8% |
+| `vm/boolean_slot_loop` | 34.878 us | - | 新增 |
+| `vm/branched_scalar_loop` | 16.122 us | - | 新增 |
+| `vm/builtin_loop` | 181.387 us | - | 新增 |
+| `vm/constant_folding/folded` | 35.454 us | - | 新增 |
+| `vm/constant_folding/runtime_expression` | 123.114 us | - | 新增 |
+| `vm/counter_loop` | 30.618 us | 27.328 us | +12.0% |
+| `vm/growing_list` | 116.626 us | 115.260 us | +1.2% |
+| `vm/growing_string` | 109.698 us | 109.090 us | +0.6% |
+| `vm/interpolation` | 299.568 us | 276.840 us | +8.2% |
+| `vm/interpolation_mixed_holes` | 119.382 us | - | 新增 |
+| `vm/long_register_expression_loop` | 122.969 us | - | 新增 |
+| `vm/owned_builtin_loop` | 328.027 us | - | 新增 |
+| `vm/propagated_constants` | 21.197 us | - | 新增 |
+| `vm/run_with_host_yield` | 3.405 us | 3.408 us | -0.1% |
+| `vm/scalar_reassignment` | 50.012 us | - | 新增 |
+| `vm/short_scalar_expression` | 406.76 ns | - | 新增 |
+| `vm/small_register_expression_loop` | 111.105 us | - | 新增 |
+| `vm/string_reads` | 1.4074 ms | 1.3896 ms | +1.3% |
+| `vm/wide_linear_script` | 23.663 us | 23.013 us | +2.8% |
+| `workload/composable_end_to_end` | 33.217 us | - | 新增 |
+| `workload/dialogue` | 935.39 ns | 896.37 ns | +4.4% |
+| `workload/inventory` | 66.828 us | 65.858 us | +1.5% |
+| `workload/mixed` | 14.838 us | 15.049 us | -1.4% |
 
 ### 产物体积
 
 | 产物 | 字节数 | Gzip 字节数 | 仓库上限 |
 | --- | ---: | ---: | ---: |
-| Runtime-only 示例 | 524,976 | 238,922 | 2,000,000 / 800,000 |
-| C runtime 静态库 | 24,715,192 | 7,851,830 | 35,000,000 / 12,000,000 |
-| Runtime-only Wasm | 418,352 | 142,630 | 650,000 / 250,000 |
-| Source-to-run Wasm | 645,463 | 235,018 | 1,000,000 / 400,000 |
-| 完整 CLI | 1,296,896 | 567,523 | 5,000,000 / 2,000,000 |
+| Runtime-only 示例 | 524,960 | 239,020 | 2,000,000 / 800,000 |
+| C runtime 静态库 | 24,728,424 | 7,853,856 | 35,000,000 / 12,000,000 |
+| Runtime-only Wasm | 418,260 | 142,598 | 650,000 / 250,000 |
+| Source-to-run Wasm | 645,471 | 236,354 | 1,000,000 / 400,000 |
+| 完整 CLI | 1,296,912 | 568,766 | 5,000,000 / 2,000,000 |
 
 ## 已发布快照
 
@@ -187,7 +188,7 @@ node scripts/record-performance.mjs
 发布时冻结为 `<源码标识>-<版本>.jsonl`：
 
 ```sh
-node scripts/record-performance.mjs --release 0.4.1
+node scripts/record-performance.mjs --release 0.5.0
 ```
 
 只根据现有 JSONL 生成文档，不重新测量：
@@ -203,6 +204,8 @@ git config core.hooksPath .githooks
 ```
 
 hook 会运行完整测量，并暂存 JSONL 报告和生成后的文档；如果存在 staged 内容，源码标识会基于 staged 内容计算，因此无关的未暂存工作可以保留。可通过 `VELIN_PERF_SAMPLE_SIZE`、`VELIN_PERF_WARMUP_TIME` 和 `VELIN_PERF_MEASUREMENT_TIME` 调整采样。
+
+仓库通过 `rust-toolchain.toml` 固定工具链，因此未发布报告与发布报告默认使用同一个编译器。记录新的未发布报告时会删除原有的 `*-last.jsonl`；带版本号的发布报告会永久保留。
 
 ## 门禁
 

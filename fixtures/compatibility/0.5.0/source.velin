@@ -1,0 +1,6 @@
+import math
+default values = [1, 2, 3]
+set total = call math.sum(values)
+set state = {total: total}
+set state["total"] = state["total"] + 1
+perform emit(state["total"])

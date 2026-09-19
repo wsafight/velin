@@ -557,7 +557,7 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
 name = "velin"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "criterion",
  "proptest",
@@ -576,7 +576,7 @@ dependencies = [
 
 [[package]]
 name = "velin-bytecode"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "velin-syntax",
@@ -584,7 +584,7 @@ dependencies = [
 
 [[package]]
 name = "velin-capi"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "criterion",
  "serde_json",
@@ -596,7 +596,7 @@ dependencies = [
 
 [[package]]
 name = "velin-check"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "velin-bytecode",
  "velin-compile",
@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "velin-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde_json",
  "velin",
@@ -614,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "velin-compile"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde_json",
  "velin-bytecode",
@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "velin-eval"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "velin-parse",
  "velin-syntax",
@@ -633,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "velin-lang"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "velin-lsp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -656,21 +656,21 @@ dependencies = [
 
 [[package]]
 name = "velin-parse"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "velin-syntax",
 ]
 
 [[package]]
 name = "velin-syntax"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "velin-vm"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "velin-bytecode",
  "velin-compile",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "velin-wasm"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "criterion",
  "serde",

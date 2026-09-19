@@ -196,6 +196,7 @@ criterion_group!(
     pipeline_p4::bench_profile_overhead,
     pipeline_p4::bench_execution_image,
     pipeline_p4::bench_real_workloads,
+    pipeline_p4::bench_composable_workload,
     pipeline_p4::bench_vm_additional_shapes
 );
 criterion_main!(benches);

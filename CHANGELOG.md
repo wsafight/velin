@@ -4,10 +4,11 @@ All notable changes to Velin are recorded here. The project follows semantic
 versioning once an API is declared stable; the current `0.x` line may still
 change source and Rust APIs between minor releases.
 
-## Unreleased
+## 0.5.0 - 2026-09-19
 
 ### Added
 
+- A pinned Rust 1.98.0 local toolchain, a 0.5.0 composable-DSL compatibility fixture, adversarial artifact/module/formatter/marshalling properties, and a modules-to-replay end-to-end benchmark.
 - Unified `ExecutionPolicy` budgets for VM fuel, host effects, call depth, runtime data, host queues, progress callbacks, and cooperative cancellation.
 - Layered source, Rust API, artifact, and C ABI compatibility policies with versioned source/artifact fixtures.
 - Typed host command declarations shared by static checking, runtime validation, synchronous/asynchronous host drivers, and schema-aware LSP completion, signature help, and hover.
@@ -23,6 +24,7 @@ change source and Rust APIs between minor releases.
 
 ### Changed
 
+- Unreleased performance recording now replaces the previous `*-last.jsonl` while retaining every versioned release snapshot.
 - Machine snapshots preserve cumulative fuel, host-effect counters, policy, and cancellation state; machine restart begins a fresh budget lifetime.
 
 ## 0.4.0 - 2026-09-15

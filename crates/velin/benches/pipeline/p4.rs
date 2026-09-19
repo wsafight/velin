@@ -8,9 +8,9 @@ use std::hint::black_box;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use velin::{
-    Expr, Machine, Op, ProgramBuilder, PureModule, ScriptRunner, ScriptYield, Type, Value,
-    Variables, Yield, artifact_cache_path, compile, decode_artifact, encode_artifact, evaluate,
-    load_artifact_cache, parse_expression, store_artifact_cache,
+    Expr, Machine, Op, ProgramBuilder, PureModule, ResolvedModule, ScriptRunner, ScriptYield, Type,
+    Value, Variables, Yield, artifact_cache_path, compile, compile_modules, decode_artifact,
+    encode_artifact, evaluate, load_artifact_cache, parse_expression, store_artifact_cache,
 };
 
 pub(crate) fn bench_eval_tree(c: &mut Criterion) {
@@ -328,6 +328,62 @@ pub(crate) fn bench_real_workloads(c: &mut Criterion) {
         b.iter(|| {
             let mut runner = ScriptRunner::new(&mixed).unwrap();
             black_box(run_unbound_effects_in_batches(&mut runner, 32))
+        });
+    });
+}
+
+pub(crate) fn bench_composable_workload(c: &mut Criterion) {
+    let entry = concat!(
+        "import rules\n",
+        "default values = [1, 2, 3, 4, 5]\n",
+        "set score = call rules.score(values)\n",
+        "accepted = perform choose(score)\n",
+        "if accepted:\n",
+        "    set state = {score: score, status: \"accepted\"}\n",
+        "else:\n",
+        "    set state = {score: score, status: \"rejected\"}\n",
+        "perform emit(state)\n",
+    );
+    let rules = concat!(
+        "export fn score(values):\n",
+        "    set total = 0\n",
+        "    for value in values:\n",
+        "        total += value\n",
+        "    return total\n",
+    );
+    c.bench_function("workload/composable_end_to_end", |b| {
+        b.iter(|| {
+            let resolver = |_: &str, specifier: &str| {
+                (specifier == "rules")
+                    .then(|| ResolvedModule::new("rules", rules))
+                    .ok_or_else(|| format!("unknown module `{specifier}`"))
+            };
+            let script = compile_modules("main", entry, &resolver).unwrap();
+            assert!(script.check("main").is_empty());
+            let mut machine = Machine::new(script.program.clone()).unwrap();
+            for (name, value) in &script.defaults {
+                machine.set_variable(name, value.clone());
+            }
+            assert!(matches!(machine.run().unwrap(), Yield::Host { .. }));
+            let checkpoint = machine.clone();
+
+            let mut accepted = checkpoint.clone();
+            assert!(matches!(
+                accepted.resume(Some(Value::Boolean(true))).unwrap(),
+                Yield::Host { .. }
+            ));
+            assert_eq!(accepted.resume(None).unwrap(), Yield::Finished);
+
+            let mut rejected = checkpoint;
+            assert!(matches!(
+                rejected.resume(Some(Value::Boolean(false))).unwrap(),
+                Yield::Host { .. }
+            ));
+            assert_eq!(rejected.resume(None).unwrap(), Yield::Finished);
+            black_box((
+                accepted.variable("state").cloned(),
+                rejected.variable("state").cloned(),
+            ))
         });
     });
 }

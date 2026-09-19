@@ -11,6 +11,10 @@ use velin_eval::{
 };
 use velin_syntax::{BinaryOp, Builtin, DataFootprint, DataMetrics, MAX_DATA_TEXT_BYTES, Value};
 
+#[path = "chunk_metrics.rs"]
+mod metrics_helpers;
+use metrics_helpers::{rng_state, scalar_metrics, shallow_metrics, string_metrics};
+
 /// A variable frame: slot `i` is assigned when it contains a value.
 pub type Frame = [Option<Value>];
 
@@ -474,44 +478,6 @@ fn apply_binary_typed_ref(
         };
     }
     apply_binary(left.clone(), op, right.clone(), line)
-}
-
-fn scalar_metrics(_value: &Value) -> DataMetrics {
-    DataMetrics {
-        footprint: DataFootprint {
-            values: 1,
-            text_bytes: 0,
-        },
-        max_depth: 0,
-    }
-}
-
-fn string_metrics(text: &str) -> DataMetrics {
-    DataMetrics {
-        footprint: DataFootprint {
-            values: 1,
-            text_bytes: text.len(),
-        },
-        max_depth: 0,
-    }
-}
-
-pub(crate) fn shallow_metrics(value: &Value) -> DataMetrics {
-    match value {
-        Value::String(text) => string_metrics(text),
-        _ => scalar_metrics(value),
-    }
-}
-
-fn rng_state(frame: &mut Frame, slot: u32, line: usize) -> Result<&mut i64, EvalError> {
-    let value = frame
-        .get_mut(slot as usize)
-        .and_then(Option::as_mut)
-        .ok_or_else(|| EvalError::new(line, "RNG state has not been initialized"))?;
-    let Value::Integer(state) = value else {
-        return Err(EvalError::new(line, "RNG state must be an integer"));
-    };
-    Ok(state)
 }
 
 #[cfg(test)]

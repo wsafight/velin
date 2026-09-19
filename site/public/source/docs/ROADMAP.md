@@ -8,7 +8,7 @@ This roadmap states direction and acceptance criteria, not release dates. Shippe
 
 ## Current foundation
 
-The `0.4.x` line already has the boundaries needed for further work:
+The `0.5.x` line has the boundaries needed for further work:
 
 - Five deterministic value types, explicitly seeded randomness, and clonable machine state.
 - A complete source-to-register-bytecode pipeline with bytecode validation repeated on deserialization.
@@ -29,7 +29,7 @@ Every new capability must preserve these rules:
 4. **Tools and runtime share semantics.** The parser, checker, compiler, VM, LSP, Wasm, and C API must not invent separate, approximately compatible rules.
 5. **Stable boundaries stay smaller than internals.** Source, facade APIs, artifacts, and ABIs each declare a compatibility surface; internal AST, IR, and optimization plans do not become permanent formats.
 
-The development order is **P0 -> P1 -> P2 -> P3**. Performance and size evidence starts at P0 and spans every priority.
+The development order is **P0 -> P1 -> P2 -> P3 -> P4**. Performance and size evidence starts at P0 and spans every priority.
 
 ## P0: runtime boundaries and compatibility contracts
 
@@ -135,6 +135,28 @@ Delivered capabilities are:
 - Pause, resume, snapshot, and deterministic branch replay in the Playground.
 
 Completion criteria: normal editing, refactoring, and debugging do not require reading bytecode or manually mapping program counters; the LSP and debugger consume parsing, checking, and debug metadata supplied by the core.
+
+## P4: release hardening and adoption evidence
+
+The first three feature stages established the intended product boundary. P4 turns that implementation into a release that downstream embedders can trust, without expanding Velin into a general-purpose language.
+
+**Status: in progress for 0.5.0.** The workspace version and compatibility fixtures now target 0.5.0. Artifact version 4 and C ABI version 1 remain unchanged because the new APIs are additive.
+
+### Reproducible release evidence
+
+- Keep exactly one `<source>-last.jsonl` report and retain every versioned release snapshot.
+- Pin the local measurement toolchain and reject performance comparisons that mix incompatible environments.
+- Exercise a representative end-to-end workload that includes modules, static checking, host effects, snapshots, and deterministic branch replay.
+
+### Adversarial boundary validation
+
+- Extend property and fuzz coverage across source parsing, formatting, module graphs, artifact decoding, value marshalling, and resume/cancellation state.
+- Assert resource ceilings before large allocations and preserve path-aware, typed failures at every public boundary.
+- Test the published Rust facade, C header, Wasm entry points, and source and artifact fixtures as downstream users consume them.
+
+Completion criteria: 0.5.0 ships with frozen source/API/ABI decisions, versioned compatibility fixtures, reproducible local performance evidence, and representative Rust/C/Wasm integration coverage.
+
+Durable serialized snapshots and bounded recursion remain candidates for a later roadmap. They require concrete embedder demand and a separate design for format compatibility, call-stack budgets, diagnostics, and replay semantics; they are not implicit P4 deliverables.
 
 ## Cross-phase work: performance and size evidence
 
