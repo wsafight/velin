@@ -380,11 +380,9 @@ impl<'a> ScriptRunner<'a> {
                 if let Err(message) = self.validate_call(&name, &values) {
                     return self.fail_pending(PendingFailure::HostContract(message));
                 }
-                if self.host_effects >= self.limits.max_host_effects {
-                    return self.fail_pending(PendingFailure::HostEffectsExceeded {
-                        limit: self.limits.max_host_effects,
-                    });
-                }
+                // The machine applies this exact limit before yielding. Keep
+                // the runner counter for host-contract prefix semantics, but
+                // do not repeat the hot-path limit comparison here.
                 self.host_effects += 1;
                 self.pending_host = Some(name.clone());
                 Ok(ScriptYield::Host { name, values })

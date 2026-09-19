@@ -15,8 +15,9 @@ use crate::error::ParseError;
 use crate::limits::MAX_STATEMENT_DEPTH;
 use crate::lines::{self, Line};
 use crate::token::{
-    AssignmentOperator, expect_bare_header, expect_colon_header, expect_header_name,
-    expect_identifier, parse_embedded, split_assignment, split_keyword, strip_keyword,
+    AssignmentOperator, AssignmentTarget, expect_bare_header, expect_colon_header,
+    expect_header_name, expect_identifier, parse_embedded, split_assignment, split_keyword,
+    strip_keyword,
 };
 use velin_parse::parse_expression_list_with_source;
 use velin_syntax::{Expr, SharedString};
@@ -132,6 +133,9 @@ impl<'lines, 'source> Parser<'lines, 'source> {
         if let Some(rest) = line.content.strip_prefix("default ") {
             return Self::parse_binding(line, rest.trim_start(), true, &self.source);
         }
+        if let Some(rest) = line.content.strip_prefix("perform ") {
+            return Self::parse_perform(line, rest.trim_start(), None, &self.source);
+        }
         let (keyword, rest) = split_keyword(line.content);
         match keyword {
             "import" => Self::parse_import(line, rest),
@@ -188,6 +192,35 @@ impl<'lines, 'source> Parser<'lines, 'source> {
             column: line.column + line.content[..rest_offset].chars().count(),
         };
         let (target, value_text, value_column, operator) = split_assignment(&synthetic)?;
+        if operator == AssignmentOperator::Set
+            && let AssignmentTarget::Identifier(name) = target
+        {
+            if !is_default && let Some(call_rest) = strip_keyword(value_text, "call") {
+                let (module, function, arguments) =
+                    Self::parse_function_call(line, call_rest, source, value_column)?;
+                return Ok(Stmt::Call {
+                    module,
+                    function,
+                    arguments,
+                    bind: name.to_owned(),
+                    line: line.number,
+                });
+            }
+            let value = parse_embedded(value_text, source, line.number, value_column)?;
+            return Ok(if is_default {
+                Stmt::Default {
+                    name: name.to_owned(),
+                    value,
+                    line: line.number,
+                }
+            } else {
+                Stmt::Set {
+                    name: name.to_owned(),
+                    value,
+                    line: line.number,
+                }
+            });
+        }
         let (name, index) = Self::parse_assignment_target(&synthetic, target, source)?;
         if !is_default && let Some(call_rest) = strip_keyword(value_text, "call") {
             if operator != AssignmentOperator::Set || index.is_some() {

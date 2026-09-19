@@ -314,6 +314,8 @@ fn single_argument_host_fast_path_avoids_vector_shape_changes() {
             value: Value::Integer(9),
         })
     );
+    assert_eq!(machine.fuel_used(), 1);
+    assert_eq!(machine.host_effects(), 1);
     assert_eq!(machine.resume(None), Ok(Yield::Finished));
 }
 

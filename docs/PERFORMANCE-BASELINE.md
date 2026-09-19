@@ -14,8 +14,8 @@ This report contains 63 benchmarks. 41 matching metrics are compared with Velin 
 | Item | Value |
 | --- | --- |
 | Velin version | `0.4.0` plus unreleased changes |
-| Measured source | staged source `5c4f3a38269a` (base `a9259d9`) |
-| Data file | `benchmarks/reports/5c4f3a38269a-last.jsonl` |
+| Measured source | staged source `fd8645a019b9` (base `e3e808b`) |
+| Data file | `benchmarks/reports/fd8645a019b9-last.jsonl` |
 | Host | Apple M3 Pro, 12 logical cores, 36.0 GiB RAM |
 | OS | Darwin 25.6.0, arm64 |
 | Rust | `rustc 1.98.1`, LLVM `22.1.8` |
@@ -27,69 +27,69 @@ This report contains 63 benchmarks. 41 matching metrics are compared with Velin 
 
 | Benchmark | Current | Released `0.4.0` | Change |
 | --- | ---: | ---: | ---: |
-| `artifact/binary_decode` | 392.069 us | 1.0433 ms | -62.4% |
-| `artifact/cache_hit` | 411.879 us | 1.0633 ms | -61.3% |
-| `artifact/cache_miss` | 1.540 us | 1.530 us | +0.6% |
-| `artifact/source_compile` | 276.541 us | 255.350 us | +8.3% |
-| `builtin/record_arguments/fresh` | 148.88 ns | - | new |
-| `builtin/record_arguments/reused` | 124.21 ns | - | new |
-| `check/builtin_heavy_script` | 300.387 us | - | new |
-| `check/expression_heavy_script` | 201.597 us | 203.650 us | -1.0% |
-| `check/guard` | 137.61 ns | 133.52 ns | +3.1% |
-| `check/short_circuit_heavy_script` | 637.427 us | - | new |
-| `check/wide_linear_script` | 38.312 us | 38.175 us | +0.4% |
-| `compile/expression_heavy_script` | 662.254 us | 641.450 us | +3.2% |
-| `compile/guard` | 809.54 ns | 778.81 ns | +3.9% |
-| `compile/wide_linear_script` | 549.935 us | 517.160 us | +6.3% |
-| `eval/tree_walk` | 96.05 ns | 96.28 ns | -0.2% |
-| `host/batched_effect_roundtrip` | 30.980 us | 41.034 us | -24.5% |
-| `host/c_abi_batch` | 12.163 us | 11.106 us | +9.5% |
-| `host/single_effect_roundtrip` | 39.681 us | 37.435 us | +6.0% |
-| `host/wasm_batch` | 13.741 us | 131.630 us | -89.6% |
-| `host/wasm_load_and_batch` | 100.903 us | - | new |
-| `host/wasm_machine_create_reused` | 192.24 ns | - | new |
-| `machine/create_expression_heavy/reuse_validation` | 1.323 us | - | new |
-| `machine/create_expression_heavy/validate` | 186.250 us | - | new |
-| `machine/create_short_circuit_heavy/reuse_validation` | 1.306 us | - | new |
-| `machine/create_short_circuit_heavy/validate` | 400.217 us | - | new |
-| `machine/create_wide/reuse_validation` | 1.330 us | 1.254 us | +6.1% |
-| `machine/create_wide/validate` | 4.626 us | 4.630 us | -0.1% |
-| `machine/profile/disabled` | 14.489 us | 14.400 us | +0.6% |
-| `machine/profile/enabled` | 14.994 us | 14.825 us | +1.1% |
-| `machine/restart` | 22.570 us | 22.275 us | +1.3% |
-| `memory/execution_image` | 32.578 us | 32.525 us | +0.2% |
-| `parse/guard` | 1.878 us | 1.834 us | +2.4% |
-| `parse/host_calls` | 309.847 us | 296.220 us | +4.6% |
-| `parse/wide_linear_script` | 367.799 us | 339.320 us | +8.4% |
-| `pure/invoke/map_fresh` | 564.09 ns | 544.04 ns | +3.7% |
-| `pure/invoke/map_reused` | 187.61 ns | 189.90 ns | -1.2% |
-| `pure/invoke/one_reused` | 88.27 ns | 82.34 ns | +7.2% |
-| `queue/full_backpressure` | 129.52 ns | 130.20 ns | -0.5% |
-| `queue/push_pop` | 8.237 us | 8.339 us | -1.2% |
-| `snapshot/clone_and_replay` | 410.18 ns | 403.14 ns | +1.7% |
-| `snapshot/machine_clone` | 667.52 ns | 674.30 ns | -1.0% |
-| `vm/boolean_slot_loop` | 31.177 us | - | new |
-| `vm/branched_scalar_loop` | 14.465 us | - | new |
-| `vm/builtin_loop` | 164.796 us | - | new |
-| `vm/constant_folding/folded` | 34.509 us | - | new |
-| `vm/constant_folding/runtime_expression` | 123.939 us | - | new |
-| `vm/counter_loop` | 26.872 us | 27.328 us | -1.7% |
-| `vm/growing_list` | 119.554 us | 115.260 us | +3.7% |
-| `vm/growing_string` | 109.803 us | 109.090 us | +0.7% |
-| `vm/interpolation` | 281.348 us | 276.840 us | +1.6% |
-| `vm/interpolation_mixed_holes` | 113.174 us | - | new |
-| `vm/long_register_expression_loop` | 122.701 us | - | new |
-| `vm/owned_builtin_loop` | 348.184 us | - | new |
-| `vm/propagated_constants` | 21.035 us | - | new |
-| `vm/run_with_host_yield` | 3.398 us | 3.408 us | -0.3% |
-| `vm/scalar_reassignment` | 45.966 us | - | new |
-| `vm/short_scalar_expression` | 398.18 ns | - | new |
-| `vm/small_register_expression_loop` | 112.743 us | - | new |
-| `vm/string_reads` | 1.3991 ms | 1.3896 ms | +0.7% |
-| `vm/wide_linear_script` | 23.517 us | 23.013 us | +2.2% |
-| `workload/dialogue` | 915.46 ns | 896.37 ns | +2.1% |
-| `workload/inventory` | 66.760 us | 65.858 us | +1.4% |
-| `workload/mixed` | 14.896 us | 15.049 us | -1.0% |
+| `artifact/binary_decode` | 292.751 us | 1.0433 ms | -71.9% |
+| `artifact/cache_hit` | 309.910 us | 1.0633 ms | -70.9% |
+| `artifact/cache_miss` | 1.148 us | 1.530 us | -25.0% |
+| `artifact/source_compile` | 199.803 us | 255.350 us | -21.8% |
+| `builtin/record_arguments/fresh` | 116.63 ns | - | new |
+| `builtin/record_arguments/reused` | 96.72 ns | - | new |
+| `check/builtin_heavy_script` | 223.688 us | - | new |
+| `check/expression_heavy_script` | 153.179 us | 203.650 us | -24.8% |
+| `check/guard` | 106.84 ns | 133.52 ns | -20.0% |
+| `check/short_circuit_heavy_script` | 494.078 us | - | new |
+| `check/wide_linear_script` | 29.068 us | 38.175 us | -23.9% |
+| `compile/expression_heavy_script` | 506.723 us | 641.450 us | -21.0% |
+| `compile/guard` | 626.99 ns | 778.81 ns | -19.5% |
+| `compile/wide_linear_script` | 423.041 us | 517.160 us | -18.2% |
+| `eval/tree_walk` | 69.51 ns | 96.28 ns | -27.8% |
+| `host/batched_effect_roundtrip` | 23.710 us | 41.034 us | -42.2% |
+| `host/c_abi_batch` | 9.504 us | 11.106 us | -14.4% |
+| `host/single_effect_roundtrip` | 30.365 us | 37.435 us | -18.9% |
+| `host/wasm_batch` | 10.550 us | 131.630 us | -92.0% |
+| `host/wasm_load_and_batch` | 78.482 us | - | new |
+| `host/wasm_machine_create_reused` | 147.79 ns | - | new |
+| `machine/create_expression_heavy/reuse_validation` | 972.93 ns | - | new |
+| `machine/create_expression_heavy/validate` | 139.797 us | - | new |
+| `machine/create_short_circuit_heavy/reuse_validation` | 980.60 ns | - | new |
+| `machine/create_short_circuit_heavy/validate` | 301.367 us | - | new |
+| `machine/create_wide/reuse_validation` | 956.98 ns | 1.254 us | -23.7% |
+| `machine/create_wide/validate` | 3.492 us | 4.630 us | -24.6% |
+| `machine/profile/disabled` | 10.919 us | 14.400 us | -24.2% |
+| `machine/profile/enabled` | 11.250 us | 14.825 us | -24.1% |
+| `machine/restart` | 17.139 us | 22.275 us | -23.1% |
+| `memory/execution_image` | 24.216 us | 32.525 us | -25.5% |
+| `parse/guard` | 1.436 us | 1.834 us | -21.7% |
+| `parse/host_calls` | 224.864 us | 296.220 us | -24.1% |
+| `parse/wide_linear_script` | 264.038 us | 339.320 us | -22.2% |
+| `pure/invoke/map_fresh` | 414.31 ns | 544.04 ns | -23.8% |
+| `pure/invoke/map_reused` | 142.02 ns | 189.90 ns | -25.2% |
+| `pure/invoke/one_reused` | 66.78 ns | 82.34 ns | -18.9% |
+| `queue/full_backpressure` | 93.70 ns | 130.20 ns | -28.0% |
+| `queue/push_pop` | 6.316 us | 8.339 us | -24.3% |
+| `snapshot/clone_and_replay` | 301.80 ns | 403.14 ns | -25.1% |
+| `snapshot/machine_clone` | 494.95 ns | 674.30 ns | -26.6% |
+| `vm/boolean_slot_loop` | 24.233 us | - | new |
+| `vm/branched_scalar_loop` | 10.858 us | - | new |
+| `vm/builtin_loop` | 123.988 us | - | new |
+| `vm/constant_folding/folded` | 26.445 us | - | new |
+| `vm/constant_folding/runtime_expression` | 93.172 us | - | new |
+| `vm/counter_loop` | 19.970 us | 27.328 us | -26.9% |
+| `vm/growing_list` | 89.105 us | 115.260 us | -22.7% |
+| `vm/growing_string` | 96.452 us | 109.090 us | -11.6% |
+| `vm/interpolation` | 235.137 us | 276.840 us | -15.1% |
+| `vm/interpolation_mixed_holes` | 84.640 us | - | new |
+| `vm/long_register_expression_loop` | 91.934 us | - | new |
+| `vm/owned_builtin_loop` | 243.132 us | - | new |
+| `vm/propagated_constants` | 15.736 us | - | new |
+| `vm/run_with_host_yield` | 2.538 us | 3.408 us | -25.5% |
+| `vm/scalar_reassignment` | 35.002 us | - | new |
+| `vm/short_scalar_expression` | 301.01 ns | - | new |
+| `vm/small_register_expression_loop` | 83.412 us | - | new |
+| `vm/string_reads` | 1.0458 ms | 1.3896 ms | -24.7% |
+| `vm/wide_linear_script` | 17.285 us | 23.013 us | -24.9% |
+| `workload/dialogue` | 696.63 ns | 896.37 ns | -22.3% |
+| `workload/inventory` | 49.897 us | 65.858 us | -24.2% |
+| `workload/mixed` | 11.197 us | 15.049 us | -25.6% |
 
 ### Artifact sizes
 
@@ -98,8 +98,8 @@ This report contains 63 benchmarks. 41 matching metrics are compared with Velin 
 | Runtime-only example | 524,976 | 238,922 | 2,000,000 / 800,000 |
 | C runtime static library | 24,715,192 | 7,851,830 | 35,000,000 / 12,000,000 |
 | Runtime-only Wasm | 418,352 | 142,630 | 650,000 / 250,000 |
-| Source-to-run Wasm | 644,708 | 234,767 | 1,000,000 / 400,000 |
-| Full CLI | 1,280,384 | 567,130 | 5,000,000 / 2,000,000 |
+| Source-to-run Wasm | 645,463 | 235,018 | 1,000,000 / 400,000 |
+| Full CLI | 1,296,896 | 567,523 | 5,000,000 / 2,000,000 |
 
 ## Released snapshots
 
