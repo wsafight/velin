@@ -16,7 +16,7 @@ use crate::limits::MAX_STATEMENT_DEPTH;
 use crate::lines::{self, Line};
 use crate::token::{
     AssignmentOperator, expect_bare_header, expect_colon_header, expect_header_name,
-    expect_identifier, parse_embedded, split_assignment, split_keyword,
+    expect_identifier, parse_embedded, split_assignment, split_keyword, strip_keyword,
 };
 use velin_parse::parse_expression_list_with_source;
 use velin_syntax::{Expr, SharedString};
@@ -126,6 +126,12 @@ impl<'lines, 'source> Parser<'lines, 'source> {
         let line = self
             .advance()
             .expect("statement called with a line present");
+        if let Some(rest) = line.content.strip_prefix("set ") {
+            return Self::parse_binding(line, rest.trim_start(), false, &self.source);
+        }
+        if let Some(rest) = line.content.strip_prefix("default ") {
+            return Self::parse_binding(line, rest.trim_start(), true, &self.source);
+        }
         let (keyword, rest) = split_keyword(line.content);
         match keyword {
             "import" => Self::parse_import(line, rest),
@@ -174,39 +180,46 @@ impl<'lines, 'source> Parser<'lines, 'source> {
         is_default: bool,
         source: &SharedString,
     ) -> Result<Stmt, ParseError> {
-        if !is_default {
-            let rest_offset = line.content.len() - rest.len();
-            let synthetic = Line {
-                number: line.number,
-                indent: line.indent,
-                content: rest,
-                column: line.column + line.content[..rest_offset].chars().count(),
-            };
-            let (target, value_text, value_column, operator) = split_assignment(&synthetic)?;
-            let (name, index) = Self::parse_assignment_target(&synthetic, target, source)?;
-            let trimmed = value_text.trim_start();
-            let leading = value_text.len() - trimmed.len();
-            let (keyword, call_rest) = split_keyword(trimmed);
-            if keyword == "call" {
-                if operator != AssignmentOperator::Set || index.is_some() {
-                    return Err(ParseError::new(
-                        line.number,
-                        line.column,
-                        "a function result requires a simple variable assignment",
-                    ));
-                }
-                let (module, function, arguments) =
-                    Self::parse_function_call(line, call_rest, source, value_column + leading)?;
-                return Ok(Stmt::Call {
-                    module,
-                    function,
-                    arguments,
-                    bind: name,
-                    line: line.number,
-                });
+        let rest_offset = line.content.len() - rest.len();
+        let synthetic = Line {
+            number: line.number,
+            indent: line.indent,
+            content: rest,
+            column: line.column + line.content[..rest_offset].chars().count(),
+        };
+        let (target, value_text, value_column, operator) = split_assignment(&synthetic)?;
+        let (name, index) = Self::parse_assignment_target(&synthetic, target, source)?;
+        if !is_default && let Some(call_rest) = strip_keyword(value_text, "call") {
+            if operator != AssignmentOperator::Set || index.is_some() {
+                return Err(ParseError::new(
+                    line.number,
+                    line.column,
+                    "a function result requires a simple variable assignment",
+                ));
             }
+            let (module, function, arguments) =
+                Self::parse_function_call(line, call_rest, source, value_column)?;
+            return Ok(Stmt::Call {
+                module,
+                function,
+                arguments,
+                bind: name,
+                line: line.number,
+            });
         }
-        let (name, value) = Self::split_assignment(line, rest, source)?;
+        let mut value = parse_embedded(value_text, source, line.number, value_column)?;
+        if let Some(index) = index {
+            if operator != AssignmentOperator::Set {
+                return Err(ParseError::new(
+                    line.number,
+                    line.column,
+                    "indexed assignment does not support compound operators",
+                ));
+            }
+            value = Self::indexed_assignment(&name, index, value, source, &synthetic);
+        } else {
+            value = Self::apply_assignment_operator(&name, value, operator, source, &synthetic);
+        }
         if is_default {
             Ok(Stmt::Default {
                 name,

@@ -41,11 +41,7 @@ impl Machine {
         self.cancelled
     }
 
-    pub(super) fn consume_fuel(
-        &mut self,
-        amount: u64,
-        immediate: &mut u64,
-    ) -> Result<(), EvalError> {
+    pub(super) fn check_execution_policy(&self) -> Result<(), EvalError> {
         if self.frame_total.values > self.policy.max_machine_values
             || self.frame_total.text_bytes > self.policy.max_machine_text_bytes
         {
@@ -66,6 +62,24 @@ impl Machine {
         if self.cancelled {
             return Err(EvalError::cancelled(self.current_line()));
         }
+        Ok(())
+    }
+
+    pub(super) fn consume_fuel(
+        &mut self,
+        amount: u64,
+        immediate: &mut u64,
+    ) -> Result<(), EvalError> {
+        self.check_execution_policy()?;
+        self.consume_fuel_prechecked(amount, immediate)
+    }
+
+    #[inline]
+    pub(super) fn consume_fuel_prechecked(
+        &mut self,
+        amount: u64,
+        immediate: &mut u64,
+    ) -> Result<(), EvalError> {
         let next_immediate = immediate.checked_add(amount).ok_or_else(|| {
             EvalError::fuel_exhausted(self.current_line(), self.policy.max_immediate_fuel, true)
         })?;

@@ -20,6 +20,12 @@ pub(crate) enum AssignmentOperator {
     Divide,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AssignmentTarget<'source> {
+    Identifier(&'source str),
+    General(&'source str),
+}
+
 /// Parses an embedded expression, translating any diagnostic into a
 /// `ParseError` at the right location.
 pub(crate) fn parse_embedded(
@@ -48,12 +54,47 @@ pub(crate) fn split_keyword(content: &str) -> (&str, &str) {
     (&content[..end], content[end..].trim_start())
 }
 
+/// Removes one exact leading keyword without scanning the following token.
+pub(crate) fn strip_keyword<'source>(content: &'source str, keyword: &str) -> Option<&'source str> {
+    let rest = content.strip_prefix(keyword)?;
+    if rest
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return None;
+    }
+    Some(rest.trim_start())
+}
+
 /// Splits a top-level assignment, including `+=`, `-=`, `*=`, and `/=`.
 pub(crate) fn split_assignment<'source>(
     line: &Line<'source>,
-) -> Result<(&'source str, &'source str, usize, AssignmentOperator), ParseError> {
+) -> Result<
+    (
+        AssignmentTarget<'source>,
+        &'source str,
+        usize,
+        AssignmentOperator,
+    ),
+    ParseError,
+> {
     let content = &line.content;
     let bytes = content.as_bytes();
+    if let Some(index) = content.find('=') {
+        let prev = index.checked_sub(1).map(|position| bytes[position]);
+        let next = bytes.get(index + 1).copied();
+        let part_of_comparison =
+            next == Some(b'=') || matches!(prev, Some(b'!' | b'<' | b'>' | b'='));
+        if !part_of_comparison {
+            let (target_end, operator) = assignment_operator(bytes, index);
+            if let Some(target) = simple_assignment_target(content, target_end) {
+                let (value, value_column) =
+                    trim_assignment_value(&content[index + 1..], line.column + index + 1);
+                return Ok((target, value, value_column, operator));
+            }
+        }
+    }
     let mut index = 0;
     let mut depth = 0usize;
     let mut in_string = false;
@@ -83,17 +124,7 @@ pub(crate) fn split_assignment<'source>(
             let part_of_comparison =
                 next == Some(b'=') || matches!(prev, Some(b'!' | b'<' | b'>' | b'='));
             if depth == 0 && !part_of_comparison {
-                let (target_end, operator) = match prev {
-                    Some(b'+') => (index - 1, AssignmentOperator::Add),
-                    Some(b'-') => (index - 1, AssignmentOperator::Subtract),
-                    Some(b'*') => (index - 1, AssignmentOperator::Multiply),
-                    Some(b'/') => (index - 1, AssignmentOperator::Divide),
-                    _ => (index, AssignmentOperator::Set),
-                };
-                let target = content[..target_end].trim();
-                let value = &content[index + 1..];
-                let value_column = line.column + content[..=index].chars().count();
-                return Ok((target, value, value_column, operator));
+                return Ok(assignment_parts(line, index));
             }
         }
         index += 1;
@@ -105,15 +136,67 @@ pub(crate) fn split_assignment<'source>(
     ))
 }
 
+fn assignment_parts<'source>(
+    line: &Line<'source>,
+    index: usize,
+) -> (
+    AssignmentTarget<'source>,
+    &'source str,
+    usize,
+    AssignmentOperator,
+) {
+    let content = line.content;
+    let (target_end, operator) = assignment_operator(content.as_bytes(), index);
+    let target = content[..target_end].trim();
+    let target = if is_identifier(target) {
+        AssignmentTarget::Identifier(target)
+    } else {
+        AssignmentTarget::General(target)
+    };
+    let column_after_operator = line.column + content[..=index].chars().count();
+    let (value, value_column) = trim_assignment_value(&content[index + 1..], column_after_operator);
+    (target, value, value_column, operator)
+}
+
+fn trim_assignment_value(value: &str, column: usize) -> (&str, usize) {
+    let trimmed = value.trim_start();
+    let leading = &value[..value.len() - trimmed.len()];
+    let leading_columns = if leading.is_ascii() {
+        leading.len()
+    } else {
+        leading.chars().count()
+    };
+    (trimmed, column + leading_columns)
+}
+
+fn assignment_operator(bytes: &[u8], index: usize) -> (usize, AssignmentOperator) {
+    match index.checked_sub(1).map(|position| bytes[position]) {
+        Some(b'+') => (index - 1, AssignmentOperator::Add),
+        Some(b'-') => (index - 1, AssignmentOperator::Subtract),
+        Some(b'*') => (index - 1, AssignmentOperator::Multiply),
+        Some(b'/') => (index - 1, AssignmentOperator::Divide),
+        _ => (index, AssignmentOperator::Set),
+    }
+}
+
+fn simple_assignment_target(content: &str, target_end: usize) -> Option<AssignmentTarget<'_>> {
+    let target = content[..target_end].trim_ascii();
+    let (&first, rest) = target.as_bytes().split_first()?;
+    if (first == b'_' || first.is_ascii_alphabetic())
+        && rest
+            .iter()
+            .all(|byte| *byte == b'_' || byte.is_ascii_alphanumeric())
+    {
+        Some(AssignmentTarget::Identifier(target))
+    } else {
+        None
+    }
+}
+
 /// Validates an identifier: non-empty, ASCII-alphanumeric/underscore, not
 /// starting with a digit.
 pub(crate) fn expect_identifier(line: &Line<'_>, text: &str) -> Result<String, ParseError> {
-    let valid = !text.is_empty()
-        && text
-            .chars()
-            .enumerate()
-            .all(|(i, c)| c == '_' || c.is_ascii_alphabetic() || (i > 0 && c.is_ascii_digit()));
-    if valid {
+    if is_identifier(text) {
         Ok(text.to_owned())
     } else {
         Err(ParseError::new(
@@ -122,6 +205,14 @@ pub(crate) fn expect_identifier(line: &Line<'_>, text: &str) -> Result<String, P
             format!("expected an identifier, found `{text}`"),
         ))
     }
+}
+
+fn is_identifier(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .chars()
+            .enumerate()
+            .all(|(i, c)| c == '_' || c.is_ascii_alphabetic() || (i > 0 && c.is_ascii_digit()))
 }
 
 /// Parses a `name:` header (used by `label`), rejecting a missing colon.

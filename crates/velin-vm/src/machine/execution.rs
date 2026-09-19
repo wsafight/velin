@@ -134,10 +134,14 @@ impl Machine {
         if let Some(error) = &self.pending_batch_error {
             return Err(error.clone());
         }
+        self.check_execution_policy()?;
+        if self.policy.progress_callback.is_none() {
+            return self.run_without_progress_callback();
+        }
         let mut immediate_fuel = 0;
         while !self.finished {
             let fused_jump_target = self.update_jump_target();
-            self.consume_fuel(
+            self.consume_fuel_prechecked(
                 if fused_jump_target.is_some() { 2 } else { 1 },
                 &mut immediate_fuel,
             )?;
@@ -150,6 +154,48 @@ impl Machine {
             }
         }
         Ok(Yield::Finished)
+    }
+
+    fn run_without_progress_callback(&mut self) -> Result<Yield, EvalError> {
+        if self.finished {
+            return Ok(Yield::Finished);
+        }
+        let mut immediate_remaining = self.policy.max_immediate_fuel;
+        let mut total_fuel = self.fuel_used;
+        let mut total_remaining = self.policy.max_fuel.saturating_sub(total_fuel);
+        let result = loop {
+            let fused_jump_target = self.update_jump_target();
+            let amount = if fused_jump_target.is_some() { 2 } else { 1 };
+            if amount > immediate_remaining {
+                break Err(EvalError::fuel_exhausted(
+                    self.current_line(),
+                    self.policy.max_immediate_fuel,
+                    true,
+                ));
+            }
+            if amount > total_remaining {
+                break Err(EvalError::fuel_exhausted(
+                    self.current_line(),
+                    self.policy.max_fuel,
+                    false,
+                ));
+            }
+            immediate_remaining -= amount;
+            total_remaining -= amount;
+            total_fuel += amount;
+            if self.pc >= self.program.ops.len() {
+                self.finished = true;
+                break Ok(Yield::Finished);
+            }
+            match self.step_with_known_jump_target(fused_jump_target) {
+                Ok(Some(effect)) => break Ok(effect),
+                Ok(None) if self.finished => break Ok(Yield::Finished),
+                Ok(None) => {}
+                Err(error) => break Err(error),
+            }
+        };
+        self.fuel_used = total_fuel;
+        result
     }
 
     /// Resumes after a [`Yield::Host`]. A host op with a `bind` destination

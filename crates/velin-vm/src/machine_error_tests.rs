@@ -105,6 +105,28 @@ fn execution_policy_accumulates_fuel_across_resumes_and_restart_clears_it() {
 }
 
 #[test]
+fn execution_error_commits_fuel_without_a_progress_callback() {
+    let mut builder = ProgramBuilder::new();
+    let target = builder.slot("target");
+    let failing = builder.expr(
+        &Expr::Binary {
+            left: Box::new(Expr::Value(Value::Integer(1))),
+            op: BinaryOp::Divide,
+            right: Box::new(Expr::Value(Value::Integer(0))),
+        },
+        2,
+    );
+    builder.push(Op::Set {
+        slot: target,
+        value: failing,
+    });
+    let mut machine = Machine::new(builder.build()).unwrap();
+
+    assert!(machine.run().unwrap_err().message.contains("division"));
+    assert_eq!(machine.fuel_used(), 1);
+}
+
+#[test]
 fn immediate_fuel_resets_for_resume_and_progress_callback_can_cancel() {
     let mut builder = ProgramBuilder::new();
     builder.push(Op::host(1, Vec::new(), None, 1));

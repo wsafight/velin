@@ -32,13 +32,16 @@ impl Machine {
         if let Some(error) = &self.pending_batch_error {
             return Err(error.clone());
         }
+        self.check_execution_policy()?;
         self.effect_buffer.clear();
         self.effect_buffer.reserve(
             limit.min(usize::try_from(self.policy.max_immediate_fuel).unwrap_or(usize::MAX)),
         );
         let mut immediate_fuel = 0;
         while !self.finished && self.effect_buffer.len() < limit {
-            if let Err(error) = self.consume_fuel(self.step_cost() as u64, &mut immediate_fuel) {
+            if let Err(error) =
+                self.consume_fuel_prechecked(self.step_cost() as u64, &mut immediate_fuel)
+            {
                 return self.defer_batch_error(error);
             }
             if self.pc >= self.program.ops.len() {

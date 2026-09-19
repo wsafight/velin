@@ -13,9 +13,9 @@ fn line(content: &str) -> Line<'_> {
 #[test]
 fn split_assignment_skips_comparisons_and_reports_missing_assignment() {
     let assigned = line("ok = hp != 3");
-    let (name, value, column, operator) = split_assignment(&assigned).unwrap();
-    assert_eq!(name, "ok");
-    assert_eq!(value, " hp != 3");
+    let (target, value, column, operator) = split_assignment(&assigned).unwrap();
+    assert_eq!(target, AssignmentTarget::Identifier("ok"));
+    assert_eq!(value, "hp != 3");
     assert!(column > 1);
     assert_eq!(operator, AssignmentOperator::Set);
     assert!(split_assignment(&line("hp != 3")).is_err());
@@ -26,13 +26,27 @@ fn split_assignment_skips_comparisons_and_reports_missing_assignment() {
             .contains("name = value")
     );
     let le = line("ok = hp <= 3");
-    let (name, value, _, _) = split_assignment(&le).unwrap();
-    assert_eq!(name, "ok");
+    let (target, value, _, _) = split_assignment(&le).unwrap();
+    assert_eq!(target, AssignmentTarget::Identifier("ok"));
     assert!(value.contains("<="));
     let ge = line("ok = hp >= 3");
-    let (name, value, _, _) = split_assignment(&ge).unwrap();
-    assert_eq!(name, "ok");
+    let (target, value, _, _) = split_assignment(&ge).unwrap();
+    assert_eq!(target, AssignmentTarget::Identifier("ok"));
     assert!(value.contains(">="));
+}
+
+#[test]
+fn split_assignment_classifies_fast_and_general_targets() {
+    let (target, value, column, operator) = split_assignment(&line("score += 1")).unwrap();
+    assert_eq!(target, AssignmentTarget::Identifier("score"));
+    assert_eq!(value, "1");
+    assert_eq!(column, 10);
+    assert_eq!(operator, AssignmentOperator::Add);
+
+    let (target, _, _, _) = split_assignment(&line("scores[0] = 1")).unwrap();
+    assert_eq!(target, AssignmentTarget::General("scores[0]"));
+    let (target, _, _, _) = split_assignment(&line("not valid = 1")).unwrap();
+    assert_eq!(target, AssignmentTarget::General("not valid"));
 }
 
 #[test]

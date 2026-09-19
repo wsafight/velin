@@ -24,10 +24,11 @@ impl Machine {
         if let Some(error) = &self.pending_batch_error {
             return Err(error.clone());
         }
+        self.check_execution_policy()?;
         let mut immediate_fuel = 0;
         while !self.finished {
             let fused_jump_target = self.update_jump_target();
-            self.consume_fuel(
+            self.consume_fuel_prechecked(
                 if fused_jump_target.is_some() { 2 } else { 1 },
                 &mut immediate_fuel,
             )?;
