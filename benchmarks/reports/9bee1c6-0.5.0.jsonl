@@ -1,0 +1,70 @@
+{"type":"run","schema_version":1,"kind":"release","version":"0.5.0","source_id":"9bee1c6","source_kind":"commit","base_revision":"9bee1c6","recorded_at":"2026-09-19T09:29:48.637Z","date":"2026-09-19","released_at":"2026-09-19","host":"Apple M3 Pro, 12 logical cores, 36.0 GiB RAM","os":"Darwin 25.6.0, arm64","rust":"1.98.0","llvm":"22.1.8","cargo":"1.98.0","sample_size":20,"warmup_seconds":0.5,"measurement_seconds":1}
+{"type":"benchmark","name":"artifact/binary_decode","estimate_ns":385747.3851782364}
+{"type":"benchmark","name":"artifact/cache_hit","estimate_ns":439851.7900406504}
+{"type":"benchmark","name":"artifact/cache_miss","estimate_ns":1655.965362294715}
+{"type":"benchmark","name":"artifact/source_compile","estimate_ns":264754.5843205575}
+{"type":"benchmark","name":"builtin/record_arguments/fresh","estimate_ns":153.7908249673109}
+{"type":"benchmark","name":"builtin/record_arguments/reused","estimate_ns":123.56184553252254}
+{"type":"benchmark","name":"check/builtin_heavy_script","estimate_ns":297375.9442098791}
+{"type":"benchmark","name":"check/expression_heavy_script","estimate_ns":199782.49070847852}
+{"type":"benchmark","name":"check/guard","estimate_ns":138.1343019208978}
+{"type":"benchmark","name":"check/short_circuit_heavy_script","estimate_ns":625247.5335365854}
+{"type":"benchmark","name":"check/wide_linear_script","estimate_ns":38330.47737142857}
+{"type":"benchmark","name":"compile/expression_heavy_script","estimate_ns":647779.8396341463}
+{"type":"benchmark","name":"compile/guard","estimate_ns":789.1849846991859}
+{"type":"benchmark","name":"compile/wide_linear_script","estimate_ns":543046.2866434378}
+{"type":"benchmark","name":"eval/tree_walk","estimate_ns":91.46057900700345}
+{"type":"benchmark","name":"host/batched_effect_roundtrip","estimate_ns":30975.3573283859}
+{"type":"benchmark","name":"host/c_abi_batch","estimate_ns":12289.656933267303}
+{"type":"benchmark","name":"host/single_effect_roundtrip","estimate_ns":40318.38775982218}
+{"type":"benchmark","name":"host/wasm_batch","estimate_ns":13657.568198986912}
+{"type":"benchmark","name":"host/wasm_load_and_batch","estimate_ns":100434.6318742741}
+{"type":"benchmark","name":"host/wasm_machine_create_reused","estimate_ns":202.22411643120313}
+{"type":"benchmark","name":"machine/create_expression_heavy/reuse_validation","estimate_ns":1316.7161007171676}
+{"type":"benchmark","name":"machine/create_expression_heavy/validate","estimate_ns":182850.3339527681}
+{"type":"benchmark","name":"machine/create_short_circuit_heavy/reuse_validation","estimate_ns":1330.151024651227}
+{"type":"benchmark","name":"machine/create_short_circuit_heavy/validate","estimate_ns":401060.78327526135}
+{"type":"benchmark","name":"machine/create_wide/reuse_validation","estimate_ns":1339.8632690768236}
+{"type":"benchmark","name":"machine/create_wide/validate","estimate_ns":4642.758402678144}
+{"type":"benchmark","name":"machine/profile/disabled","estimate_ns":14432.975346724055}
+{"type":"benchmark","name":"machine/profile/enabled","estimate_ns":14769.531972168854}
+{"type":"benchmark","name":"machine/restart","estimate_ns":22892.385229148258}
+{"type":"benchmark","name":"memory/execution_image","estimate_ns":32735.312536394445}
+{"type":"benchmark","name":"parse/guard","estimate_ns":1861.2260570785647}
+{"type":"benchmark","name":"parse/host_calls","estimate_ns":301667.0168771777}
+{"type":"benchmark","name":"parse/wide_linear_script","estimate_ns":352720.12600796414}
+{"type":"benchmark","name":"pure/invoke/map_fresh","estimate_ns":584.5968767880264}
+{"type":"benchmark","name":"pure/invoke/map_reused","estimate_ns":202.34079770956905}
+{"type":"benchmark","name":"pure/invoke/one_reused","estimate_ns":89.6978682461857}
+{"type":"benchmark","name":"queue/full_backpressure","estimate_ns":124.34522266859864}
+{"type":"benchmark","name":"queue/push_pop","estimate_ns":8167.335321175194}
+{"type":"benchmark","name":"snapshot/clone_and_replay","estimate_ns":408.7792794471676}
+{"type":"benchmark","name":"snapshot/machine_clone","estimate_ns":691.6064925064042}
+{"type":"benchmark","name":"vm/boolean_slot_loop","estimate_ns":33198.937147502904}
+{"type":"benchmark","name":"vm/branched_scalar_loop","estimate_ns":15713.874877684566}
+{"type":"benchmark","name":"vm/builtin_loop","estimate_ns":163114.08764227643}
+{"type":"benchmark","name":"vm/constant_folding/folded","estimate_ns":35480.911349661816}
+{"type":"benchmark","name":"vm/constant_folding/runtime_expression","estimate_ns":122725.53626444159}
+{"type":"benchmark","name":"vm/counter_loop","estimate_ns":27384.449137970045}
+{"type":"benchmark","name":"vm/growing_list","estimate_ns":118179.33047505736}
+{"type":"benchmark","name":"vm/growing_string","estimate_ns":112229.41579558652}
+{"type":"benchmark","name":"vm/interpolation","estimate_ns":289548.79161585367}
+{"type":"benchmark","name":"vm/interpolation_mixed_holes","estimate_ns":111119.66839802286}
+{"type":"benchmark","name":"vm/long_register_expression_loop","estimate_ns":123194.12139730189}
+{"type":"benchmark","name":"vm/owned_builtin_loop","estimate_ns":345014.26225319394}
+{"type":"benchmark","name":"vm/propagated_constants","estimate_ns":21247.78364382501}
+{"type":"benchmark","name":"vm/run_with_host_yield","estimate_ns":3400.915204216405}
+{"type":"benchmark","name":"vm/scalar_reassignment","estimate_ns":47512.29711751663}
+{"type":"benchmark","name":"vm/short_scalar_expression","estimate_ns":396.0994113260303}
+{"type":"benchmark","name":"vm/small_register_expression_loop","estimate_ns":110562.98218529439}
+{"type":"benchmark","name":"vm/string_reads","estimate_ns":1407534.7991289198}
+{"type":"benchmark","name":"vm/wide_linear_script","estimate_ns":23453.40749729665}
+{"type":"benchmark","name":"workload/composable_end_to_end","estimate_ns":33045.94263937282}
+{"type":"benchmark","name":"workload/dialogue","estimate_ns":1043.1323128694241}
+{"type":"benchmark","name":"workload/inventory","estimate_ns":67275.78239681994}
+{"type":"benchmark","name":"workload/mixed","estimate_ns":14871.399079531517}
+{"type":"artifact","name":"runtime-only example","bytes":524960,"gzip_bytes":239020,"max_bytes":2000000,"max_gzip_bytes":800000}
+{"type":"artifact","name":"C runtime staticlib","bytes":24728424,"gzip_bytes":7853856,"max_bytes":35000000,"max_gzip_bytes":12000000}
+{"type":"artifact","name":"runtime-only wasm","bytes":418260,"gzip_bytes":142598,"max_bytes":650000,"max_gzip_bytes":250000}
+{"type":"artifact","name":"source-to-run wasm","bytes":645471,"gzip_bytes":236354,"max_bytes":1000000,"max_gzip_bytes":400000}
+{"type":"artifact","name":"full CLI","bytes":1296912,"gzip_bytes":568766,"max_bytes":5000000,"max_gzip_bytes":2000000}
